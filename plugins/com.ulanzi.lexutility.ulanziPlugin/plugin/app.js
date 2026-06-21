@@ -896,23 +896,38 @@ function renderLatencyBackground(theme, accent, backgroundStyle) {
   };
 }
 
-function buildLatencySeries(instance, warnMs, timeoutMs, accent) {
+function buildLatencySeries(instance, warnMs, accent) {
   const history = instance.history || [];
-  const maxMs = Math.max(warnMs * 1.6, timeoutMs, 300);
+  // 纵向刻度锚定在告警阈值附近并固定下来：单个尖峰/超时只会被钳到柱顶，
+  // 不会反过来把整条基线上的正常柱子重新压扁（这正是之前“显示不正常”的根因）。
+  const maxMs = Math.max(warnMs * 1.5, 150);
+
+  // 横向布局：把柱子收敛在基线宽度（startX → endX）内，按历史上限分配槽位，
+  // 这样柱宽稳定、从左往右增长，满历史时也不会越过右边缘。
+  const startX = 42;
+  const endX = 214;
   const chartBottom = 192;
   const chartHeight = 42;
-  const barWidth = 7.2;
-  const gap = 2.2;
-  const startX = 42;
+  const slotCount = LATENCY_HISTORY_LIMIT;
+  const step = (endX - startX) / slotCount;
+  const gap = step * 0.22;
+  const barWidth = step - gap;
   const points = [];
   let bars = '';
 
-  history.forEach((entry, index) => {
-    const x = startX + index * (barWidth + gap);
+  const barGeometry = (entry, index) => {
+    const x = startX + index * step;
     const value = entry.ok ? entry.ms : maxMs;
-    const height = Math.max(5, Math.min(chartHeight, (value / maxMs) * chartHeight));
+    // sqrt 曲线放大低延迟段，让 40ms / 120ms 这类正常值也能拉开高度差。
+    const ratio = Math.sqrt(Math.min(1, value / maxMs));
+    const height = Math.max(4, ratio * chartHeight);
     const y = chartBottom - height;
     const fill = !entry.ok ? '#ef4444' : entry.ms > warnMs ? '#f59e0b' : accent;
+    return { x, y, height, fill };
+  };
+
+  history.forEach((entry, index) => {
+    const { x, y, height, fill } = barGeometry(entry, index);
     bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${height.toFixed(1)}" rx="2" fill="${fill}" opacity="0.98"/>`;
     points.push(`${(x + barWidth / 2).toFixed(1)},${y.toFixed(1)}`);
   });
@@ -923,12 +938,8 @@ function buildLatencySeries(instance, warnMs, timeoutMs, accent) {
       ? `<polyline points="${points.join(' ')}" fill="none" stroke="${accent}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>`
       : '',
     dots: history.map((entry, index) => {
-      const x = startX + index * (barWidth + gap) + barWidth / 2;
-      const value = entry.ok ? entry.ms : maxMs;
-      const height = Math.max(5, Math.min(chartHeight, (value / maxMs) * chartHeight));
-      const y = chartBottom - height;
-      const fill = !entry.ok ? '#ef4444' : entry.ms > warnMs ? '#f59e0b' : accent;
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.3" fill="${fill}"/>`;
+      const { x, y, fill } = barGeometry(entry, index);
+      return `<circle cx="${(x + barWidth / 2).toFixed(1)}" cy="${y.toFixed(1)}" r="2.3" fill="${fill}"/>`;
     }).join(''),
   };
 }
@@ -938,7 +949,6 @@ function renderLatencyIcon(instance) {
   const background = renderLatencyBackground(theme, normalizeColor(instance.settings.color, theme.accent), instance.settings.backgroundStyle);
   const host = hostFromUrl(instance.settings.url);
   const warnMs = Number.parseInt(instance.settings.warnMs, 10) || 400;
-  const timeoutMs = Number.parseInt(instance.settings.timeoutMs, 10) || 4000;
   const status = instance.status || 'checking';
   const accent =
     status === 'down' ? '#ef4444'
@@ -959,7 +969,7 @@ function renderLatencyIcon(instance) {
     : status === 'up' ? '延迟'
     : '检查';
   const hostLabel = clipText(host, 18);
-  const chart = buildLatencySeries(instance, warnMs, timeoutMs, accent);
+  const chart = buildLatencySeries(instance, warnMs, accent);
   const graphSvg = instance.settings.graphMode === 'line'
     ? `${chart.line}${chart.dots}`
     : chart.bars;
