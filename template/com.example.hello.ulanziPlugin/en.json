@@ -1,0 +1,10 @@
+{
+  "Localization": {
+    "__PLUGIN_NAME__": "__PLUGIN_NAME__",
+    "Title": "Title",
+    "Subtitle": "Subtitle",
+    "Color": "Color",
+    "Save": "Save",
+    "Click the key to increment the counter.": "Click the key to increment the counter."
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "Author": "__PLUGIN_AUTHOR__",
+  "Name": "__PLUGIN_NAME__",
+  "Description": "__PLUGIN_DESCRIPTION__",
+  "Category": "__PLUGIN_NAME__",
+  "CategoryIcon": "assets/icons/categoryIcon.svg",
+  "Icon": "assets/icons/pluginIcon.svg",
+  "Version": "0.1.0",
+  "UUID": "__PLUGIN_UUID__",
+  "Type": "JavaScript",
+  "CodePath": "plugin/app.js",
+  "PrivateAPI": true,
+  "SupportedInMultiActions": false,
+  "Actions": [
+    {
+      "Name": "Counter",
+      "Tooltip": "Incrementing counter action.",
+      "Icon": "assets/icons/actionCounter.svg",
+      "PropertyInspectorPath": "property-inspector/counter.html",
+      "UUID": "__PLUGIN_UUID__.counter",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionCounter.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Badge",
+      "Tooltip": "Toggleable status badge.",
+      "Icon": "assets/icons/actionBadge.svg",
+      "PropertyInspectorPath": "property-inspector/badge.html",
+      "UUID": "__PLUGIN_UUID__.badge",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionBadge.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Swatch",
+      "Tooltip": "Cycle through preset colors.",
+      "Icon": "assets/icons/actionSwatch.svg",
+      "PropertyInspectorPath": "property-inspector/swatch.html",
+      "UUID": "__PLUGIN_UUID__.swatch",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionSwatch.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Font Test",
+      "Tooltip": "Three-line font size test for 28px, 32px, and 36px.",
+      "Icon": "assets/icons/actionFontBars.svg",
+      "PropertyInspectorPath": "property-inspector/fontprobe.html",
+      "UUID": "__PLUGIN_UUID__.fontprobe",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionFontBars.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    }
+  ],
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    },
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.11"
+    }
+  ],
+  "Software": {
+    "MinVersion": "3.0.11"
+  }
+}

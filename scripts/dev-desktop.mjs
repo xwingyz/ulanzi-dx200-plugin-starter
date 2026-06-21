@@ -1,0 +1,135 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+function parseArgs(argv) {
+  const result = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!arg.startsWith('--')) {
+      continue;
+    }
+    const key = arg.slice(2);
+    const next = argv[i + 1];
+    if (!next || next.startsWith('--')) {
+      result[key] = 'true';
+      continue;
+    }
+    result[key] = next;
+    i += 1;
+  }
+  return result;
+}
+
+function desktopPluginRoot() {
+  const home = os.homedir();
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'Ulanzi', 'UlanziDeck', 'Plugins');
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || home, 'Ulanzi', 'UlanziDeck', 'Plugins');
+  }
+  throw new Error(`Unsupported desktop platform: ${process.platform}`);
+}
+
+function removeDir(targetPath) {
+  if (fs.existsSync(targetPath)) {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+  }
+}
+
+function copyDir(sourceDir, targetDir) {
+  fs.mkdirSync(targetDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDir(sourcePath, targetPath);
+    } else {
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+}
+
+function syncPlugin(rootDir, pluginName) {
+  const sourceDir = path.join(rootDir, 'plugins', pluginName);
+  if (!fs.existsSync(sourceDir)) {
+    throw new Error(`Plugin not found: ${sourceDir}`);
+  }
+
+  const targetRoot = desktopPluginRoot();
+  const targetDir = path.join(targetRoot, pluginName);
+  fs.mkdirSync(targetRoot, { recursive: true });
+  removeDir(targetDir);
+  copyDir(sourceDir, targetDir);
+  return targetDir;
+}
+
+function restartDesktopApp() {
+  if (process.platform === 'darwin') {
+    spawnSync('pkill', ['-f', '/Applications/Ulanzi Studio.app/Contents/MacOS/UlanziDeck'], {
+      stdio: 'inherit'
+    });
+    spawnSync('open', ['-a', 'Ulanzi Studio'], { stdio: 'inherit' });
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/IM', 'UlanziDeck.exe', '/F'], { stdio: 'inherit' });
+    spawnSync('cmd', ['/c', 'start', '', 'Ulanzi Studio'], { stdio: 'inherit' });
+    return;
+  }
+
+  throw new Error(`Unsupported desktop platform: ${process.platform}`);
+}
+
+function printModeHint(mode, pluginName, targetDir) {
+  console.log(`Synced ${pluginName}`);
+  console.log(targetDir);
+  console.log(`Mode: ${mode}`);
+
+  if (mode === 'sync') {
+    console.log('Use this after runtime-only changes such as SVG drawing, button state text, or non-manifest JS logic.');
+    console.log('If the button on device still points to an old UUID, delete that key and drag the action again.');
+    return;
+  }
+
+  if (mode === 'rebind') {
+    console.log('Delete the old key instance in UlanziDeck, then drag the action in again.');
+    console.log('Use this after UUID, action UUID, or action identity changes.');
+    return;
+  }
+
+  if (mode === 'restart') {
+    console.log('UlanziDeck was restarted after sync.');
+    console.log('Use this after manifest changes, main-service entry changes, dependency changes, or first-time plugin install.');
+  }
+}
+
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const pluginName = args.plugin;
+  const mode = args.mode || 'sync';
+
+  if (!pluginName) {
+    console.error('Missing required argument: --plugin');
+    process.exit(1);
+  }
+
+  if (!['sync', 'rebind', 'restart'].includes(mode)) {
+    console.error('Invalid --mode. Use one of: sync, rebind, restart');
+    process.exit(1);
+  }
+
+  const rootDir = process.cwd();
+  const targetDir = syncPlugin(rootDir, pluginName);
+
+  if (mode === 'restart') {
+    restartDesktopApp();
+  }
+
+  printModeHint(mode, pluginName, targetDir);
+}
+
+main();

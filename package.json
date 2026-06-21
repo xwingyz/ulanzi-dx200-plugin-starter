@@ -1,0 +1,13 @@
+{
+  "name": "ulanzi-dx200-plugin-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "new": "node scripts/create-plugin.mjs",
+    "sync-plugin": "node scripts/sync-plugin.mjs",
+    "install-plugin": "node scripts/sync-plugin.mjs --target desktop",
+    "dev:desktop": "node scripts/dev-desktop.mjs",
+    "dev:sim": "node scripts/sync-plugin.mjs --target sim",
+    "run-plugin": "node scripts/run-plugin.mjs"
+  }
+}

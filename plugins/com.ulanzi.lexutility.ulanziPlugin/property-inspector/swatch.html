@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Swatch</title>
+    <style>
+      :root { color-scheme: dark; --bg: #0b1020; --panel: #131a2e; --text: #e2e8f0; --muted: #94a3b8; --line: #24314f; --accent: #8b5cf6; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: radial-gradient(circle at top, #1e1b4b 0%, #0f172a 58%, #020617 100%); color: var(--text); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(19, 26, 46, 0.94); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 16px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      label { color: var(--muted); }
+      input { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; color: var(--text); padding: 10px 12px; }
+      input[type="hidden"] { display: none; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #0b1220; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .theme-chip[data-theme-value="mint"] span { background: linear-gradient(90deg, #07111f 0 20%, #08131f 20% 40%, #0f172a 40% 65%, #14b8a6 65% 100%); }
+      .theme-chip[data-theme-value="ember"] span { background: linear-gradient(90deg, #1a0d08 0 20%, #140a06 20% 40%, #2a140c 40% 65%, #f97316 65% 100%); }
+      .theme-chip[data-theme-value="mono"] span { background: linear-gradient(90deg, #09090b 0 20%, #111111 20% 40%, #18181b 40% 65%, #d4d4d8 65% 100%); }
+      .theme-chip[data-theme-value="signal"] span { background: linear-gradient(90deg, #06111f 0 20%, #07101d 20% 40%, #0b1730 40% 65%, #60a5fa 65% 100%); }
+      button { width: 100%; border: 0; border-radius: 10px; padding: 10px 12px; background: var(--accent); color: #ede9fe; font-weight: 700; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1>Swatch</h1>
+        <p>Click the key to cycle through a built-in palette.</p>
+        <form id="property-inspector">
+          <div class="field">
+            <label for="title">Title</label>
+            <input id="title" name="title" maxlength="14" value="Lex Utility">
+          </div>
+          <div class="field">
+            <label for="subtitle">Subtitle</label>
+            <input id="subtitle" name="subtitle" maxlength="18" value="Palette">
+          </div>
+          <div class="field">
+            <label for="theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="signal">
+            <div class="theme-row" role="group" aria-label="Theme">
+              <button class="theme-chip" type="button" data-theme-value="mint" aria-label="CRT Mint"><span></span></button>
+              <button class="theme-chip" type="button" data-theme-value="ember" aria-label="CRT Ember"><span></span></button>
+              <button class="theme-chip" type="button" data-theme-value="mono" aria-label="CRT Mono"><span></span></button>
+              <button class="theme-chip" type="button" data-theme-value="signal" aria-label="CRT Signal"><span></span></button>
+            </div>
+          </div>
+          <button type="submit">Save</button>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./swatch.js"></script>
+  </body>
+</html>

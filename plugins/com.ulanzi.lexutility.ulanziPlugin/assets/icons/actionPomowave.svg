@@ -1,0 +1,23 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="40" y1="28" x2="216" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#28120f"/>
+      <stop offset="100%" stop-color="#120f18"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="48" y1="56" x2="204" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff7d5a"/>
+      <stop offset="100%" stop-color="#ffb36b"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+  <rect x="24" y="24" width="208" height="208" rx="36" fill="#150f14" stroke="#ff8b67" stroke-opacity="0.32" stroke-width="3"/>
+  <circle cx="128" cy="118" r="70" fill="none" stroke="#47343a" stroke-width="14"/>
+  <circle cx="128" cy="118" r="70" fill="none" stroke="url(#ring)" stroke-width="14" stroke-linecap="round" stroke-dasharray="320 120" transform="rotate(-90 128 118)"/>
+  <path d="M128 76 L128 118 L156 144" fill="none" stroke="#fff4e8" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="74" y="162" width="108" height="28" rx="14" fill="#ff7d5a" fill-opacity="0.18"/>
+  <text x="128" y="182" text-anchor="middle" fill="#ffb36b" font-size="18" font-weight="700" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">POMOWAVE</text>
+  <circle cx="100" cy="208" r="6" fill="#ff8b67"/>
+  <circle cx="118" cy="208" r="6" fill="#ff8b67"/>
+  <circle cx="136" cy="208" r="6" fill="#6be39c"/>
+  <circle cx="154" cy="208" r="6" fill="#72b7ff"/>
+</svg>

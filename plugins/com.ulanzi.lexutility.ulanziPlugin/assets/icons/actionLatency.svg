@@ -1,0 +1,36 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" rx="48" fill="#06111f"/>
+  <rect x="16" y="16" width="224" height="224" rx="40" fill="none" stroke="#1d4ed8" stroke-opacity="0.35" stroke-width="2"/>
+  <rect x="28" y="28" width="200" height="200" rx="30" fill="#07101d" stroke="#60a5fa" stroke-width="4"/>
+  <rect x="40" y="40" width="176" height="176" rx="24" fill="#0b1730" stroke="#60a5fa" stroke-opacity="0.85" stroke-width="1.5"/>
+  <circle cx="58" cy="62" r="7" fill="#f59e0b"/>
+  <text x="72" y="68" fill="#f59e0b" font-size="18" font-weight="800" font-family="Arial, Helvetica, sans-serif">延迟</text>
+  <text x="128" y="88" text-anchor="middle" fill="#93c5fd" fill-opacity="0.55" font-size="13" font-family="Arial, Helvetica, sans-serif">example.com</text>
+  <text x="128" y="136" text-anchor="middle" fill="#eff6ff" font-size="50" font-weight="800" font-family="Arial, Helvetica, sans-serif">88ms</text>
+  <line x1="48" y1="192" x2="208" y2="192" stroke="#1d4ed8" stroke-width="1.5" opacity="0.55"/>
+  <rect x="49" y="154" width="5" height="37" rx="1.8" fill="#f59e0b"/>
+  <rect x="55.4" y="181" width="5" height="10" rx="1.8" fill="#60a5fa"/>
+  <rect x="61.8" y="183" width="5" height="8" rx="1.8" fill="#60a5fa"/>
+  <rect x="68.2" y="184.5" width="5" height="6.5" rx="1.8" fill="#60a5fa"/>
+  <rect x="74.6" y="185" width="5" height="6" rx="1.8" fill="#60a5fa"/>
+  <rect x="81" y="185.5" width="5" height="5.5" rx="1.8" fill="#60a5fa"/>
+  <rect x="87.4" y="185" width="5" height="6" rx="1.8" fill="#60a5fa"/>
+  <rect x="93.8" y="184.2" width="5" height="6.8" rx="1.8" fill="#60a5fa"/>
+  <rect x="100.2" y="183.6" width="5" height="7.4" rx="1.8" fill="#60a5fa"/>
+  <rect x="106.6" y="183.2" width="5" height="7.8" rx="1.8" fill="#60a5fa"/>
+  <rect x="113" y="182.6" width="5" height="8.4" rx="1.8" fill="#60a5fa"/>
+  <rect x="119.4" y="180.5" width="5" height="10.5" rx="1.8" fill="#14b8a6"/>
+  <rect x="125.8" y="184.3" width="5" height="6.7" rx="1.8" fill="#60a5fa"/>
+  <rect x="132.2" y="183.1" width="5" height="7.9" rx="1.8" fill="#60a5fa"/>
+  <rect x="138.6" y="182.4" width="5" height="8.6" rx="1.8" fill="#60a5fa"/>
+  <rect x="145" y="181.6" width="5" height="9.4" rx="1.8" fill="#60a5fa"/>
+  <rect x="151.4" y="180.8" width="5" height="10.2" rx="1.8" fill="#60a5fa"/>
+  <rect x="157.8" y="179.9" width="5" height="11.1" rx="1.8" fill="#60a5fa"/>
+  <rect x="164.2" y="179.2" width="5" height="11.8" rx="1.8" fill="#60a5fa"/>
+  <rect x="170.6" y="176" width="5" height="15" rx="1.8" fill="#14b8a6"/>
+  <rect x="177" y="185" width="5" height="6" rx="1.8" fill="#60a5fa"/>
+  <rect x="183.4" y="184.5" width="5" height="6.5" rx="1.8" fill="#60a5fa"/>
+  <rect x="189.8" y="149" width="5" height="42" rx="1.8" fill="#ef4444"/>
+  <text x="48" y="212" fill="#93c5fd" fill-opacity="0.55" font-size="12" font-family="Arial, Helvetica, sans-serif">延迟监控</text>
+  <text x="208" y="212" text-anchor="end" fill="#f59e0b" font-size="17" font-weight="800" font-family="Arial, Helvetica, sans-serif">84%</text>
+</svg>

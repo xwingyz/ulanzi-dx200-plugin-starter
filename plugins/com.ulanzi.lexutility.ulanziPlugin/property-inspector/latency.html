@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Latency Monitor</title>
+    <style>
+      :root { color-scheme: dark; --bg: #0f172a; --panel: #111c30; --text: #e2e8f0; --muted: #94a3b8; --line: #23314f; --accent: #60a5fa; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #07101d 0%, #111827 100%); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(17, 28, 48, 0.92); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 16px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      label { color: var(--muted); }
+      input { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; color: var(--text); padding: 10px 12px; }
+      input[type="hidden"] { display: none; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #0b1220; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .theme-chip[data-theme-value="mint"] span { background: linear-gradient(90deg, #07111f 0 20%, #08131f 20% 40%, #0f172a 40% 65%, #14b8a6 65% 100%); }
+      .theme-chip[data-theme-value="ember"] span { background: linear-gradient(90deg, #1a0d08 0 20%, #140a06 20% 40%, #2a140c 40% 65%, #f97316 65% 100%); }
+      .theme-chip[data-theme-value="mono"] span { background: linear-gradient(90deg, #09090b 0 20%, #111111 20% 40%, #18181b 40% 65%, #d4d4d8 65% 100%); }
+      .theme-chip[data-theme-value="signal"] span { background: linear-gradient(90deg, #06111f 0 20%, #07101d 20% 40%, #0b1730 40% 65%, #60a5fa 65% 100%); }
+      .seg-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .seg-btn { min-width: 74px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: #0b1220; color: var(--text); cursor: pointer; font-size: 12px; font-weight: 700; }
+      .seg-btn.active { border-color: var(--accent); background: rgba(96, 165, 250, 0.16); color: #bfdbfe; }
+      .bg-chip { width: 52px; height: 36px; border-radius: 10px; border: 1px solid var(--line); padding: 0; cursor: pointer; overflow: hidden; background: #0b1220; }
+      .bg-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .bg-chip span { display: block; width: 100%; height: 100%; }
+      .bg-chip[data-bg-style="gradient"] span { background: linear-gradient(135deg, #06111f 0%, #0b1730 55%, #1d4ed8 100%); }
+      .bg-chip[data-bg-style="stars"] span { background:
+        radial-gradient(circle at 20% 30%, rgba(255,255,255,.85) 0 1px, transparent 2px),
+        radial-gradient(circle at 78% 22%, rgba(255,255,255,.7) 0 1px, transparent 2px),
+        radial-gradient(circle at 68% 70%, rgba(255,255,255,.55) 0 1px, transparent 2px),
+        linear-gradient(135deg, #04070f 0%, #07101d 100%); }
+      .bg-chip[data-bg-style="mist"] span { background: linear-gradient(135deg, #f7fbff 0%, #d6e4fb 100%); }
+      .bg-chip[data-bg-style="paper"] span { background: linear-gradient(135deg, #fffaf2 0%, #eedfc8 100%); }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1>Latency Monitor</h1>
+        <p>输入一个网址，按固定间隔检测延迟。按键按下时立即重测。</p>
+        <form id="property-inspector">
+          <div class="field">
+            <label for="url">URL</label>
+            <input id="url" name="url" maxlength="120" value="https://example.com" placeholder="https://example.com">
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="intervalSec">Interval (s)</label>
+              <input id="intervalSec" name="intervalSec" type="number" min="3" max="3600" value="30">
+            </div>
+            <div class="field">
+              <label for="warnMs">Warn (ms)</label>
+              <input id="warnMs" name="warnMs" type="number" min="50" max="10000" value="800">
+            </div>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="timeoutMs">Timeout (ms)</label>
+              <input id="timeoutMs" name="timeoutMs" type="number" min="500" max="30000" value="8000">
+            </div>
+            <div class="field">
+              <label for="color">Accent</label>
+              <input id="color" name="color" type="color" value="#60a5fa">
+            </div>
+          </div>
+          <div class="field">
+            <label for="graphMode">Chart</label>
+            <input id="graphMode" name="graphMode" type="hidden" value="bars">
+            <div class="seg-row" role="group" aria-label="Chart Mode">
+              <button class="seg-btn" type="button" data-graph-mode="bars">柱状图</button>
+              <button class="seg-btn" type="button" data-graph-mode="line">折线图</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="signal">
+            <div class="theme-row" role="group" aria-label="Theme">
+              <button class="theme-chip" type="button" data-theme-value="mint" aria-label="CRT Mint"><span></span></button>
+              <button class="theme-chip" type="button" data-theme-value="ember" aria-label="CRT Ember"><span></span></button>
+              <button class="theme-chip" type="button" data-theme-value="mono" aria-label="CRT Mono"><span></span></button>
+              <button class="theme-chip" type="button" data-theme-value="signal" aria-label="CRT Signal"><span></span></button>
+            </div>
+            <div class="hint">每个 action 只监控一个网址，配置会保存在该按键实例里。</div>
+          </div>
+          <div class="field">
+            <label for="backgroundStyle">Background</label>
+            <input id="backgroundStyle" name="backgroundStyle" type="hidden" value="gradient">
+            <div class="theme-row" role="group" aria-label="Background">
+              <button class="bg-chip" type="button" data-bg-style="gradient" aria-label="Gradient"><span></span></button>
+              <button class="bg-chip" type="button" data-bg-style="stars" aria-label="Stars"><span></span></button>
+              <button class="bg-chip" type="button" data-bg-style="mist" aria-label="Mist"><span></span></button>
+              <button class="bg-chip" type="button" data-bg-style="paper" aria-label="Paper"><span></span></button>
+            </div>
+            <div class="hint">预设了渐变、星光和两种浅色背景。</div>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./latency.js"></script>
+  </body>
+</html>
