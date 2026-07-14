@@ -1,3 +1,43 @@
+// 自动保存去抖：连续输入只在停顿后落一次盘；手动保存/按钮走 flush 立即提交。
+const AUTOSAVE_DEBOUNCE_MS = 400;
+
+function debounce(fn, wait) {
+  let timer = null;
+  let pendingArgs = null;
+  const debounced = (...args) => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    pendingArgs = args;
+    timer = setTimeout(() => {
+      timer = null;
+      const argsToSend = pendingArgs;
+      pendingArgs = null;
+      fn(...argsToSend);
+    }, wait);
+  };
+  debounced.flush = () => {
+    if (!timer) {
+      return false;
+    }
+    clearTimeout(timer);
+    timer = null;
+    const argsToSend = pendingArgs;
+    pendingArgs = null;
+    fn(...argsToSend);
+    return true;
+  };
+  debounced.cancel = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    pendingArgs = null;
+  };
+  debounced.pending = () => timer !== null;
+  return debounced;
+}
+
 function collectSettings(fields) {
   return fields.reduce((result, field) => {
     const element = document.getElementById(field);
@@ -59,27 +99,47 @@ function bindThemeButtons(pushSettings) {
 
 function initInspector(actionUuid, fields) {
   let currentContext = '';
+  let uiBound = false;
 
   function pushSettings() {
     $UD.sendParamFromPlugin(collectSettings(fields), currentContext);
+  }
+  const autosave = debounce(pushSettings, AUTOSAVE_DEBOUNCE_MS);
+
+  function commitSettings() {
+    if (!autosave.flush()) {
+      pushSettings();
+    }
+  }
+
+  function bindUiOnce() {
+    if (uiBound) {
+      return;
+    }
+    uiBound = true;
+
+    const form = document.getElementById('property-inspector');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      commitSettings();
+    });
+
+    form.addEventListener('input', () => {
+      autosave();
+    });
+
+    bindThemeButtons(commitSettings);
+    window.addEventListener('pagehide', () => {
+      autosave.flush();
+      autosave.cancel();
+    });
   }
 
   $UD.connect(actionUuid);
 
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
-
-    const form = document.getElementById('property-inspector');
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      pushSettings();
-    });
-
-    form.addEventListener('input', () => {
-      pushSettings();
-    });
-
-    bindThemeButtons(pushSettings);
+    bindUiOnce();
   });
 
   function apply(message) {

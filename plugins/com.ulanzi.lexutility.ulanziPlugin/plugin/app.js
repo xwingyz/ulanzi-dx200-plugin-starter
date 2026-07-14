@@ -10,7 +10,10 @@ import { fileURLToPath } from 'node:url';
 
 const PLUGIN_UUID = 'com.ulanzi.ulanzistudio.lexutility';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LATENCY_SETTINGS_PATH = path.join(__dirname, '..', 'data', 'latency-settings.json');
+// 框架层持久化：所有 action 的设置都落到同一份 data/action-settings.json，
+// 按 `${actionid}::${key}` 归档。旧版 latency 专属文件仅用于一次性迁移。
+const SETTINGS_STORE_PATH = path.join(__dirname, '..', 'data', 'action-settings.json');
+const LEGACY_LATENCY_STORE_PATH = path.join(__dirname, '..', 'data', 'latency-settings.json');
 
 const THEMES = {
   mint: {
@@ -124,12 +127,12 @@ const ACTION_CONFIGS = {
       color: '#8b5cf6',
       theme: 'signal',
     },
-    createState: () => ({ step: 0 }),
+    createState: () => ({ step: 0, currentColor: SWATCH_COLORS[0] }),
     onRun: (instance) => {
       instance.step = (instance.step + 1) % SWATCH_COLORS.length;
-      instance.settings.color = SWATCH_COLORS[instance.step];
+      instance.currentColor = SWATCH_COLORS[instance.step];
     },
-    render: (instance) => renderSwatchIcon(instance.settings, instance.step),
+    render: (instance) => renderSwatchIcon(instance.settings, instance.step, instance.currentColor),
   },
   fontprobe: {
     defaults: {
@@ -166,6 +169,21 @@ const ACTION_CONFIGS = {
     onRun: (instance) => {
       togglePomodoro(instance);
     },
+    onReady: (instance) => {
+      initializePomodoroInstance(instance);
+      if (instance.running && !hasInstanceTimeout(instance, 'pomodoro')) {
+        schedulePomodoroTick(instance);
+      }
+    },
+    onSettingsChanged: (instance, previousSettings) => {
+      initializePomodoroInstance(instance);
+      reconcilePomodoroSettings(instance, previousSettings);
+    },
+    onParamFromPlugin: (instance, param) => {
+      if (param?.resetTimer === 'true') {
+        resetPomodoroInstance(instance);
+      }
+    },
     render: (instance) => renderPomodoroIcon(instance),
   },
   latency: {
@@ -188,6 +206,29 @@ const ACTION_CONFIGS = {
     }),
     onRun: (instance) =>
       runLatencyCheck(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true }),
+    onReady: (instance) => {
+      scheduleLatencyCheck(instance);
+      if (!instance.history.length && !instance.checking) {
+        return runLatencyCheck(instance, { immediateRender: true });
+      }
+      return undefined;
+    },
+    onSettingsChanged: (instance, previousSettings) => {
+      const probeChanged =
+        previousSettings.url !== instance.settings.url ||
+        previousSettings.intervalSec !== instance.settings.intervalSec ||
+        previousSettings.warnMs !== instance.settings.warnMs ||
+        previousSettings.timeoutMs !== instance.settings.timeoutMs;
+      if (!probeChanged) {
+        return;
+      }
+      instance.history = [];
+      instance.lastMs = null;
+      instance.status = 'checking';
+      clearLatencyTimer(instance);
+      instance.checking = false;
+      guardAction(instance, 'ready', () => onInstanceReady(instance));
+    },
     render: (instance) => renderLatencyIcon(instance),
   },
 };
@@ -201,30 +242,44 @@ const ACTION_KEY_BY_UUID = Object.fromEntries(
 
 const $UD = new UlanzideckApi();
 const INSTANCES = new Map();
-const LATENCY_PERSISTED_SETTINGS = loadLatencyPersistedSettings();
+const SETTINGS_STORAGE = createSettingsStorage();
+const PERSISTED_SETTINGS = SETTINGS_STORAGE.load();
 
 // ---- 框架隔离层：单进程内按实例隔离异常与定时器（见 docs/development-rules.md §4）----
 
-function reportActionError(instance, phase, error) {
+function reportActionError(instance, phase, error, options = {}) {
+  const instances = options.instances ?? INSTANCES;
+  const errorRenderer = options.renderError ?? renderErrorState;
   const actionKey = instance ? actionKeyFromUuid(instance.actionUuid) : 'unknown';
   log(`action error [${actionKey}] phase=${phase}`, error?.stack || error);
-  if (instance && INSTANCES.has(instance.context)) {
+  if (instance) {
     instance.lastError = { phase, message: String(error?.message || error), at: Date.now() };
-    renderErrorState(instance);
+    if (options.renderError || instances.has(instance.context)) {
+      errorRenderer(instance);
+    }
   }
 }
 
-function guardAction(instance, phase, fn) {
+function guardAction(instance, phase, fn, onError = reportActionError) {
   try {
     const result = fn();
     if (result && typeof result.then === 'function') {
-      result.catch((error) => reportActionError(instance, phase, error));
+      result.catch((error) => onError(instance, phase, error));
     }
     return result;
   } catch (error) {
-    reportActionError(instance, phase, error);
+    onError(instance, phase, error);
     return undefined;
   }
+}
+
+function initializeInstanceState(instance, config, options = {}) {
+  const onError = (failedInstance, phase, error) => reportActionError(failedInstance, phase, error, options);
+  const state = guardAction(instance, 'createState', () => config.createState() || {}, onError);
+  if (state) {
+    Object.assign(instance, state);
+  }
+  return instance;
 }
 
 function safeHandler(name, handler) {
@@ -237,16 +292,21 @@ function safeHandler(name, handler) {
   };
 }
 
-function setInstanceTimeout(instance, slot, fn, ms) {
+function setInstanceTimeout(instance, slot, fn, ms, onCancel) {
   clearInstanceTimeout(instance, slot);
   if (!instance.timers) {
     instance.timers = new Map();
   }
-  const handle = setTimeout(() => {
+  const timer = { handle: null, cancel: onCancel };
+  timer.handle = setTimeout(() => {
+    if (instance.timers?.get(slot) !== timer) {
+      return;
+    }
     instance.timers?.delete(slot);
+    timer.cancel = undefined;
     guardAction(instance, `timer:${slot}`, fn);
   }, ms);
-  instance.timers.set(slot, handle);
+  instance.timers.set(slot, timer);
 }
 
 function hasInstanceTimeout(instance, slot) {
@@ -254,10 +314,11 @@ function hasInstanceTimeout(instance, slot) {
 }
 
 function clearInstanceTimeout(instance, slot) {
-  const handle = instance?.timers?.get(slot);
-  if (handle) {
-    clearTimeout(handle);
+  const timer = instance?.timers?.get(slot);
+  if (timer) {
+    clearTimeout(timer.handle ?? timer);
     instance.timers.delete(slot);
+    timer.cancel?.();
   }
 }
 
@@ -265,10 +326,15 @@ function disposeInstance(instance) {
   if (!instance?.timers) {
     return;
   }
-  for (const handle of instance.timers.values()) {
-    clearTimeout(handle);
+  for (const slot of [...instance.timers.keys()]) {
+    clearInstanceTimeout(instance, slot);
   }
-  instance.timers.clear();
+}
+
+function delayInstance(instance, slot, ms) {
+  return new Promise((resolve) => {
+    setInstanceTimeout(instance, slot, () => resolve(true), ms, () => resolve(false));
+  });
 }
 
 function renderErrorState(instance) {
@@ -295,19 +361,152 @@ function toDataUrl(svg) {
   return `data:image/svg+xml;base64,${encoded}`;
 }
 
-function loadLatencyPersistedSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(LATENCY_SETTINGS_PATH, 'utf8'));
-  } catch {
-    return {};
-  }
+function createSettingsStorage(options = {}) {
+  const storePath = options.storePath ?? SETTINGS_STORE_PATH;
+  const legacyPath = options.legacyPath ?? LEGACY_LATENCY_STORE_PATH;
+  const fsImpl = options.fsImpl ?? fs;
+  const logger = options.logger ?? log;
+  let sequence = 0;
+  let loadedFromLegacy = false;
+  let storeCorrupt = false;
+
+  const readJson = (filePath) => {
+    const value = JSON.parse(fsImpl.readFileSync(filePath, 'utf8'));
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype
+    ) {
+      throw new TypeError('persist store root must be a plain object');
+    }
+    return value;
+  };
+  const storage = {
+    get loadedFromLegacy() {
+      return loadedFromLegacy;
+    },
+    get storeCorrupt() {
+      return storeCorrupt;
+    },
+    load() {
+      try {
+        return readJson(storePath);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          storeCorrupt = true;
+          logger('persist store read failed', error?.stack || error);
+          return {};
+        }
+      }
+      try {
+        const legacyData = readJson(legacyPath);
+        loadedFromLegacy = true;
+        storage.write(legacyData);
+        return legacyData;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          logger('legacy persist store read failed', error?.stack || error);
+        }
+        return {};
+      }
+    },
+    write(data) {
+      if (storeCorrupt) {
+        logger('persist store is read-only after load failure');
+        return false;
+      }
+      const directory = path.dirname(storePath);
+      const tempPath = path.join(
+        directory,
+        `.${path.basename(storePath)}.${process.pid}.${++sequence}.tmp`,
+      );
+      try {
+        fsImpl.mkdirSync(directory, { recursive: true });
+        fsImpl.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+        fsImpl.renameSync(tempPath, storePath);
+        return true;
+      } catch (error) {
+        try {
+          fsImpl.unlinkSync(tempPath);
+        } catch (cleanupError) {
+          if (cleanupError?.code !== 'ENOENT') {
+            logger('persist temp cleanup failed', cleanupError?.stack || cleanupError);
+          }
+        }
+        logger('persist store write failed', error?.stack || error);
+        return false;
+      }
+    },
+  };
+  return storage;
 }
 
-function saveLatencyPersistedSettings() {
-  try {
-    fs.mkdirSync(path.dirname(LATENCY_SETTINGS_PATH), { recursive: true });
-    fs.writeFileSync(LATENCY_SETTINGS_PATH, JSON.stringify(LATENCY_PERSISTED_SETTINGS, null, 2));
-  } catch {}
+function persistenceKey(context) {
+  const { key = '', actionid = '' } = $UD.decodeContext(context) || {};
+  return `${actionid}::${key}`;
+}
+
+// persist 语义：默认持久化整份归一化设置；action 可用 `persist: false` 关闭，
+// 或 `persist: (settings) => ({...})` 只挑选需要落盘的字段。
+function readPersistedSettings(context, config) {
+  if (config.persist === false) {
+    return {};
+  }
+  return PERSISTED_SETTINGS[persistenceKey(context)] || {};
+}
+
+function writePersistedSettings(context, config, settings, options = {}) {
+  if (config.persist === false) {
+    return false;
+  }
+  const store = options.store ?? PERSISTED_SETTINGS;
+  const storage = options.storage ?? SETTINGS_STORAGE;
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const clean = pickPersistedSettings(config, settings);
+  const key = keyFromContext(context);
+  const candidate = { ...store, [key]: clean };
+  if (!storage.write(candidate)) {
+    return false;
+  }
+  store[key] = clean;
+  return true;
+}
+
+function pickPersistedSettings(config, settings) {
+  const source = typeof config.persist === 'function' ? config.persist(settings) : settings;
+  const clean = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value !== undefined) {
+      clean[name] = value;
+    }
+  }
+  return clean;
+}
+
+function persistedSettingsEqual(actionUuid, config, settings, persistedSettings) {
+  const desired = pickPersistedSettings(config, settings);
+  const previous = pickPersistedSettings(config, normalizeSettings(actionUuid, persistedSettings));
+  const keys = new Set([...Object.keys(desired), ...Object.keys(previous)]);
+  return [...keys].every((key) => Object.is(desired[key], previous[key]));
+}
+
+function resolveSettingsForEvent(eventType, {
+  current = {},
+  incoming = {},
+  persisted = {},
+} = {}) {
+  if (eventType === 'hostRestore') {
+    return { ...current, ...incoming, ...persisted };
+  }
+  if (eventType === 'pluginSubmit') {
+    return { ...current, ...persisted, ...incoming };
+  }
+  return { ...current, ...incoming };
+}
+
+function dispatchActionParam(config, instance, param) {
+  return config.onParamFromPlugin?.(instance, param);
 }
 
 function escapeXml(value) {
@@ -413,33 +612,6 @@ function isEnabled(value) {
 function clipText(value, maxLength) {
   const text = String(value || '');
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
-}
-
-function latencyPersistenceKey(context) {
-  const { key = '', actionid = '' } = $UD.decodeContext(context) || {};
-  return `${actionid}::${key}`;
-}
-
-function pickLatencyPersistedFields(settings = {}) {
-  return {
-    url: settings.url,
-    intervalSec: settings.intervalSec,
-    warnMs: settings.warnMs,
-    timeoutMs: settings.timeoutMs,
-    theme: settings.theme,
-    color: settings.color,
-    graphMode: settings.graphMode,
-    backgroundStyle: settings.backgroundStyle,
-  };
-}
-
-function readLatencyPersistedSettings(context) {
-  return LATENCY_PERSISTED_SETTINGS[latencyPersistenceKey(context)] || {};
-}
-
-function writeLatencyPersistedSettings(context, settings) {
-  LATENCY_PERSISTED_SETTINGS[latencyPersistenceKey(context)] = pickLatencyPersistedFields(settings);
-  saveLatencyPersistedSettings();
 }
 
 function checkUrl(rawUrl, timeoutMs) {
@@ -550,9 +722,9 @@ function renderBadgeIcon(settings, active) {
   `);
 }
 
-function renderSwatchIcon(settings, step) {
+function renderSwatchIcon(settings, step, currentColor = settings.color) {
   const theme = themeFor(settings);
-  const accent = normalizeColor(settings.color, theme.accent);
+  const accent = normalizeColor(currentColor, theme.accent);
   const dots = SWATCH_COLORS.map((color, index) => {
     const cx = 72 + index * 28;
     const stroke = step % SWATCH_COLORS.length === index ? theme.text : theme.shell;
@@ -1084,10 +1256,29 @@ function scheduleLatencyCheck(instance) {
   setInstanceTimeout(instance, 'latency', () => runLatencyCheck(instance), intervalSec * 1000);
 }
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+function isInstanceCurrent(instance, requestId, instances = INSTANCES) {
+  return instances.get(instance.context) === instance && requestId === instance.requestId;
+}
+
+function commitLatencyResult(instance, result, options = {}) {
+  const {
+    requestId,
+    feedbackCompleted = true,
+    instances = INSTANCES,
+    warnMs = Number.parseInt(instance.settings.warnMs, 10) || 400,
+    render = renderInstance,
+    schedule = scheduleLatencyCheck,
+  } = options;
+  if (!feedbackCompleted || !isInstanceCurrent(instance, requestId, instances)) {
+    return false;
+  }
+  instance.checking = false;
+  instance.lastMs = result.ok ? result.ms : null;
+  instance.history = [...instance.history, result].slice(-LATENCY_HISTORY_LIMIT);
+  instance.status = !result.ok ? 'down' : result.ms > warnMs ? 'slow' : 'up';
+  render(instance);
+  schedule(instance);
+  return true;
 }
 
 async function runLatencyCheck(instance, options = {}) {
@@ -1123,43 +1314,38 @@ async function runLatencyCheck(instance, options = {}) {
   const warnMs = Number.parseInt(instance.settings.warnMs, 10) || 400;
   const result = await checkUrl(instance.settings.url, timeoutMs);
 
-  if (!INSTANCES.has(instance.context) || requestId !== instance.requestId) {
+  if (!isInstanceCurrent(instance, requestId)) {
     return;
   }
 
   const remainingFeedbackMs = minDisplayMs - (Date.now() - startedAt);
+  let feedbackCompleted = true;
   if (remainingFeedbackMs > 0) {
-    await delay(remainingFeedbackMs);
+    feedbackCompleted = await delayInstance(instance, 'latencyFeedback', remainingFeedbackMs);
   }
 
-  if (!INSTANCES.has(instance.context) || requestId !== instance.requestId) {
-    return;
-  }
-
-  instance.checking = false;
-  instance.lastMs = result.ok ? result.ms : null;
-  instance.history = [...instance.history, result].slice(-LATENCY_HISTORY_LIMIT);
-  instance.status = !result.ok ? 'down' : result.ms > warnMs ? 'slow' : 'up';
-  renderInstance(instance);
-  scheduleLatencyCheck(instance);
+  commitLatencyResult(instance, result, { requestId, feedbackCompleted, warnMs });
 }
 
 function onInstanceReady(instance) {
-  const actionKey = actionKeyFromUuid(instance.actionUuid);
-  if (actionKey === 'pomowave') {
-    initializePomodoroInstance(instance);
-    if (instance.running && !hasInstanceTimeout(instance, 'pomodoro')) {
-      schedulePomodoroTick(instance);
-    }
-    return;
-  }
+  const config = configFromUuid(instance.actionUuid);
+  return config.onReady?.(instance);
+}
 
-  if (actionKey !== 'latency') {
-    return;
+// 回填加固：把插件侧权威（含持久化）的归一化设置回推给 PI，纠正宿主
+// 可能过期/缺字段的 ActionParam。仅在与来件不一致时发送，避免多余流量与回环。
+function syncInspectorSettings(instance, incomingSettings = {}, ud = $UD) {
+  const authoritative = {};
+  for (const [name, value] of Object.entries(instance.settings)) {
+    if (value !== undefined) {
+      authoritative[name] = value;
+    }
   }
-  scheduleLatencyCheck(instance);
-  if (!instance.history.length && !instance.checking) {
-    guardAction(instance, 'latencyCheck', () => runLatencyCheck(instance, { immediateRender: true }));
+  const differs = Object.keys(authoritative).some(
+    (name) => String(incomingSettings?.[name] ?? '') !== String(authoritative[name]),
+  );
+  if (differs) {
+    ud.sendParamFromPlugin(authoritative, instance.context);
   }
 }
 
@@ -1178,76 +1364,94 @@ function renderInstance(instance) {
   $UD.setBaseDataIcon(instance.context, icon);
 }
 
-function ensureInstance(context, incomingSettings = {}) {
-  let instance = INSTANCES.get(context);
+function ensureInstance(context, incomingSettings = {}, eventType = 'hostRestore', runtime = {}) {
+  const instances = runtime.instances ?? INSTANCES;
+  const readPersisted = runtime.readPersisted ?? readPersistedSettings;
+  const writePersisted = runtime.writePersisted ?? writePersistedSettings;
+  const render = runtime.render ?? renderInstance;
+  const ready = runtime.ready ?? onInstanceReady;
+  let instance = instances.get(context);
   const actionUuid = actionFromContext(context);
-  const actionKey = actionKeyFromUuid(actionUuid);
   const config = configFromUuid(actionUuid);
+  const persistedSettings = readPersisted(context, config);
 
   if (!instance) {
-    const persistedSettings = actionKey === 'latency'
-      ? readLatencyPersistedSettings(context)
-      : {};
-    let initialState = {};
-    try {
-      initialState = config.createState() || {};
-    } catch (error) {
-      log(`action error [${actionKey}] phase=createState`, error?.stack || error);
-    }
     instance = {
       context,
       actionUuid,
-      settings: normalizeSettings(actionUuid, { ...persistedSettings, ...incomingSettings }),
+      settings: normalizeSettings(actionUuid, resolveSettingsForEvent(eventType, {
+        incoming: incomingSettings,
+        persisted: persistedSettings,
+      })),
       active: true,
-      ...initialState,
     };
-    INSTANCES.set(context, instance);
-    if (actionKey === 'latency') {
-      writeLatencyPersistedSettings(context, instance.settings);
-    }
-    if (actionKey === 'pomowave') {
-      guardAction(instance, 'init', () => initializePomodoroInstance(instance));
+    instances.set(context, instance);
+    initializeInstanceState(instance, config, {
+      instances,
+      renderError: runtime.renderError,
+    });
+    if (
+      eventType !== 'runtime' &&
+      !persistedSettingsEqual(actionUuid, config, instance.settings, persistedSettings)
+    ) {
+      writePersisted(context, config, instance.settings);
     }
   } else if (incomingSettings && Object.keys(incomingSettings).length > 0) {
     const previousSettings = { ...instance.settings };
-    const previousUrl = instance.settings?.url;
-    const previousInterval = instance.settings?.intervalSec;
-    const previousWarn = instance.settings?.warnMs;
-    const previousTimeout = instance.settings?.timeoutMs;
-    instance.settings = normalizeSettings(actionUuid, { ...instance.settings, ...incomingSettings });
-    if (actionKey === 'latency') {
-      writeLatencyPersistedSettings(context, instance.settings);
-    }
-    if (actionKey === 'pomowave') {
-      guardAction(instance, 'settingsChanged', () => {
-        initializePomodoroInstance(instance);
-        reconcilePomodoroSettings(instance, previousSettings);
-      });
-    }
+    instance.settings = normalizeSettings(actionUuid, resolveSettingsForEvent(eventType, {
+      current: instance.settings,
+      incoming: incomingSettings,
+      persisted: persistedSettings,
+    }));
     if (
-      actionKey === 'latency' &&
-      (
-        previousUrl !== instance.settings.url ||
-        previousInterval !== instance.settings.intervalSec ||
-        previousWarn !== instance.settings.warnMs ||
-        previousTimeout !== instance.settings.timeoutMs
-      )
+      eventType !== 'runtime' &&
+      !persistedSettingsEqual(actionUuid, config, instance.settings, persistedSettings)
     ) {
-      instance.history = [];
-      instance.lastMs = null;
-      instance.status = 'checking';
-      clearLatencyTimer(instance);
-      instance.checking = false;
-      guardAction(instance, 'ready', () => onInstanceReady(instance));
+      writePersisted(context, config, instance.settings);
     }
+    guardAction(instance, 'settingsChanged', () => config.onSettingsChanged?.(instance, previousSettings));
   }
 
-  renderInstance(instance);
-  guardAction(instance, 'ready', () => onInstanceReady(instance));
+  if (instance.lastError?.phase === 'createState') {
+    return instance;
+  }
+  render(instance);
+  guardAction(instance, 'ready', () => ready(instance));
   return instance;
 }
 
-$UD.connect(PLUGIN_UUID);
+function createSettingsEventProcessor(options = {}) {
+  const runtime = {
+    instances: options.instances ?? INSTANCES,
+    readPersisted: options.readPersisted ?? readPersistedSettings,
+    writePersisted: options.writePersisted ?? writePersistedSettings,
+    render: options.render ?? renderInstance,
+    renderError: options.renderError,
+    ready: options.ready ?? onInstanceReady,
+  };
+  const ud = options.ud ?? $UD;
+  return {
+    ensure: (context, incomingSettings = {}, eventType = 'hostRestore') =>
+      ensureInstance(context, incomingSettings, eventType, runtime),
+    runtime: (context) => ensureInstance(context, {}, 'runtime', runtime),
+    hostRestore(context, incomingSettings = {}) {
+      const instance = ensureInstance(context, incomingSettings, 'hostRestore', runtime);
+      guardAction(instance, 'syncInspector', () => syncInspectorSettings(instance, incomingSettings, ud));
+      return instance;
+    },
+    pluginSubmit(context, incomingSettings = {}) {
+      const instance = ensureInstance(context, incomingSettings, 'pluginSubmit', runtime);
+      const config = configFromUuid(instance.actionUuid);
+      guardAction(instance, 'paramFromPlugin', () => dispatchActionParam(config, instance, incomingSettings));
+      runtime.render(instance);
+      return instance;
+    },
+  };
+}
+
+function startPlugin() {
+  $UD.connect(PLUGIN_UUID);
+  const eventProcessor = createSettingsEventProcessor({ instances: INSTANCES });
 
 $UD.onConnected(() => {
   log('connected');
@@ -1262,23 +1466,19 @@ $UD.onClose(safeHandler('wsClose', () => {
 }));
 
 $UD.onAdd(safeHandler('add', (message) => {
-  ensureInstance(message.context, message.param || {});
+  eventProcessor.hostRestore(message.context, message.param || {});
 }));
 
 $UD.onParamFromApp(safeHandler('paramFromApp', (message) => {
-  ensureInstance(message.context, message.param || {});
+  eventProcessor.hostRestore(message.context, message.param || {});
 }));
 
 $UD.onParamFromPlugin(safeHandler('paramFromPlugin', (message) => {
-  const instance = ensureInstance(message.context, message.param || {});
-  if (actionKeyFromUuid(instance.actionUuid) === 'pomowave' && message.param?.resetTimer === 'true') {
-    guardAction(instance, 'resetTimer', () => resetPomodoroInstance(instance));
-    renderInstance(instance);
-  }
+  eventProcessor.pluginSubmit(message.context, message.param || {});
 }));
 
 $UD.onRun(safeHandler('run', (message) => {
-  const instance = ensureInstance(message.context, message.param || {});
+  const instance = eventProcessor.runtime(message.context);
   const config = configFromUuid(instance.actionUuid);
   guardAction(instance, 'onRun', () => config.onRun(instance));
   renderInstance(instance);
@@ -1312,4 +1512,24 @@ process.on('unhandledRejection', (reason) => {
 
 process.on('uncaughtException', (error) => {
   log('uncaughtException (isolated, process kept alive)', error?.stack || error);
+});
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  startPlugin();
+}
+
+export const __testing = Object.freeze({
+  ACTION_CONFIGS,
+  clearInstanceTimeout,
+  commitLatencyResult,
+  createSettingsEventProcessor,
+  createSettingsStorage,
+  delayInstance,
+  dispatchActionParam,
+  disposeInstance,
+  initializeInstanceState,
+  resolveSettingsForEvent,
+  setInstanceTimeout,
+  writePersistedSettings,
 });

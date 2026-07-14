@@ -70,6 +70,27 @@
 - 所有设置都先经 `normalizeSettings` 归一化，再进入 `render`。
 - 同一个 action 的运行态不跨 context 共享可变状态，统一放 `INSTANCES`。
 
+### 可选生命周期钩子与框架边界
+
+action 可按需声明以下可选能力，未声明时框架直接跳过：
+
+- `onReady(instance)`：实例完成本轮设置合并与渲染后的准备工作。
+- `onSettingsChanged(instance, previousSettings)`：响应归一化后的设置变化。
+- `onParamFromPlugin(instance, param)`：处理 Property Inspector 来件中的 action 私有语义。
+- `persist`：默认保存归一化后的完整设置；设为 `false` 关闭该 action 的持久化，或提供筛选函数只返回需要保存的字段。
+
+框架事件处理器只负责通用的实例管理、设置合并、持久化、回推和钩子分发，不得出现任何具体业务 action key，也不得为某个 action 新增专属分支。action 特有行为必须下放到 `ACTION_CONFIGS` 的钩子或 action 实现中。
+
+### 共享框架持久化
+
+- 所有 action 的设置统一写入插件目录下的 `data/action-settings.json`，记录键固定为宿主 context 解码后的 `actionid::key`，不同 action、键位和实例不得共用可变记录。
+- 宿主恢复事件（`onAdd` / `onParamFromApp`）以本地 persisted 设置为权威；合并并归一化后，如宿主来件缺字段或已过期，框架必须把权威设置回推给 Property Inspector。
+- Property Inspector 提交事件（`onParamFromPlugin`）以 incoming 设置为权威，使用户刚提交的值覆盖旧 persisted 值；随后再归一化、持久化并渲染。
+- 写盘前必须比较**归一化后的持久化语义**；语义未变化时不重复写盘，不能只按原始来件或对象引用判断。
+- 文件更新必须在目标文件同目录写临时文件，再用 rename 替换正式文件，避免半写入状态。
+- 若新的 `action-settings.json` 存在但无法读取或解析，本次进程将存储置为只读并保留原文件，不得用空对象、默认值或 legacy 数据覆盖它。
+- legacy 存储只允许在新的 `action-settings.json` 明确返回 `ENOENT` 时迁移；其他读取错误一律不得触发迁移。
+
 ### 进程内隔离（单进程约束下的强制规则）
 
 为控制系统占用，一个插件的所有 action 共用一个 Node 进程；隔离由框架层在进程内保证：
@@ -131,7 +152,7 @@
 - action 私有 inspector 入口文件只做 `initInspector(...)` 调用，不写重复连接代码。
 - HTML 表单结构保持 `#property-inspector` 和 `.uspi-wrapper`，不要每个 action 自定义 wrapper 约定。
 - Inspector 里主题按钮的 `data-theme-value` 必须直接对应 `THEMES` key。
-- 输入事件默认即时同步，只有昂贵操作才允许手动提交。
+- 文本等连续输入统一使用 `400ms` 去抖自动提交，减少连续写盘；表单提交、主题等按钮操作必须 flush 待提交值并立即发送。
 
 ## 8. 新增 Action 的标准步骤
 

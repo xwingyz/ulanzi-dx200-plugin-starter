@@ -28,33 +28,42 @@ function syncModeButtons() {
 
 function initLatencyInspector() {
   let currentContext = '';
+  let uiBound = false;
 
   function pushSettings() {
     $UD.sendParamFromPlugin(collectSettings(LATENCY_FIELDS), currentContext);
   }
+  const autosave = debounce(pushSettings, AUTOSAVE_DEBOUNCE_MS);
 
-  $UD.connect('com.ulanzi.ulanzistudio.lexutility.latency');
+  function commitSettings() {
+    if (!autosave.flush()) {
+      pushSettings();
+    }
+  }
 
-  $UD.onConnected(() => {
-    document.querySelector('.uspi-wrapper').classList.remove('hidden');
+  function bindUiOnce() {
+    if (uiBound) {
+      return;
+    }
+    uiBound = true;
 
     const form = document.getElementById('property-inspector');
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      pushSettings();
+      commitSettings();
     });
 
     form.addEventListener('input', () => {
-      pushSettings();
+      autosave();
     });
 
-    bindThemeButtons(pushSettings);
+    bindThemeButtons(commitSettings);
 
     document.querySelectorAll('[data-graph-mode]').forEach((button) => {
       button.addEventListener('click', () => {
         document.getElementById('graphMode').value = button.dataset.graphMode || 'bars';
         syncModeButtons();
-        pushSettings();
+        commitSettings();
       });
     });
 
@@ -62,11 +71,22 @@ function initLatencyInspector() {
       button.addEventListener('click', () => {
         document.getElementById('backgroundStyle').value = button.dataset.bgStyle || 'gradient';
         syncModeButtons();
-        pushSettings();
+        commitSettings();
       });
     });
 
+    window.addEventListener('pagehide', () => {
+      autosave.flush();
+      autosave.cancel();
+    });
     syncModeButtons();
+  }
+
+  $UD.connect('com.ulanzi.ulanzistudio.lexutility.latency');
+
+  $UD.onConnected(() => {
+    document.querySelector('.uspi-wrapper').classList.remove('hidden');
+    bindUiOnce();
   });
 
   function apply(message) {

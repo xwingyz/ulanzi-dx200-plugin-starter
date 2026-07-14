@@ -275,6 +275,14 @@ npm run run-plugin -- \
 
 ## 测试插件
 
+先从仓库根目录运行共享框架测试：
+
+```bash
+npm test
+```
+
+该入口覆盖模板与示例插件的生命周期分发、设置优先级、持久化安全和实例隔离等框架行为；测试项会随框架演进，不以固定数量作为完成标准。宿主与真机行为仍按下列流程验证。
+
 ### 1. 在桌面版 UlanziDeck 中测试
 
 1. 重启 `UlanziDeck Studio`
@@ -334,6 +342,8 @@ npm run run-plugin -- --plugin com.ulanzi.lexutility.ulanziPlugin
 注意：
 
 - Simulator 不会自动启动 Node.js 主服务
+- 桌面版 Studio 则监听 `127.0.0.1:3906` 并自动拉起已安装插件的主服务；桌面工作流不要手动运行 `run-plugin`
+- `run-plugin` 默认连接 Simulator 的 `127.0.0.1:39069`，仅用于 Simulator 工作流
 - `openurl` / `openview` 在浏览器模拟器里受限制
 
 ### 3. 调试
@@ -389,12 +399,14 @@ npm install
 - `manifest.json` 必需字段
 - Property Inspector 与主服务的事件模型
 - Node.js `ws` 通信方式
+- 通过外部 `UlanziDeckSimulator` 目录进行同步和运行的开发流
+- macOS 与 Windows 的桌面插件目录解析及同步入口
 
 还没做的部分：
 
 - 没有把官方 `common-html` / `common-node` 整包直接镜像进仓库
-- 还没接入官方 `UlanziDeckSimulator` 子目录
-- 还没补 Windows 专用说明
+- 没有把官方 `UlanziDeckSimulator` 作为仓库子目录 vendor；通过 `--sim-root` 或 `ULANZI_SIMULATOR_DIR` 指向外部 SDK 目录
+- Windows 已支持桌面插件目录解析、同步与 `restart` 流程；具体宿主可见行为仍需在对应平台实机验证
 
 ## 参考来源
 

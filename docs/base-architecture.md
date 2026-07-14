@@ -18,14 +18,16 @@
 ## 2. 分层结构（现状）
 
 ```text
-宿主 UlanziDeck Studio
-  │  WebSocket (ws://127.0.0.1:39069)
+桌面宿主 Ulanzi Studio                     官方 Simulator
+  │  WebSocket ws://127.0.0.1:3906          │  WebSocket ws://127.0.0.1:39069
+  │  自动拉起插件主服务                      │  由 run-plugin 启动插件主服务
+  └──────────────────────┬───────────────────┘
   ▼
 运行实例 plugin/app.js（一个插件一个 Node 进程）
-  ├── 框架层：$UD 事件分发 → ensureInstance → normalizeSettings → render → setBaseDataIcon
+  ├── 框架层：$UD 事件分发 → ensureInstance → normalizeSettings → 通用 persist → render → setBaseDataIcon
   ├── 注册表：ACTION_CONFIGS / ACTIONS / ACTION_KEY_BY_UUID（自动注册，勿手写第二套映射）
   ├── 实例层：INSTANCES（运行态唯一容器，active 标记控制是否推送渲染）
-  └── 子功能层：各 action 的 onRun / render / 私有定时器与持久化
+  └── 子功能层：各 action 的必选能力与可选生命周期钩子
 配置层 property-inspector/<key>.{html,js} → inspector-shared.js（连接/回填/提交协议）
 静态层 manifest.json + assets/icons/（宿主未拉起运行态前的默认展示）
 ```
@@ -36,25 +38,25 @@
 - 运行态集中在 `INSTANCES`，不跨 context 共享可变状态。
 - 主题走 `THEMES` token（mint/ember/mono/signal），渲染共用 `renderScreenFrame` 骨架。
 - Inspector 协议统一收口在 `inspector-shared.js`，action 入口只调 `initInspector`。
+- 设置持久化由框架统一收口到 `data/action-settings.json`，action 不再各自维护文件读写分支。
 - 脚手架、同步、运行脚本与业务完全分离（`scripts/` 无业务逻辑）。
 
-## 4. 待收敛项（按优先级）
+## 4. 当前收敛状态
 
-### 4.1 框架层与子功能层在 app.js 内耦合
+### 4.1 生命周期钩子化与通用持久化（已完成）
 
-`ensureInstance`、`onParamFromPlugin`、`onClear` 里存在 `if (actionKey === 'latency')` / `'pomowave'` 的硬编码分支（设置持久化、定时器初始化/清理、设置变更对账）。这违背“框架不认识具体子功能”的基座原则：每加一个带定时器或持久化的 action，都要改框架段。
+`ACTION_CONFIGS` 保留 `defaults`、`createState`、`onRun`、`render` 四个必选能力，并支持以下可选能力：
 
-**收敛方向**：把这些分支下放为 `ACTION_CONFIGS` 可选生命周期钩子，框架只做存在性调用：
+- `onReady(instance)`：实例完成本轮设置合并与渲染后的准备工作。
+- `onSettingsChanged(instance, previousSettings)`：响应归一化后的设置变化。
+- `onParamFromPlugin(instance, param)`：处理 Property Inspector 传来的 action 私有参数语义。
+- `persist`：默认持久化归一化后的完整设置；设为 `false` 可关闭，传入筛选函数可只保存指定字段。
 
-- `onSettingsChanged(instance, previousSettings)` — 替代 latency 重置与 pomowave 对账分支
-- `persist: { read(context), write(context, settings) }` — 替代 latency 专属持久化分支
-- ~~`onDispose(instance)`~~ — 已由框架定时器登记表 + `disposeInstance` 统一解决，不再需要逐 action 清理钩子
-
-改造完成后，`ensureInstance` / `onClear` 不应再出现任何 actionKey 字面量。此项属共享层改造，动手前按 [development-rules.md](development-rules.md) §11 先声明影响范围（6 个现有 action 全部过一遍验证）。
+框架事件处理只做通用的设置合并、持久化、回推、生命周期分发和实例清理，不含 `latency`、`pomowave` 等业务 action key。实例销毁仍由定时器登记表与 `disposeInstance` 统一处理，不增加逐 action 清理分支。持久化与事件优先级的长期约束见 [development-rules.md](development-rules.md) §4。
 
 ### 4.2 单文件体量与拆分时机
 
-`plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js` 已 1200+ 行，其中 latency 约 400 行、pomowave 约 300 行。当前尚可维护；触发拆分的条件建议定为：**完成 4.1 的钩子化之后**，按 `plugin/actions/<key>.js` 拆文件、`plugin/app.js` 只留框架与注册表。先钩子化再拆文件，避免带着耦合搬家。
+`plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js` 已超过 1200 行。生命周期钩子化已经完成，下一步可按 `plugin/actions/<key>.js` 拆文件，让 `plugin/app.js` 只保留框架与注册表；此项仍待办。
 
 ### 4.3 模板与插件的共享层漂移（已处理一轮）
 
@@ -82,6 +84,6 @@
 1. ~~文档旧路径与模板回灌~~（完成）
 2. ~~框架隔离层：异常隔离 + 定时器隔离（guardAction / safeHandler / 定时器登记表）~~（完成）
 3. ~~桥接层连接自愈（5 秒重连、不裸崩）+ `dev-desktop.mjs` restart 孤儿进程修复~~（完成）
-4. `ACTION_CONFIGS` 生命周期钩子化（剩 `onSettingsChanged` + `persist`），消除框架内 actionKey 分支（下一个共享层任务，单独一次任务做）
-5. 钩子化后按 `plugin/actions/<key>.js` 拆分子功能文件
+4. ~~`ACTION_CONFIGS` 生命周期钩子化 + 通用设置持久化，消除框架事件中的业务 action key~~（完成）
+5. 按 `plugin/actions/<key>.js` 拆分子功能文件（待办）
 6. action 超过 8 个时补 `docs/action-catalog.md`（沿用 development-rules.md §13 的既有建议）

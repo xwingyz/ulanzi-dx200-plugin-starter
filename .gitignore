@@ -3,3 +3,6 @@ dist/
 .DS_Store
 tmp/
 *.log
+# 运行态：各 action 的持久化设置存储
+plugins/*/data/
+template/*/data/

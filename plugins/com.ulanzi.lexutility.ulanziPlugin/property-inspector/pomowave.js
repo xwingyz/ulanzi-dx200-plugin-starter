@@ -31,33 +31,42 @@ function syncPomowaveButtons() {
 
 function initPomowaveInspector() {
   let currentContext = '';
+  let uiBound = false;
 
   function pushSettings() {
     $UD.sendParamFromPlugin(collectSettings(POMOWAVE_FIELDS), currentContext);
   }
+  const autosave = debounce(pushSettings, AUTOSAVE_DEBOUNCE_MS);
 
-  $UD.connect('com.ulanzi.ulanzistudio.lexutility.pomowave');
+  function commitSettings() {
+    if (!autosave.flush()) {
+      pushSettings();
+    }
+  }
 
-  $UD.onConnected(() => {
-    document.querySelector('.uspi-wrapper').classList.remove('hidden');
+  function bindUiOnce() {
+    if (uiBound) {
+      return;
+    }
+    uiBound = true;
 
     const form = document.getElementById('property-inspector');
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      pushSettings();
+      commitSettings();
     });
 
     form.addEventListener('input', () => {
-      pushSettings();
+      autosave();
     });
 
-    bindThemeButtons(pushSettings);
+    bindThemeButtons(commitSettings);
 
     document.querySelectorAll('[data-bg-style]').forEach((button) => {
       button.addEventListener('click', () => {
         document.getElementById('backgroundStyle').value = button.dataset.bgStyle || 'gradient';
         syncPomowaveButtons();
-        pushSettings();
+        commitSettings();
       });
     });
 
@@ -65,15 +74,27 @@ function initPomowaveInspector() {
       button.addEventListener('click', () => {
         document.getElementById('soundStyle').value = button.dataset.soundStyle || 'glass';
         syncPomowaveButtons();
-        pushSettings();
+        commitSettings();
       });
     });
 
     document.getElementById('resetTimer').addEventListener('click', () => {
+      autosave.flush();
       $UD.sendParamFromPlugin({ resetTimer: 'true' }, currentContext);
     });
 
+    window.addEventListener('pagehide', () => {
+      autosave.flush();
+      autosave.cancel();
+    });
     syncPomowaveButtons();
+  }
+
+  $UD.connect('com.ulanzi.ulanzistudio.lexutility.pomowave');
+
+  $UD.onConnected(() => {
+    document.querySelector('.uspi-wrapper').classList.remove('hidden');
+    bindUiOnce();
   });
 
   function apply(message) {
