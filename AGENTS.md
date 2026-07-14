@@ -37,6 +37,19 @@ Ulanzi DX200 / Ulanzi Deck 插件开发仓库的 agent 指令入口。
 - 颜色/布局走 `THEMES` token(`mint`/`ember`/`mono`/`signal`),不在 action 内硬编码或新增私有主题。
 - Property Inspector 复用 `property-inspector/inspector-shared.js`,共享字段固定 `title`/`subtitle`/`color`/`theme`。
 
+## 进程内隔离(单进程硬约束)
+
+所有 action 共用一个 Node 进程(低系统占用),隔离由框架层保证,action 代码必须遵守:
+
+- 不得直接调用 `setTimeout`/`setInterval`,统一走 `setInstanceTimeout(instance, slot, fn, ms)` / `clearInstanceTimeout` / `hasInstanceTimeout`;实例清除时框架 `disposeInstance` 统一回收。
+- 进入 action 的入口(`onRun`/`render`/`createState`/定时器回调)已由 `guardAction`/`safeHandler` 兜底,单 action 抛错只让该键位显示 ERR 图,不影响进程。不要移除这些包裹。
+- 异步 `onRun` 必须 return Promise,否则 rejection 逃逸出框架兜底。
+
+## 宿主连接事实
+
+- 桌面版 Studio 监听 `3906` 且**自动拉起插件主服务**;`run-plugin`(默认 39069)只用于 Simulator 工作流,桌面下不要手动跑。
+- 桥接层自带 5 秒自动重连;连接失败崩溃 = 桥接层被改坏,先查 `libs/node/ulanzideckApi.js`。
+
 ## 常用命令(均从仓库根目录跑)
 
 ```bash
@@ -58,7 +71,7 @@ npm run run-plugin -- --plugin <pluginDir>           # 启动 Node.js 主服务
 
 - 开工先声明:本次只改哪个插件、哪个 action、哪一层。
 - 一次任务只改一类问题,不要一边改主题一边改同步脚本。
-- 改共享层必须说明影响哪些现有 action。
+- 改共享层必须说明影响哪些现有 action,且通用修复必须在同一次任务内回流 `template/`(详见 development-rules.md §9「共享层回流」)。
 - 要新增公共约束,先改 [docs/development-rules.md](docs/development-rules.md),再改模板或代码。
 
 ## 完成定义

@@ -2,7 +2,7 @@
 
 这个仓库提供一个可直接扩展的 Ulanzi DX200 / Ulanzi Deck JavaScript 插件最小框架。
 
-长期协作规则见 [docs/development-rules.md](/Users/yuanlei/Documents/Personal/Ulanzi/docs/development-rules.md)。
+长期协作规则见 [docs/development-rules.md](docs/development-rules.md)，基座架构分析见 [docs/base-architecture.md](docs/base-architecture.md)。
 
 当前已经按官方 SDK 的公开约定收敛了最关键的命名规则：
 
@@ -24,6 +24,7 @@
 ├── package.json
 ├── README.md
 ├── docs/
+│   ├── base-architecture.md
 │   └── development-rules.md
 ├── scripts/
 │   ├── create-plugin.mjs
@@ -104,7 +105,7 @@ npm install
 然后从仓库根目录同步到 macOS 的 Ulanzi 插件目录：
 
 ```bash
-cd /Users/yuanlei/Documents/Personal/Ulanzi
+cd /Users/yuanlei/Documents/Lab/Ulanzi
 npm run install-plugin -- --plugin com.ulanzi.lexutility.ulanziPlugin
 ```
 
@@ -221,7 +222,7 @@ export ULANZI_SIMULATOR_DIR=/tmp/UlanziDeckPlugin-SDK/UlanziDeckSimulator
 同步插件到 Simulator：
 
 ```bash
-cd /Users/yuanlei/Documents/Personal/Ulanzi
+cd /Users/yuanlei/Documents/Lab/Ulanzi
 npm run dev:sim -- --plugin com.ulanzi.lexutility.ulanziPlugin
 ```
 
@@ -239,7 +240,7 @@ npm run sync-plugin -- \
 对 Node.js 插件，还需要单独启动主服务：
 
 ```bash
-cd /Users/yuanlei/Documents/Personal/Ulanzi
+cd /Users/yuanlei/Documents/Lab/Ulanzi
 npm run run-plugin -- --plugin com.ulanzi.lexutility.ulanziPlugin
 ```
 
@@ -290,7 +291,7 @@ npm run run-plugin -- \
 - `Swatch`（key `swatch`）：点击后在内置颜色盘之间轮换
 - `Font Test`（key `fontprobe`）：固定显示 3 行 `测速128Kbps`，字号分别为 `28px / 32px / 36px`
 
-> 约定：action key 用于 UUID、`ACTION_CONFIGS`、`property-inspector/<key>.html` 与 `<key>.js`、`assets/icons/action<Key>.svg` 四层命名，必须保持一致（详见 [docs/development-rules.md](/Users/yuanlei/Documents/Personal/Ulanzi/docs/development-rules.md) §4、§8）。`Font Test` 的展示名是 “Font Test”，但 key 是 `fontprobe`，对应文件即 `fontprobe.html` / `fontprobe.js`。
+> 约定：action key 用于 UUID、`ACTION_CONFIGS`、`property-inspector/<key>.html` 与 `<key>.js`、`assets/icons/action<Key>.svg` 四层命名，必须保持一致（详见 [docs/development-rules.md](docs/development-rules.md) §4、§8）。`Font Test` 的展示名是 “Font Test”，但 key 是 `fontprobe`，对应文件即 `fontprobe.html` / `fontprobe.js`。
 
 仓库内的示例插件 `plugins/com.ulanzi.lexutility.ulanziPlugin` 在上述 4 个 action 之外，额外演示了两个扩展 action：
 

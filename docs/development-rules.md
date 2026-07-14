@@ -1,6 +1,6 @@
 # Ulanzi 插件开发规则
 
-这份文档是 `/Users/yuanlei/Documents/Personal/Ulanzi` 的长期开发约束，目标是让多个智能体可以在同一套基座上并行扩展多个 action，而不反复改坏宿主兼容性、目录结构或调试流程。
+这份文档是本仓库（当前位于 `/Users/yuanlei/Documents/Lab/Ulanzi`）的长期开发约束，目标是让多个智能体可以在同一套基座上并行扩展多个 action，而不反复改坏宿主兼容性、目录结构或调试流程。
 
 ## 1. 目标与边界
 
@@ -69,6 +69,15 @@
 - `render` 必须是纯渲染函数输入，依赖 `settings + state` 产出图标。
 - 所有设置都先经 `normalizeSettings` 归一化，再进入 `render`。
 - 同一个 action 的运行态不跨 context 共享可变状态，统一放 `INSTANCES`。
+
+### 进程内隔离（单进程约束下的强制规则）
+
+为控制系统占用，一个插件的所有 action 共用一个 Node 进程；隔离由框架层在进程内保证：
+
+- action 代码不得直接调用 `setTimeout` / `setInterval`。统一使用框架的 `setInstanceTimeout(instance, slot, fn, ms)` / `clearInstanceTimeout(instance, slot)` / `hasInstanceTimeout(instance, slot)`，定时器句柄按实例登记，回调自动带异常兜底；实例被 `onClear` 移除时由框架 `disposeInstance` 统一回收，action 不需要（也不允许）自己维护裸句柄。
+- 框架对所有进入 action 代码的入口统一兜底：`onRun`、`render`、`createState`、定时器回调、宿主事件处理均经 `guardAction` / `safeHandler` 包裹。单个 action 抛错只影响该实例：记日志、该键位显示 ERR 状态图（`renderErrorState`），进程与其他 action 不受影响。
+- 异步 `onRun` 必须 return Promise（箭头函数省略大括号，或显式 `return`），否则 rejection 逃逸出框架兜底。
+- 进程级 `unhandledRejection` / `uncaughtException` 只是最后一道网：记日志并维持进程存活，不作为常规错误处理途径；正常路径的错误必须在 `guardAction` 层被拦下。
 
 ## 5. 图标与按钮 UI 规范
 
@@ -142,6 +151,13 @@
 - `libs/node` 和 `libs/js` 视为宿主桥接层，除非是通用 API 封装，不把业务代码塞进去。
 - 新脚本若只服务单次排障，不进入 `scripts/`；只有可复用流程才纳入仓库脚本。
 
+### 共享层回流（多 agent 协作强制项）
+
+- 共享层指：`libs/`、`property-inspector/inspector-shared.js`、`plugin/app.js` 的框架段（THEMES、normalize、INSTANCES、事件分发、隔离层）。
+- 在业务插件里对共享层做出的**通用**修复或增强，验证通过后必须同步回流 `template/`，同一次任务内完成，不留"以后再补"。
+- 例行核对命令：`diff -rq template/com.example.hello.ulanziPlugin/libs plugins/<plugin>/libs`；`libs/node/utils.js` 里的 `__PLUGIN_NAME__` 是脚手架占位符，属预期差异，不算漂移。
+- 改共享层的任务，完成定义额外包含：模板与业务插件两份副本一致（占位符除外）、双份 `node --check` 通过。
+
 ## 10. 调试方法
 
 先判断是哪一层出问题，再选动作：
@@ -175,6 +191,13 @@
 - 只改渲染逻辑、普通 JS、Inspector 页面：`sync`
 - 改 UUID、action identity、按钮绑定关系：`rebind`
 - 改 `manifest.json`、主入口、依赖、首次安装：`restart`
+
+### F. 宿主连接层（端口与进程事实）
+
+- 桌面版 Ulanzi Studio 的 WebSocket 监听 `127.0.0.1:3906`；官方 Simulator 监听 `127.0.0.1:39069`。两者不要混。
+- **桌面工作流下宿主会自动拉起插件的 Node 主服务进程**（从 `~/Library/Application Support/.../Plugins/` 的同步副本）。不要再手动跑 `run-plugin` 连 3906——同一插件 UUID 双连接行为不可预期。`run-plugin` 只用于 Simulator 工作流（默认连 39069）。
+- 桥接层（`libs/node/ulanzideckApi.js`）具备连接自愈：连不上宿主时打印中文提示并每 5 秒自动重连，进程不退出。如果看到进程因连接失败直接崩溃，说明桥接层被改坏或没回流，先查桥接层，不要在业务层加 try/catch 绕过。
+- `restart` 模式会先清理宿主拉起的插件 Node 子进程再重启 Studio（孤儿进程会导致 Studio 重启失败或继续跑旧代码）。重启后验证顺序：主进程新 PID → `lsof -iTCP:3906` 有监听 → 插件子进程新 PID → 同步副本内容为新代码。
 
 ## 11. 多智能体协作规范
 
