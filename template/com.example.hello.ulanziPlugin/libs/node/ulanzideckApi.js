@@ -9,6 +9,8 @@ class UlanzideckApi extends EventEmitter {
     this.uuid = '';
     this.actionid = '';
     this.websocket = null;
+    this.reconnectDelayMs = 5000;
+    this.reconnectTimer = null;
   }
 
   connect(uuid, port = 3906, address = '127.0.0.1') {
@@ -17,28 +19,44 @@ class UlanzideckApi extends EventEmitter {
     this.port = argvPort || port;
     this.uuid = uuid;
 
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (this.websocket) {
+      this.websocket.onerror = null;
+      this.websocket.onclose = null;
       this.websocket.close();
       this.websocket = null;
     }
 
     const isMain = uuid.split('.').length === 4;
-    this.websocket = new WebSocket(`ws://${this.address}:${this.port}`);
+    const websocket = new WebSocket(`ws://${this.address}:${this.port}`);
+    this.websocket = websocket;
 
-    this.websocket.onopen = () => {
-      this.websocket.send(JSON.stringify({ code: 0, cmd: Events.CONNECTED, uuid }));
+    websocket.onopen = () => {
+      websocket.send(JSON.stringify({ code: 0, cmd: Events.CONNECTED, uuid }));
       this.emit(Events.CONNECTED, {});
     };
 
-    this.websocket.onerror = (error) => {
-      this.emit(Events.ERROR, error);
+    websocket.onerror = (error) => {
+      console.error(
+        `[UlanzideckApi] WebSocket 连接异常 ws://${this.address}:${this.port}: ${error?.message || error}`,
+      );
+      if (this.listenerCount(Events.ERROR) > 0) {
+        this.emit(Events.ERROR, error);
+      }
     };
 
-    this.websocket.onclose = () => {
+    websocket.onclose = () => {
       this.emit(Events.CLOSE);
+      if (this.websocket === websocket) {
+        this.scheduleReconnect();
+      }
     };
 
-    this.websocket.onmessage = (event) => {
+    websocket.onmessage = (event) => {
       const data = event?.data ? JSON.parse(event.data) : null;
       if (!data || (typeof data.code !== 'undefined' && data.cmdType !== 'REQUEST')) {
         return;
@@ -65,6 +83,19 @@ class UlanzideckApi extends EventEmitter {
 
       this.emit(data.cmd, data);
     };
+  }
+
+  scheduleReconnect() {
+    if (this.reconnectTimer) {
+      return;
+    }
+    console.error(
+      `[UlanzideckApi] 未连接到宿主 ws://${this.address}:${this.port}，请先启动 Ulanzi Studio 或 Simulator，${this.reconnectDelayMs / 1000} 秒后自动重连`,
+    );
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect(this.uuid, this.port, this.address);
+    }, this.reconnectDelayMs);
   }
 
   encodeContext(data) {

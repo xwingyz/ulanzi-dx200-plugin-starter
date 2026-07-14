@@ -66,17 +66,34 @@ function syncPlugin(rootDir, pluginName) {
   return targetDir;
 }
 
+function sleepSync(ms) {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, ms);
+}
+
 function restartDesktopApp() {
   if (process.platform === 'darwin') {
     spawnSync('pkill', ['-f', '/Applications/Ulanzi Studio.app/Contents/MacOS/UlanziDeck'], {
       stdio: 'inherit'
     });
+    // 主程序退出后，它拉起的插件 Node 子进程会变成孤儿并占住旧代码，
+    // 不清掉会导致 Studio 重启失败或继续运行旧插件。
+    spawnSync('pkill', ['-f', 'Ulanzi Studio.app/Contents/MacOS/NodeJS/node'], {
+      stdio: 'inherit'
+    });
+    sleepSync(1500);
     spawnSync('open', ['-a', 'Ulanzi Studio'], { stdio: 'inherit' });
     return;
   }
 
   if (process.platform === 'win32') {
     spawnSync('taskkill', ['/IM', 'UlanziDeck.exe', '/F'], { stdio: 'inherit' });
+    spawnSync('powershell', [
+      '-NoProfile',
+      '-Command',
+      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'UlanziDeck\\\\Plugins' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+    ], { stdio: 'inherit' });
+    sleepSync(1500);
     spawnSync('cmd', ['/c', 'start', '', 'Ulanzi Studio'], { stdio: 'inherit' });
     return;
   }
