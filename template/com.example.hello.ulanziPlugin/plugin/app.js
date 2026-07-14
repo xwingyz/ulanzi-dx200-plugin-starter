@@ -120,6 +120,93 @@ const ACTION_KEY_BY_UUID = Object.fromEntries(
 const $UD = new UlanzideckApi();
 const INSTANCES = new Map();
 
+// ---- 框架隔离层：单进程内按实例隔离异常与定时器（见 docs/development-rules.md §4）----
+
+function reportActionError(instance, phase, error) {
+  const actionKey = instance ? actionKeyFromUuid(instance.actionUuid) : 'unknown';
+  log(`action error [${actionKey}] phase=${phase}`, error?.stack || error);
+  if (instance && INSTANCES.has(instance.context)) {
+    instance.lastError = { phase, message: String(error?.message || error), at: Date.now() };
+    renderErrorState(instance);
+  }
+}
+
+function guardAction(instance, phase, fn) {
+  try {
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      result.catch((error) => reportActionError(instance, phase, error));
+    }
+    return result;
+  } catch (error) {
+    reportActionError(instance, phase, error);
+    return undefined;
+  }
+}
+
+function safeHandler(name, handler) {
+  return (message) => {
+    try {
+      handler(message);
+    } catch (error) {
+      log(`handler error [${name}]`, error?.stack || error);
+    }
+  };
+}
+
+function setInstanceTimeout(instance, slot, fn, ms) {
+  clearInstanceTimeout(instance, slot);
+  if (!instance.timers) {
+    instance.timers = new Map();
+  }
+  const handle = setTimeout(() => {
+    instance.timers?.delete(slot);
+    guardAction(instance, `timer:${slot}`, fn);
+  }, ms);
+  instance.timers.set(slot, handle);
+}
+
+function hasInstanceTimeout(instance, slot) {
+  return Boolean(instance?.timers?.has(slot));
+}
+
+function clearInstanceTimeout(instance, slot) {
+  const handle = instance?.timers?.get(slot);
+  if (handle) {
+    clearTimeout(handle);
+    instance.timers.delete(slot);
+  }
+}
+
+function disposeInstance(instance) {
+  if (!instance?.timers) {
+    return;
+  }
+  for (const handle of instance.timers.values()) {
+    clearTimeout(handle);
+  }
+  instance.timers.clear();
+}
+
+function renderErrorState(instance) {
+  if (instance.active === false) {
+    return;
+  }
+  try {
+    const theme = themeFor(instance.settings || {});
+    const actionKey = actionKeyFromUuid(instance.actionUuid);
+    $UD.setBaseDataIcon(instance.context, toDataUrl(`
+      <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        ${renderScreenFrame(theme, theme.accent, `
+          <text x="128" y="116" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="700" font-family="Arial, Helvetica, sans-serif">ERR</text>
+          <text x="128" y="150" text-anchor="middle" fill="${theme.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${escapeXml(actionKey)}</text>
+          <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">see plugin log</text>
+        `)}
+      </svg>
+    `));
+  } catch {}
+}
+
 function toDataUrl(svg) {
   const encoded = Buffer.from(svg).toString('base64');
   return `data:image/svg+xml;base64,${encoded}`;
@@ -279,8 +366,18 @@ function renderFontTestIcon(settings) {
 }
 
 function renderInstance(instance) {
+  if (instance.active === false) {
+    return;
+  }
   const config = configFromUuid(instance.actionUuid);
-  $UD.setBaseDataIcon(instance.context, config.render(instance));
+  let icon;
+  try {
+    icon = config.render(instance);
+  } catch (error) {
+    reportActionError(instance, 'render', error);
+    return;
+  }
+  $UD.setBaseDataIcon(instance.context, icon);
 }
 
 function ensureInstance(context, incomingSettings = {}) {
@@ -289,12 +386,18 @@ function ensureInstance(context, incomingSettings = {}) {
   const config = configFromUuid(actionUuid);
 
   if (!instance) {
+    let initialState = {};
+    try {
+      initialState = config.createState() || {};
+    } catch (error) {
+      log(`action error [${actionKeyFromUuid(actionUuid)}] phase=createState`, error?.stack || error);
+    }
     instance = {
       context,
       actionUuid,
       settings: normalizeSettings(actionUuid, incomingSettings),
       active: true,
-      ...config.createState(),
+      ...initialState,
     };
     INSTANCES.set(context, instance);
   } else if (incomingSettings && Object.keys(incomingSettings).length > 0) {
@@ -311,26 +414,34 @@ $UD.onConnected(() => {
   log('connected');
 });
 
-$UD.onAdd((message) => {
-  ensureInstance(message.context, message.param || {});
-});
+$UD.onError(safeHandler('wsError', (error) => {
+  log(`websocket error: ${error?.message || error}`);
+}));
 
-$UD.onParamFromApp((message) => {
-  ensureInstance(message.context, message.param || {});
-});
+$UD.onClose(safeHandler('wsClose', () => {
+  log('websocket closed, waiting for reconnect');
+}));
 
-$UD.onParamFromPlugin((message) => {
+$UD.onAdd(safeHandler('add', (message) => {
   ensureInstance(message.context, message.param || {});
-});
+}));
 
-$UD.onRun((message) => {
+$UD.onParamFromApp(safeHandler('paramFromApp', (message) => {
+  ensureInstance(message.context, message.param || {});
+}));
+
+$UD.onParamFromPlugin(safeHandler('paramFromPlugin', (message) => {
+  ensureInstance(message.context, message.param || {});
+}));
+
+$UD.onRun(safeHandler('run', (message) => {
   const instance = ensureInstance(message.context, message.param || {});
   const config = configFromUuid(instance.actionUuid);
-  config.onRun(instance);
+  guardAction(instance, 'onRun', () => config.onRun(instance));
   renderInstance(instance);
-});
+}));
 
-$UD.onSetActive((message) => {
+$UD.onSetActive(safeHandler('setActive', (message) => {
   const instance = INSTANCES.get(message.context);
   if (!instance) {
     return;
@@ -339,13 +450,22 @@ $UD.onSetActive((message) => {
   if (instance.active) {
     renderInstance(instance);
   }
-});
+}));
 
-$UD.onClear((message) => {
+$UD.onClear(safeHandler('clear', (message) => {
   if (!Array.isArray(message.param)) {
     return;
   }
   message.param.forEach((item) => {
+    disposeInstance(INSTANCES.get(item.context));
     INSTANCES.delete(item.context);
   });
+}));
+
+process.on('unhandledRejection', (reason) => {
+  log('unhandledRejection (isolated)', reason?.stack || reason);
+});
+
+process.on('uncaughtException', (error) => {
+  log('uncaughtException (isolated, process kept alive)', error?.stack || error);
 });

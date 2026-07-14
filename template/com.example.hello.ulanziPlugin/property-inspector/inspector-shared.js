@@ -4,6 +4,10 @@ function collectSettings(fields) {
     if (!element) {
       return result;
     }
+    if (element.type === 'checkbox') {
+      result[field] = element.checked ? 'true' : 'false';
+      return result;
+    }
     result[field] = field === 'color' ? element.value : element.value.trim();
     return result;
   }, {});
@@ -13,6 +17,10 @@ function applySettings(fields, settings = {}) {
   fields.forEach((field) => {
     const element = document.getElementById(field);
     if (!element || typeof settings[field] !== 'string') {
+      return;
+    }
+    if (element.type === 'checkbox') {
+      element.checked = settings[field] === 'true';
       return;
     }
     element.value = settings[field];
@@ -50,8 +58,10 @@ function bindThemeButtons(pushSettings) {
 }
 
 function initInspector(actionUuid, fields) {
+  let currentContext = '';
+
   function pushSettings() {
-    $UD.sendParamFromPlugin(collectSettings(fields));
+    $UD.sendParamFromPlugin(collectSettings(fields), currentContext);
   }
 
   $UD.connect(actionUuid);
@@ -72,15 +82,12 @@ function initInspector(actionUuid, fields) {
     bindThemeButtons(pushSettings);
   });
 
-  $UD.onAdd((message) => {
+  function apply(message) {
+    currentContext = message.context || currentContext;
     applySettings(fields, message.param || {});
-  });
+  }
 
-  $UD.onParamFromApp((message) => {
-    applySettings(fields, message.param || {});
-  });
-
-  $UD.onParamFromPlugin((message) => {
-    applySettings(fields, message.param || {});
-  });
+  $UD.onAdd(apply);
+  $UD.onParamFromApp(apply);
+  $UD.onParamFromPlugin(apply);
 }
