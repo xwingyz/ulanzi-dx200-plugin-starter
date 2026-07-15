@@ -177,7 +177,7 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 - 共享层指：`libs/`、`property-inspector/inspector-shared.js`、`plugin/app.js` 的框架段（THEMES、normalize、INSTANCES、事件分发、隔离层）。
 - 在业务插件里对共享层做出的**通用**修复或增强，验证通过后必须同步回流 `template/`，同一次任务内完成，不留"以后再补"。
 - 例行核对命令：`diff -rq template/com.example.hello.ulanziPlugin/libs plugins/<plugin>/libs`；`libs/node/utils.js` 里的 `__PLUGIN_NAME__` 是脚手架占位符，属预期差异，不算漂移。
-- 改共享层的任务，完成定义额外包含：模板与业务插件两份副本一致（占位符除外）、双份 `node --check` 通过。
+- 改共享层的任务，完成定义额外包含：模板与业务插件两份副本一致（占位符除外）、双份 `node --check` 通过、`npm test` 全绿。
 
 ## 10. 调试方法
 
@@ -234,10 +234,13 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 一个 action 开发完成，至少满足：
 
 - `manifest.json`、`plugin/app.js`、`property-inspector/`、`assets/icons/` 四层齐全。
+- `npm test` 全绿（仓库根目录跑，覆盖框架段、持久化与 inspector 生命周期）。
 - `sync` 或 `restart` 后能在宿主看到正确按钮。
 - Inspector 改值后，按钮能实时或预期地刷新。
 - 删除旧实例并重新拖放后，UUID 绑定正常。
 - 没有把业务逻辑塞进桥接库或脚本目录。
+
+改动触及共享层（框架段、`inspector-shared.js`、`libs/`）时，`npm test` 是**合并前的强制门槛**，不是可选项：这套测试正是用来兜住"单 action 改动打穿框架"的回归。测试失败时先查是否真的动了共享语义，不要为了让测试变绿而改测试预期。
 
 ## 13. 后续建议
 

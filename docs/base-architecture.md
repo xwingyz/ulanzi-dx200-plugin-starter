@@ -40,6 +40,7 @@
 - Inspector 协议统一收口在 `inspector-shared.js`，action 入口只调 `initInspector`。
 - 设置持久化由框架统一收口到 `data/action-settings.json`，action 不再各自维护文件读写分支。
 - 脚手架、同步、运行脚本与业务完全分离（`scripts/` 无业务逻辑）。
+- 框架段有回归测试兜底：`tests/` 覆盖框架事件、持久化与 inspector 生命周期，`npm test` 是改共享层的合并前门槛（见 [development-rules.md](development-rules.md) §12）。这是多 agent 并行下唯一不依赖人工宿主验证的客观信号。
 
 ## 4. 当前收敛状态
 

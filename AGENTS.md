@@ -58,6 +58,7 @@ Ulanzi DX200 / Ulanzi Deck 插件开发仓库的 agent 指令入口。
 
 ```bash
 npm install                                          # 安装模板最小依赖
+npm test                                             # 框架段/持久化/inspector 生命周期回归,改共享层必跑
 npm run new -- --id <id> --name "<Name>"             # 生成新插件
 npm run install-plugin -- --plugin <pluginDir>       # 同步到本机 Ulanzi 插件目录
 npm run dev:desktop -- --plugin <pluginDir> --mode <sync|rebind|restart>
@@ -80,6 +81,8 @@ npm run run-plugin -- --plugin <pluginDir>           # 启动 Node.js 主服务
 
 ## 完成定义
 
-四层齐全;`sync`/`restart` 后宿主显示正确按钮;Inspector 改值后按钮按预期刷新;删旧实例重拖后 UUID 绑定正常;业务逻辑没塞进桥接库或脚本目录。
+四层齐全;`npm test` 全绿;`sync`/`restart` 后宿主显示正确按钮;Inspector 改值后按钮按预期刷新;删旧实例重拖后 UUID 绑定正常;业务逻辑没塞进桥接库或脚本目录。
+
+改共享层时 `npm test` 是合并前强制门槛;测试红了先查共享语义是否真被改动,不要改测试预期让它变绿。
 
 详见 development-rules.md §4、§8、§12。
