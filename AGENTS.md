@@ -37,6 +37,10 @@ Ulanzi DX200 / Ulanzi Deck 插件开发仓库的 agent 指令入口。
 - 颜色/布局走 `THEMES` token(`mint`/`ember`/`mono`/`signal`),不在 action 内硬编码或新增私有主题。
 - Property Inspector 复用 `property-inspector/inspector-shared.js`,共享字段固定 `title`/`subtitle`/`color`/`theme`。
 
+四件套之外的可选生命周期钩子:`onReady(instance)` / `onSettingsChanged(instance, previousSettings)` / `onParamFromPlugin(instance, param)` / `persist`(默认持久化归一化后的完整设置,设 `false` 关闭,传筛选函数只保存指定字段)。
+
+设置持久化由框架层统一负责(插件目录下 `data/action-settings.json`,记录键 `actionid::key`):**不要在框架事件里新增 action key 分支,也不要给 action 写私有持久化**。宿主恢复事件以本地 persisted 为权威并回推 Inspector,Inspector 提交事件以 incoming 为权威。完整条款见 [docs/development-rules.md](docs/development-rules.md) §4。
+
 ## 进程内隔离(单进程硬约束)
 
 所有 action 共用一个 Node 进程(低系统占用),隔离由框架层保证,action 代码必须遵守:
