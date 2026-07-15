@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lexutility-sim-service",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "scripts/run-plugin.mjs",
+        "--plugin",
+        "com.ulanzi.lexutility.ulanziPlugin"
+      ],
+      "port": 39069
+    }
+  ]
+}
