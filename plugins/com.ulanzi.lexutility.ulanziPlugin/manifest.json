@@ -13,6 +13,22 @@
   "SupportedInMultiActions": false,
   "Actions": [
     {
+      "Name": "Network Speed",
+      "Tooltip": "Test download and upload speed with an Ookla Speedtest server.",
+      "Icon": "assets/icons/actionSpeedtest.svg",
+      "PropertyInspectorPath": "property-inspector/speedtest.html",
+      "UUID": "com.ulanzi.ulanzistudio.lexutility.speedtest",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionSpeedtest.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
       "Name": "Latency Monitor",
       "Tooltip": "Monitor one URL and show live latency.",
       "Icon": "assets/icons/actionLatency.svg",

@@ -8,6 +8,7 @@ const POMOWAVE_FIELDS = [
   'showFrame',
   'soundStyle',
   'soundEnabled',
+  'repeatManualCue',
   'autoStartBreaks',
   'autoStartFocus',
 ];

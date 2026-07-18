@@ -340,3 +340,42 @@ test('pomowave sound button commits the style then auditions it', () => {
   );
   assert.equal(harness.sends.at(-2).settings.soundStyle, 'bell');
 });
+
+test('pomowave inspector submits the manual-stage continuous cue setting', () => {
+  const harness = createHarness('pomowave.js');
+  harness.callbacks.connected[0]();
+  harness.elements.get('repeatManualCue').type = 'checkbox';
+  harness.elements.get('repeatManualCue').checked = true;
+
+  harness.form.dispatchEvent({ type: 'submit' });
+
+  assert.equal(harness.sends.at(-1).settings.repeatManualCue, 'true');
+});
+
+test('speedtest inspector persists scope, schedule, node mode and chart type', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+  harness.elements.get('scope').value = 'overseas';
+  harness.elements.get('intervalMin').value = '30';
+  harness.elements.get('selectionMode').value = 'fixed';
+  harness.elements.get('fixedServerId').value = '12345';
+  harness.elements.get('chartType').value = 'bar';
+
+  harness.form.dispatchEvent({ type: 'submit' });
+
+  const settings = harness.sends.at(-1).settings;
+  assert.equal(settings.scope, 'overseas');
+  assert.equal(settings.intervalMin, '30');
+  assert.equal(settings.selectionMode, 'fixed');
+  assert.equal(settings.fixedServerId, '12345');
+  assert.equal(settings.chartType, 'bar');
+});
+
+test('speedtest inspector sends an immediate-test control without rewriting settings', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+
+  harness.elements.get('testSelected').dispatchEvent({ type: 'click' });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.sends.at(-1).settings)), { testSelected: 'true' });
+});

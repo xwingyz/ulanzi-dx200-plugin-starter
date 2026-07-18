@@ -37,7 +37,9 @@
 │       ├── package.json
 │       ├── assets/icons/
 │       ├── libs/
-│       ├── plugin/app.js
+│       ├── plugin/
+│       │   ├── app.js             # 框架、宿主事件与统一注册
+│       │   └── actions/<key>.js   # 每个 action 的私有实现
 │       └── property-inspector/   # 每个 action 一组 <key>.html + <key>.js，共用 inspector-shared.js
 └── plugins/
     └── com.ulanzi.lexutility.ulanziPlugin/   # 示例插件（6 个 action）
@@ -76,7 +78,7 @@ plugins/com.ulanzi.lexutility.ulanziPlugin
 
 模板现在默认带 4 个示例 action，但结构不是固定 3 个，也不是固定 4 个。后续继续新增 action 时，主要补这几处：
 
-- `plugin/app.js` 里的 `ACTION_CONFIGS`
+- `plugin/actions/<key>.js` 的 action 定义，并在 `plugin/actions/index.js` 注册
 - `manifest.json` 里的 `Actions`
 - `property-inspector/` 对应页面和入口脚本
 - `assets/icons/` 对应图标
@@ -299,16 +301,17 @@ npm test
 - `Swatch`（key `swatch`）：点击后在内置颜色盘之间轮换
 - `Font Test`（key `fontprobe`）：固定显示 3 行 `测速128Kbps`，字号分别为 `28px / 32px / 36px`
 
-> 约定：action key 用于 UUID、`ACTION_CONFIGS`、`property-inspector/<key>.html` 与 `<key>.js`、`assets/icons/action<Key>.svg` 四层命名，必须保持一致（详见 [docs/development-rules.md](docs/development-rules.md) §4、§8）。`Font Test` 的展示名是 “Font Test”，但 key 是 `fontprobe`，对应文件即 `fontprobe.html` / `fontprobe.js`。
+> 约定：action key 用于 UUID、`plugin/actions/<key>.js` 的注册 key、`property-inspector/<key>.html` 与 `<key>.js`、`assets/icons/action<Key>.svg` 四层命名，必须保持一致（详见 [docs/development-rules.md](docs/development-rules.md) §4、§8）。`Font Test` 的展示名是 “Font Test”，但 key 是 `fontprobe`，对应文件即 `fontprobe.html` / `fontprobe.js`。
 
 仓库内的业务插件 `plugins/com.ulanzi.lexutility.ulanziPlugin` 不携带上述模板测试 action，只保留实际使用的工具：
 
 - `Latency`（key `latency`）：网络/接口延迟监测展示
 - `Pomowave`（key `pomowave`）：番茄钟节奏可视化
+- `Network Speed`（key `speedtest`）：使用用户单独安装并接受条款的 Ookla Speedtest CLI，按实例测试中国大陆或海外节点的上下行速度
 
 新增 action 时按相同四层命名扩展即可，不需要改脚手架。
 
-两个业务 action 都复用内置主题、安全框和共享 Inspector。
+三个业务 action 都复用内置主题、安全框和共享 Inspector。
 
 图标基线：
 
@@ -380,7 +383,7 @@ npm install
 
 这足够作为后续插件的开发基座：
 
-- 如果你要做状态类插件，改 `plugin/app.js` 的数据获取和渲染
+- 如果你要做状态类 action，把数据获取、状态机和渲染放进对应的 `plugin/actions/<key>.js`
 - 如果你要做控制类插件，改 `onRun` 逻辑
 - 如果你要做配置面板，新增 `property-inspector/<action>.html` 与 `<action>.js`，并复用 `property-inspector/inspector-shared.js` 里的连接/回填/提交逻辑
 

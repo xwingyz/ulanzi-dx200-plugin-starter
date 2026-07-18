@@ -1,5 +1,6 @@
 import UlanzideckApi from '../libs/node/ulanzideckApi.js';
 import { log } from '../libs/node/utils.js';
+import { createActionModules } from './actions/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -106,86 +107,35 @@ const THEMES = {
 };
 
 const THEME_NAMES = Object.keys(THEMES);
-const SWATCH_COLORS = ['#8b5cf6', '#14b8a6', '#f97316', '#ef4444', '#22c55e'];
-const FONT_TEST_LINES = [
-  { size: 28, y: 96 },
-  { size: 32, y: 144 },
-  { size: 36, y: 198 },
-];
-const FONT_TEST_TEXT = '测速128Kbps';
-const FONT_TEST_FAMILY = '"Arial Black", "Helvetica Neue", Arial, Helvetica, sans-serif';
-
-const ACTION_CONFIGS = {
-  counter: {
-    defaults: {
-      title: '__PLUGIN_NAME__',
-      subtitle: 'Counter',
-      theme: 'mint',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({ count: 0 }),
-    onRun: (instance) => {
-      instance.count += 1;
-    },
-    render: (instance) => renderCounterIcon(instance.settings, instance.count),
-  },
-  badge: {
-    defaults: {
-      title: '__PLUGIN_NAME__',
-      subtitle: 'Status',
-      theme: 'ember',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({ activeBadge: true }),
-    onRun: (instance) => {
-      instance.activeBadge = !instance.activeBadge;
-    },
-    render: (instance) => renderBadgeIcon(instance.settings, instance.activeBadge),
-  },
-  swatch: {
-    defaults: {
-      title: '__PLUGIN_NAME__',
-      subtitle: 'Palette',
-      theme: 'signal',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({ step: 0, currentColor: SWATCH_COLORS[0] }),
-    onRun: (instance) => {
-      instance.step = (instance.step + 1) % SWATCH_COLORS.length;
-      instance.currentColor = SWATCH_COLORS[instance.step];
-    },
-    render: (instance) => renderSwatchIcon(instance.settings, instance.step, instance.currentColor),
-  },
-  fontprobe: {
-    defaults: {
-      title: '__PLUGIN_NAME__',
-      subtitle: 'Font Test',
-      theme: 'mono',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({}),
-    onRun: () => {},
-    render: (instance) => renderFontTestIcon(instance.settings),
-  },
-};
-
-const ACTIONS = Object.fromEntries(
-  Object.keys(ACTION_CONFIGS).map((key) => [key, `${PLUGIN_UUID}.${key}`]),
-);
-const ACTION_KEY_BY_UUID = Object.fromEntries(
-  Object.entries(ACTIONS).map(([key, uuid]) => [uuid, key]),
-);
+let ACTION_CONFIGS;
+let ACTIONS;
+let ACTION_KEY_BY_UUID;
 
 const $UD = new UlanzideckApi();
 const INSTANCES = new Map();
+const EXCLUSIVE_TASKS = createExclusiveTaskQueue();
 const SETTINGS_STORAGE = createSettingsStorage();
 const PERSISTED_SETTINGS = SETTINGS_STORAGE.load();
 const STATE_STORAGE = createSettingsStorage({ storePath: STATE_STORE_PATH });
 const PERSISTED_STATE = STATE_STORAGE.load();
+
+const ACTION_MODULES = createActionModules({
+  escapeXml,
+  frameFor,
+  normalizeColor,
+  renderScreenFrame,
+  themeFor,
+  toDataUrl,
+});
+ACTION_CONFIGS = Object.freeze(Object.fromEntries(
+  ACTION_MODULES.map(({ key, config }) => [key, config]),
+));
+ACTIONS = Object.freeze(Object.fromEntries(
+  Object.keys(ACTION_CONFIGS).map((key) => [key, `${PLUGIN_UUID}.${key}`]),
+));
+ACTION_KEY_BY_UUID = Object.freeze(Object.fromEntries(
+  Object.entries(ACTIONS).map(([key, uuid]) => [uuid, key]),
+));
 
 // ---- 框架持久化层：所有 action 设置按 `${actionid}::${key}` 落盘并跨重启回读 ----
 
@@ -453,6 +403,125 @@ function clearInstanceTimeout(instance, slot) {
   }
 }
 
+// 通用独占任务队列：同一资源（例如 network-bandwidth）一次只允许一个实例运行。
+// 框架只负责排队、取消与 AbortSignal，不感知任何 action key 或业务结果结构。
+function createExclusiveTaskQueue() {
+  const resources = new Map();
+  const sameInstance = (left, right) => left === right || (
+    left?.context && right?.context && left.context === right.context
+  );
+  const stateFor = (resource) => {
+    if (!resources.has(resource)) {
+      resources.set(resource, { active: null, waiting: [] });
+    }
+    return resources.get(resource);
+  };
+  const callHook = (entry, name, ...args) => {
+    try {
+      entry.options?.[name]?.(...args);
+    } catch (error) {
+      log(`exclusive task hook failed [${name}]`, error?.stack || error);
+    }
+  };
+  const pump = (resource) => {
+    const state = stateFor(resource);
+    if (state.active || state.waiting.length === 0) {
+      return;
+    }
+    const entry = state.waiting.shift();
+    state.active = entry;
+    entry.started = true;
+    entry.controller = new AbortController();
+    callHook(entry, 'onStart');
+    Promise.resolve()
+      .then(() => entry.controller.signal.aborted
+        ? { cancelled: true }
+        : entry.task(entry.controller.signal))
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        if (state.active === entry) {
+          state.active = null;
+        }
+        callHook(entry, 'onFinish');
+        if (!state.active && state.waiting.length === 0) {
+          resources.delete(resource);
+        }
+        pump(resource);
+      });
+  };
+  const find = (instance, resource) => {
+    const state = resources.get(resource);
+    if (!state) {
+      return null;
+    }
+    if (state.active && sameInstance(state.active.instance, instance)) {
+      return state.active;
+    }
+    return state.waiting.find((entry) => sameInstance(entry.instance, instance)) || null;
+  };
+
+  return {
+    run(instance, resource, task, options = {}) {
+      const existing = find(instance, resource);
+      if (existing) {
+        return existing.promise;
+      }
+      const state = stateFor(resource);
+      const entry = { instance, resource, task, options, started: false, controller: null };
+      entry.promise = new Promise((resolve, reject) => {
+        entry.resolve = resolve;
+        entry.reject = reject;
+      });
+      state.waiting.push(entry);
+      if (state.active) {
+        callHook(entry, 'onQueued', state.waiting.length);
+      }
+      pump(resource);
+      return entry.promise;
+    },
+    cancel(instance, resource) {
+      const state = resources.get(resource);
+      if (!state) {
+        return false;
+      }
+      if (state.active && sameInstance(state.active.instance, instance)) {
+        callHook(state.active, 'onCancel', 'active');
+        state.active.controller?.abort();
+        return true;
+      }
+      const index = state.waiting.findIndex((entry) => sameInstance(entry.instance, instance));
+      if (index < 0) {
+        return false;
+      }
+      const [entry] = state.waiting.splice(index, 1);
+      callHook(entry, 'onCancel', 'waiting');
+      entry.resolve({ cancelled: true });
+      if (!state.active && state.waiting.length === 0) {
+        resources.delete(resource);
+      }
+      return true;
+    },
+    cancelAll(instance) {
+      let cancelled = false;
+      for (const resource of [...resources.keys()]) {
+        cancelled = this.cancel(instance, resource) || cancelled;
+      }
+      return cancelled;
+    },
+    position(instance, resource) {
+      const state = resources.get(resource);
+      if (!state) {
+        return -1;
+      }
+      if (state.active && sameInstance(state.active.instance, instance)) {
+        return 0;
+      }
+      const index = state.waiting.findIndex((entry) => sameInstance(entry.instance, instance));
+      return index < 0 ? -1 : index + 1;
+    },
+  };
+}
+
 function disposeInstance(instance) {
   if (!instance) {
     return;
@@ -463,6 +532,7 @@ function disposeInstance(instance) {
   if (config?.onDispose) {
     guardAction(instance, 'dispose', () => config.onDispose(instance));
   }
+  EXCLUSIVE_TASKS.cancelAll(instance);
   if (!instance.timers) {
     return;
   }
@@ -629,105 +699,6 @@ function renderScreenFrame(theme, accent, innerSvg, frame = frameFor()) {
     ${chrome}
     ${frameContent(frame, innerSvg)}
   `;
-}
-
-function renderCounterIcon(settings, count) {
-  const theme = themeFor(settings);
-  const accent = theme.accent;
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="54" y="54" width="148" height="20" rx="10" fill="${accent}" opacity="0.2"/>
-          <text x="128" y="78" text-anchor="middle" fill="${theme.text}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.title)}</text>
-          <text x="128" y="138" text-anchor="middle" fill="${accent}" font-size="72" font-weight="700" font-family="Arial, Helvetica, sans-serif">${count}</text>
-          <text x="128" y="174" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
-          <text x="128" y="204" text-anchor="middle" fill="${theme.low}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to increment</text>
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
-}
-
-function renderBadgeIcon(settings, active) {
-  const theme = themeFor(settings);
-  const accent = theme.accent;
-  const pillFill = active ? accent : theme.low;
-  const pillText = active ? theme.contrast : theme.text;
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="54" y="56" width="148" height="42" rx="21" fill="${pillFill}"/>
-          <text x="128" y="84" text-anchor="middle" fill="${pillText}" font-size="20" font-weight="700" font-family="Arial, Helvetica, sans-serif">${active ? 'LIVE' : 'PAUSED'}</text>
-          <text x="128" y="136" text-anchor="middle" fill="${theme.text}" font-size="30" font-weight="700" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.title)}</text>
-          <text x="128" y="170" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
-          <text x="128" y="202" text-anchor="middle" fill="${accent}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to toggle</text>
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
-}
-
-function renderSwatchIcon(settings, step, currentColor) {
-  const theme = themeFor(settings);
-  const accent = normalizeColor(currentColor, theme.accent);
-  const dots = SWATCH_COLORS.map((color, index) => {
-    const cx = 72 + index * 28;
-    const stroke = step % SWATCH_COLORS.length === index ? theme.text : theme.shell;
-    return `<circle cx="${cx}" cy="194" r="10" fill="${color}" stroke="${stroke}" stroke-width="3"/>`;
-  }).join('');
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="54" y="54" width="148" height="76" rx="20" fill="${accent}"/>
-          <text x="128" y="162" text-anchor="middle" fill="${theme.text}" font-size="28" font-weight="700" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.title)}</text>
-          <text x="128" y="188" text-anchor="middle" fill="${theme.muted}" font-size="17" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
-          <text x="128" y="218" text-anchor="middle" fill="${theme.text}" font-size="17" font-family="Arial, Helvetica, sans-serif">${escapeXml(accent.toUpperCase())}</text>
-          ${dots}
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
-}
-
-function renderFontTestIcon(settings) {
-  const theme = themeFor(settings);
-  const accent = theme.accent;
-  const samples = FONT_TEST_LINES.map(({ size, y }, index) => {
-    const fill = index === 2 ? accent : theme.text;
-    return `
-      <text x="128" y="${y}" text-anchor="middle" fill="${fill}" font-size="${size}" font-weight="800" font-family="${FONT_TEST_FAMILY}">${escapeXml(FONT_TEST_TEXT)}</text>
-    `;
-  }).join('');
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="50" y="50" width="156" height="156" rx="20" fill="none" stroke="${accent}" stroke-width="2"/>
-          <rect x="40" y="40" width="176" height="176" rx="24" fill="none" stroke="${theme.muted}" stroke-width="1.5" stroke-dasharray="6 6" opacity="0.8"/>
-          ${samples}
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
 }
 
 function onInstanceReady(instance) {
@@ -967,6 +938,7 @@ export const __testing = Object.freeze({
   clearInstanceTimeout,
   createSettingsStorage,
   createSettingsEventProcessor,
+  createExclusiveTaskQueue,
   delayInstance,
   dispatchActionParam,
   disposeInstance,

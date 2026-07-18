@@ -24,7 +24,9 @@
 ├── template/
 │   └── com.example.hello.ulanziPlugin/
 │       ├── manifest.json
-│       ├── plugin/app.js
+│       ├── plugin/
+│       │   ├── app.js
+│       │   └── actions/<key>.js
 │       ├── property-inspector/
 │       ├── assets/icons/
 │       └── libs/
@@ -43,14 +45,14 @@
 - 插件 UUID 固定为 `com.ulanzi.ulanzistudio.<pluginSegment>`。
 - action UUID 固定为 `com.ulanzi.ulanzistudio.<pluginSegment>.<actionKey>`。
 - `actionKey` 只用小写 ASCII 字母和数字，必要时用单词直连，不用中划线。
-- `manifest.json`、`plugin/app.js`、`property-inspector/*.js` 里的 action identity 必须完全一致。
+- `manifest.json`、`plugin/actions/<key>.js`、`property-inspector/*.js` 里的 action identity 必须完全一致。
 
 ## 4. Action 设计约束
 
 每个 action 必须同时具备这四层：
 
 1. `manifest.json` 里的 action 声明。
-2. `plugin/app.js` 里的 `ACTION_CONFIGS[actionKey]`。
+2. `plugin/actions/<key>.js` 导出的 action 定义，并由 `plugin/actions/index.js` 注册。
 3. `property-inspector/<action>.html` 和 `<action>.js`。
 4. `assets/icons/` 里的静态图标。
 
@@ -61,6 +63,8 @@
 - `onRun`
 - `render`
 
+每个 action 模块必须通过工厂函数返回 `{ key, config }`；测试辅助能力可额外放在 `testing`，由注册层统一汇总。`plugin/app.js` 只向工厂显式注入框架能力，不允许 action 直接 import `app.js`，也不允许 action 之间互相 import。
+
 规则：
 
 - `defaults` 只放可序列化设置，不放运行态临时值。
@@ -68,12 +72,14 @@
 - `onRun` 只处理按键行为，不直接写死 SVG 字符串。
 - `render` 必须是纯渲染函数输入，依赖 `settings + state` 产出图标。
 - 所有设置都先经 `normalizeSettings` 归一化，再进入 `render`。
+- 通用字段（`title` / `subtitle` / `theme` / `frameSize` / `showFrame`）由框架归一化；action 私有字段由该 action 的可选 `normalizeSettings(settings, defaults)` 返回，框架不得持有 action 私有枚举或字段分支。
 - 同一个 action 的运行态不跨 context 共享可变状态，统一放 `INSTANCES`。
 
 ### 可选生命周期钩子与框架边界
 
 action 可按需声明以下可选能力，未声明时框架直接跳过：
 
+- `normalizeSettings(settings, defaults)`：只归一化本 action 的私有字段，返回的新对象与框架通用字段合并。
 - `onReady(instance)`：实例完成本轮设置合并与渲染后的准备工作。
 - `onSettingsChanged(instance, previousSettings)`：响应归一化后的设置变化。
 - `onParamFromPlugin(instance, param)`：处理 Property Inspector 来件中的 action 私有语义。
@@ -90,7 +96,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 运行态落盘频率由 action 控制，但不得逐次探测就写盘；按语义边界（如聚合桶滚动）批量写，并在 `onDispose` 补一次 flush。
 - 两个存储共用 `createSettingsStorage` 工厂：传 `storePath` 指定文件，传 `legacyPath: null` 关闭 legacy 迁移（legacy 迁移只对设置存储有意义）。
 
-框架事件处理器只负责通用的实例管理、设置合并、持久化、回推和钩子分发，不得出现任何具体业务 action key，也不得为某个 action 新增专属分支。action 特有行为必须下放到 `ACTION_CONFIGS` 的钩子或 action 实现中。
+框架事件处理器只负责通用的实例管理、设置合并、持久化、回推和钩子分发，不得出现任何具体业务 action key，也不得为某个 action 新增专属分支。action 特有常量、I/O、状态机、渲染与字段归一化必须全部留在对应的 `plugin/actions/<key>.js`。
 
 ### 共享框架持久化
 
@@ -108,6 +114,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 为控制系统占用，一个插件的所有 action 共用一个 Node 进程；隔离由框架层在进程内保证：
 
 - action 代码不得直接调用 `setTimeout` / `setInterval`。统一使用框架的 `setInstanceTimeout(instance, slot, fn, ms)` / `clearInstanceTimeout(instance, slot)` / `hasInstanceTimeout(instance, slot)`，定时器句柄按实例登记，回调自动带异常兜底；实例被 `onClear` 移除时由框架 `disposeInstance` 统一回收，action 不需要（也不允许）自己维护裸句柄。
+- 多实例争用同一排他资源（例如带宽测速）时，统一使用框架 `createExclusiveTaskQueue()` 创建的共享队列；资源名由业务定义，框架只负责同资源串行、同实例去重、排队/运行取消和 `AbortSignal`。不得在 action 内另造模块级 busy 标志或私有队列，`disposeInstance` 必须取消该实例仍在排队或运行的任务。
 - 框架对所有进入 action 代码的入口统一兜底：`onRun`、`render`、`createState`、定时器回调、宿主事件处理均经 `guardAction` / `safeHandler` 包裹。单个 action 抛错只影响该实例：记日志、该键位显示 ERR 状态图（`renderErrorState`），进程与其他 action 不受影响。
 - 异步 `onRun` 必须 return Promise（箭头函数省略大括号，或显式 `return`），否则 rejection 逃逸出框架兜底。
 - 进程级 `unhandledRejection` / `uncaughtException` 只是最后一道网：记日志并维持进程存活，不作为常规错误处理途径；正常路径的错误必须在 `guardAction` 层被拦下。
@@ -156,7 +163,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 新 action 默认先复用已有主题，不先新增新套。
 - Property Inspector 的 theme 选项要和运行态 theme key 一一对应。
 - PI 主题色卡由共享层按 `inspector-shared.js` 的 `THEME_SWATCHES` 动态渲染，五段按角色依次为：背景（`canvas`）、填充（`panel`）、边框（`low`）、强调（`accent`）、文字（`text`）；页面只保留空的 `.theme-row` 容器，不再逐页写色卡 CSS。
-- 新增主题的完整动作：扩 `THEMES`（业务插件与 template 两份）→ 扩 `THEME_SWATCHES` → 若插件含 pomowave 再补 `POMODORO_PALETTES`。三者一致性由 `npm test` 校验锁定，漏改会直接红。
+- 新增主题的完整动作：扩 `THEMES`（业务插件与 template 两份）→ 扩 `THEME_SWATCHES`。Pomowave 的阶段色必须从当前 theme token 派生，不再维护独立静态色板；两份主题与 Inspector 色卡的一致性由 `npm test` 校验锁定，漏改会直接红。
 
 ## 7. Property Inspector 共享规范
 
@@ -183,15 +190,18 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 1. 先确认 action key、用途、默认标题和默认 theme。
 2. 在 `manifest.json` 增加 action 项，补 `PropertyInspectorPath`、`Icon`、`UUID`。
-3. 在 `plugin/app.js` 的 `ACTION_CONFIGS` 加条目。
-4. 在 `ACTIONS` / `ACTION_KEY_BY_UUID` 现有映射机制下复用自动注册，不再手写第二套映射。
+3. 新建 `plugin/actions/<action>.js`，通过工厂返回 `{ key, config }`；私有常量、状态机、I/O、渲染和私有字段归一化都放在这里。
+4. 只在 `plugin/actions/index.js` 导入并加入 `createActionModules(runtime)`；`ACTION_CONFIGS`、`ACTIONS`、`ACTION_KEY_BY_UUID` 由框架自动生成，不手写第二套映射。
 5. 新建 `property-inspector/<action>.html` 和 `<action>.js`，优先从最接近的现有 action 复制。
 6. 补 `assets/icons/action<Something>.svg`。
 7. 用 `npm run dev:desktop -- --plugin <plugin> --mode sync|rebind|restart` 验证。
 
 ## 9. 项目结构演进规则
 
-- 多个 action 共用的渲染基础能力优先提到 `plugin/` 内共享函数，不复制到多个 `renderXxx`。
+- `plugin/app.js` 只保留宿主启动、共享主题/渲染原语、实例管理、存储、隔离与事件分发；不得重新放入具体 action 的常量、状态机、网络/进程 I/O 或 SVG 业务实现。
+- action 模块只能使用工厂参数中显式注入的框架能力；不得直接访问 `$UD`、`INSTANCES`、持久化文件路径，也不得反向 import `app.js`。
+- action 之间禁止互相 import。多个 action 第二次需要同一纯能力时，再把它提升为 `plugin/app.js` 的共享原语并显式注入；领域逻辑不能借“共享”之名上移。
+- 单个 action 模块持续超过约 700 行且内部职责稳定时，可在 `plugin/actions/<key>/` 下继续拆 `state.js`、`render.js`、`service.js`，但只由该 action 的 `index.js` 对外暴露定义。
 - 多个 action 共用的 inspector UI 片段，第二次出现时就应抽成共享 HTML/CSS 方案；不要等到第五个 action 再清理。
 - 若单个插件开始承载明显不同的领域，优先拆成新插件，而不是无限堆 action。
 - `libs/node` 和 `libs/js` 视为宿主桥接层，除非是通用 API 封装，不把业务代码塞进去。
@@ -199,7 +209,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 ### 共享层回流（多 agent 协作强制项）
 
-- 共享层指：`libs/`、`property-inspector/inspector-shared.js`、`plugin/app.js` 的框架段（THEMES、normalize、INSTANCES、事件分发、隔离层）。
+- 共享层指：`libs/`、`property-inspector/inspector-shared.js`、`plugin/app.js` 的框架段（THEMES、通用 normalize、INSTANCES、事件分发、隔离层）以及 `plugin/actions/index.js` 的注册协议。
 - 在业务插件里对共享层做出的**通用**修复或增强，验证通过后必须同步回流 `template/`，同一次任务内完成，不留"以后再补"。
 - 例行核对命令：`diff -rq template/com.example.hello.ulanziPlugin/libs plugins/<plugin>/libs`；`libs/node/utils.js` 里的 `__PLUGIN_NAME__` 是脚手架占位符，属预期差异，不算漂移。
 - 浏览器桥接层（`libs/js/*`）与 `inspector-shared.js` 的双份一致性、以及 inspector 脚本对 `$UD` 方法的调用面，已由 `tests/inspector-bridge.test.js` 用真实桥接文件锁定；mock 掉 `$UD` 的测试看不见这类断裂，新增 `$UD` 用法时优先补真实桥接测试。
@@ -236,7 +246,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 ### E. 模式选择
 
 - 只改 Inspector 页面、静态资源：`sync`（PI 每次打开都重新加载，拷过去即生效）
-- 改 `plugin/app.js` 任何逻辑（含纯渲染函数）：`restart`。主服务是常驻 Node 进程，`sync` 只拷文件不重载进程，改了也不会生效——不要被"只是改了渲染"骗过
+- 改 `plugin/app.js` 或任何 `plugin/actions/*.js` 逻辑（含纯渲染函数）：`restart`。它们都由常驻 Node 主服务加载，`sync` 只拷文件不重载进程，改了也不会生效——不要被"只是改了渲染"骗过
 - 改 UUID、action identity、按钮绑定关系：`rebind`
 - 改 `manifest.json`、主入口、依赖、首次安装：`restart`
 
@@ -246,7 +256,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - **桌面工作流下宿主会自动拉起插件的 Node 主服务进程**（从 `~/Library/Application Support/.../Plugins/` 的同步副本）。不要再手动跑 `run-plugin` 连 3906——同一插件 UUID 双连接行为不可预期。`run-plugin` 只用于 Simulator 工作流（默认连 39069）。
 - 桥接层（`libs/node/ulanzideckApi.js`）具备连接自愈：连不上宿主时打印中文提示并每 5 秒自动重连，进程不退出。如果看到进程因连接失败直接崩溃，说明桥接层被改坏或没回流，先查桥接层，不要在业务层加 try/catch 绕过。
 - `restart` 模式会先清理宿主拉起的插件 Node 子进程再重启 Studio（孤儿进程会导致 Studio 重启失败或继续跑旧代码）。重启后验证顺序：主进程新 PID → `lsof -iTCP:3906` 有监听 → 插件子进程新 PID → 同步副本内容为新代码。
-- **实机行为与新代码不符（改了没生效、无声音、按钮无反应）时，先证伪"旧进程 / 未同步"，再怀疑逻辑**。诊断命令：`grep -c '<新加的符号>' "$HOME/Library/Application Support/Ulanzi/UlanziDeck/Plugins/<plugin>/plugin/app.js"` 与仓库源对比——部署副本计数为 0，说明新代码根本没进 Studio 加载的那份副本，是常驻旧进程在跑，`restart` 即可，不是逻辑 bug。别在源码里反复找错。改 `app.js` 后必须 `restart`（§10.E），Node 不热重载；纯 PI 页面改动 `sync` 后重开 PI 面板即可。
+- **实机行为与新代码不符（改了没生效、无声音、按钮无反应）时，先证伪"旧进程 / 未同步"，再怀疑逻辑**。诊断命令：对仓库与宿主副本中实际修改的 `plugin/app.js` 或 `plugin/actions/<key>.js` 执行 `grep -c '<新加的符号>' <file>` 并比较——部署副本计数为 0，说明新代码根本没进 Studio 加载的那份副本，是常驻旧进程在跑，`restart` 即可，不是逻辑 bug。别在源码里反复找错。改插件侧 JS 后必须 `restart`（§10.E），Node 不热重载；纯 PI 页面改动 `sync` 后重开 PI 面板即可。
 
 ## 11. 多智能体协作规范
 
@@ -261,7 +271,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 一个 action 开发完成，至少满足：
 
-- `manifest.json`、`plugin/app.js`、`property-inspector/`、`assets/icons/` 四层齐全。
+- `manifest.json`、`plugin/actions/<key>.js`、`property-inspector/`、`assets/icons/` 四层齐全，且已加入 `plugin/actions/index.js`。
 - `npm test` 全绿（仓库根目录跑，覆盖框架段、持久化与 inspector 生命周期）。
 - `sync` 或 `restart` 后能在宿主看到正确按钮。
 - Inspector 改值后，按钮能实时或预期地刷新。

@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 插件框架 | `template/` 母版 + `libs/`（宿主桥接）+ `inspector-shared.js` + `plugin/app.js` 里的框架段（`THEMES`、`normalizeSettings`、`INSTANCES`、事件分发、`renderScreenFrame`） | 框架不含业务，负责连接宿主、实例管理、设置归一化、渲染骨架 |
 | 运行实例 | 每个插件一个 Node.js 主服务进程（`plugin/app.js`，经 `run-plugin.mjs` 或宿主拉起） | 单进程内用 `INSTANCES: Map<context, instance>` 管理所有按键实例 |
-| 子功能集合 | `ACTION_CONFIGS` 注册表中的各 action（当前 2 个：latency / pomowave） | 每个 action 通过 `defaults + createState + onRun + render` 四件套接入框架 |
+| 子功能集合 | `plugin/actions/` 中注册的各 action（当前 3 个：latency / pomowave / speedtest） | 每个 action 通过工厂返回 `key + config`，由注册层生成 `ACTION_CONFIGS` |
 | 复制基座 | `scripts/create-plugin.mjs` 从 `template/` 生成新插件 | 一套框架可派生多个独立插件 |
 
 结论：**架构方向与需求一致，不需要推倒重来。** 仓库本身就是按“一个框架、一个运行实例、多个 action 子功能”设计的。
@@ -25,9 +25,9 @@
   ▼
 运行实例 plugin/app.js（一个插件一个 Node 进程）
   ├── 框架层：$UD 事件分发 → ensureInstance → normalizeSettings → 通用 persist → render → setBaseDataIcon
-  ├── 注册表：ACTION_CONFIGS / ACTIONS / ACTION_KEY_BY_UUID（自动注册，勿手写第二套映射）
+  ├── 注册层：actions/index.js → ACTION_CONFIGS / ACTIONS / ACTION_KEY_BY_UUID（自动生成）
   ├── 实例层：INSTANCES（运行态唯一容器，active 标记控制是否推送渲染）
-  └── 子功能层：各 action 的必选能力与可选生命周期钩子
+  └── 子功能层：actions/<key>.js（私有常量、I/O、状态机、渲染、归一化与生命周期钩子）
 配置层 property-inspector/<key>.{html,js} → inspector-shared.js（连接/回填/提交协议）
 静态层 manifest.json + assets/icons/（宿主未拉起运行态前的默认展示）
 ```
@@ -55,9 +55,9 @@
 
 框架事件处理只做通用的设置合并、持久化、回推、生命周期分发和实例清理，不含 `latency`、`pomowave` 等业务 action key。实例销毁仍由定时器登记表与 `disposeInstance` 统一处理，不增加逐 action 清理分支。持久化与事件优先级的长期约束见 [development-rules.md](development-rules.md) §4。
 
-### 4.2 单文件体量与拆分时机
+### 4.2 Action 模块隔离（已完成）
 
-`plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js` 已超过 1200 行。生命周期钩子化已经完成，下一步可按 `plugin/actions/<key>.js` 拆文件，让 `plugin/app.js` 只保留框架与注册表；此项仍待办。
+`latency`、`pomowave`、`speedtest` 已分别迁入 `plugin/actions/<key>.js`，模板的四个示例 action 也采用相同结构。`plugin/app.js` 只负责框架和装配，通过工厂参数显式注入允许使用的共享能力；action 不反向 import `app.js`、不互相 import，私有字段归一化也由各自 config 负责。
 
 ### 4.3 模板与插件的共享层漂移（已处理一轮）
 
@@ -67,7 +67,7 @@
 
 ### 4.4 领域边界
 
-`lexutility` 当前 2 个 action 仍属“工具集”同一领域。若后续出现明显不同领域（如设备控制、IM 通知），按 [development-rules.md](development-rules.md) §9 拆新插件（即新的运行实例），而不是无限堆 action——基座的复制单位是插件，不是 action。
+`lexutility` 当前 3 个 action 仍属“工具集”同一领域。若后续出现明显不同领域（如设备控制、IM 通知），按 [development-rules.md](development-rules.md) §9 拆新插件（即新的运行实例），而不是无限堆 action——基座的复制单位是插件，不是 action。
 
 ## 4.5 进程内隔离层（已落地）
 
@@ -86,5 +86,5 @@
 2. ~~框架隔离层：异常隔离 + 定时器隔离（guardAction / safeHandler / 定时器登记表）~~（完成）
 3. ~~桥接层连接自愈（5 秒重连、不裸崩）+ `dev-desktop.mjs` restart 孤儿进程修复~~（完成）
 4. ~~`ACTION_CONFIGS` 生命周期钩子化 + 通用设置持久化，消除框架事件中的业务 action key~~（完成）
-5. 按 `plugin/actions/<key>.js` 拆分子功能文件（待办）
+5. ~~按 `plugin/actions/<key>.js` 拆分子功能文件，并让模板使用同一注册协议~~（完成）
 6. action 超过 8 个时补 `docs/action-catalog.md`（沿用 development-rules.md §13 的既有建议）

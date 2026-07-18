@@ -289,9 +289,20 @@ for (const copy of COPIES) {
   });
 }
 
-test('every theme has a pomowave palette in the business plugin', () => {
-  for (const name of Object.keys(pluginTesting.THEMES)) {
-    assert.ok(pluginTesting.POMODORO_PALETTES[name], `POMODORO_PALETTES missing theme "${name}"`);
+test('pomowave phase colors derive from each framework theme', () => {
+  const phaseColors = { focus: new Set(), shortBreak: new Set(), longBreak: new Set(), done: new Set() };
+  for (const [name, theme] of Object.entries(pluginTesting.THEMES)) {
+    const palette = pluginTesting.pomodoroPalette({ theme: name });
+    assert.equal(palette.focus, theme.accent);
+    assert.equal(palette.longBreak, theme.muted);
+    assert.equal(palette.done, theme.text);
+    for (const phase of Object.keys(phaseColors)) {
+      assert.match(palette[phase], /^#[0-9a-f]{6}$/i);
+      phaseColors[phase].add(palette[phase]);
+    }
+  }
+  for (const [phase, colors] of Object.entries(phaseColors)) {
+    assert.equal(colors.size, Object.keys(pluginTesting.THEMES).length, `${phase} must change with every theme`);
   }
 });
 

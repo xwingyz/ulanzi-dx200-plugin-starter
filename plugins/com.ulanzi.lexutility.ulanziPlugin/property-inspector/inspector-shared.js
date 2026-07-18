@@ -115,8 +115,8 @@ function applySettings(fields, settings = {}) {
 
 // 主题色卡数据：五段按角色依次为 背景(canvas) / 填充(panel) / 边框(low) /
 // 强调(accent) / 文字(text)，必须与 plugin/app.js 的 THEMES 同步，
-// 一致性由 npm test 校验锁定。新增主题只改 THEMES 与这里
-// （pomowave 相关的再补 POMODORO_PALETTES），不再逐页维护色卡 CSS。
+// 一致性由 npm test 校验锁定。新增主题只改 THEMES 与这里；Pomowave
+// 的阶段色由 theme token 派生，不再另维护静态色板或逐页色卡 CSS。
 const THEME_SWATCHES = {
   mint: ['#07111f', '#0f172a', '#64748b', '#14b8a6', '#e2e8f0'],
   ember: ['#1a0d08', '#2a140c', '#9a3412', '#f97316', '#fff7ed'],

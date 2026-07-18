@@ -18,6 +18,7 @@ const frameworks = [
     name: 'lex utility',
     actionConfigs: lexActionConfigs,
     clearTimeout: lexTesting.clearInstanceTimeout,
+    createExclusiveTaskQueue: lexTesting.createExclusiveTaskQueue,
     createSettingsEventProcessor: lexTesting.createSettingsEventProcessor,
     delayInstance: lexTesting.delayInstance,
     dispatchActionParam: lexTesting.dispatchActionParam,
@@ -45,6 +46,7 @@ const frameworks = [
     name: 'template',
     actionConfigs: templateActionConfigs,
     clearTimeout: templateTesting.clearInstanceTimeout,
+    createExclusiveTaskQueue: templateTesting.createExclusiveTaskQueue,
     createSettingsEventProcessor: templateTesting.createSettingsEventProcessor,
     delayInstance: templateTesting.delayInstance,
     dispatchActionParam: templateTesting.dispatchActionParam,
@@ -70,10 +72,10 @@ test('Lex Utility only exposes production actions', () => {
   );
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-  assert.deepEqual(Object.keys(lexActionConfigs).sort(), ['latency', 'pomowave']);
+  assert.deepEqual(Object.keys(lexActionConfigs).sort(), ['latency', 'pomowave', 'speedtest']);
   assert.deepEqual(
     manifest.Actions.map((action) => action.UUID.split('.').at(-1)).sort(),
-    ['latency', 'pomowave'],
+    ['latency', 'pomowave', 'speedtest'],
   );
 });
 
@@ -129,6 +131,86 @@ for (const framework of frameworks) {
 
     assert.deepEqual(await Promise.all([first, second]), [false, false]);
     assert.equal(instance.timers.size, 0);
+  });
+
+  test(`${framework.name}: exclusive tasks sharing a resource run serially`, async () => {
+    const queue = framework.createExclusiveTaskQueue();
+    const first = { context: 'first' };
+    const second = { context: 'second' };
+    const events = [];
+    let releaseFirst;
+
+    const firstRun = queue.run(first, 'network-bandwidth', async () => {
+      events.push('first:start');
+      await new Promise((resolve) => { releaseFirst = resolve; });
+      events.push('first:end');
+      return 'first-result';
+    });
+    const secondRun = queue.run(second, 'network-bandwidth', async () => {
+      events.push('second:start');
+      return 'second-result';
+    });
+
+    await Promise.resolve();
+    assert.deepEqual(events, ['first:start']);
+    assert.equal(queue.position(second, 'network-bandwidth'), 1);
+
+    releaseFirst();
+    assert.equal(await firstRun, 'first-result');
+    assert.equal(await secondRun, 'second-result');
+    assert.deepEqual(events, ['first:start', 'first:end', 'second:start']);
+  });
+
+  test(`${framework.name}: exclusive queue deduplicates and can cancel a waiting instance`, async () => {
+    const queue = framework.createExclusiveTaskQueue();
+    const active = { context: 'active' };
+    const waiting = { context: 'waiting' };
+    let releaseActive;
+    let waitingStarts = 0;
+
+    const activeRun = queue.run(active, 'network-bandwidth', () =>
+      new Promise((resolve) => { releaseActive = resolve; }));
+    const waitingRun = queue.run(waiting, 'network-bandwidth', async () => {
+      waitingStarts += 1;
+    });
+    const duplicate = queue.run(waiting, 'network-bandwidth', async () => {
+      waitingStarts += 1;
+    });
+
+    assert.equal(waitingRun, duplicate);
+    assert.equal(queue.cancel(waiting, 'network-bandwidth'), true);
+    assert.deepEqual(await waitingRun, { cancelled: true });
+    assert.equal(waitingStarts, 0);
+
+    releaseActive('done');
+    assert.equal(await activeRun, 'done');
+  });
+
+  test(`${framework.name}: cancelling an active exclusive task aborts it and releases the next`, async () => {
+    const queue = framework.createExclusiveTaskQueue();
+    const active = { context: 'active' };
+    const next = { context: 'next' };
+    let aborted = false;
+    let nextStarted = false;
+
+    const activeRun = queue.run(active, 'network-bandwidth', (signal) =>
+      new Promise((resolve) => {
+        signal.addEventListener('abort', () => {
+          aborted = true;
+          resolve({ cancelled: true });
+        }, { once: true });
+      }));
+    const nextRun = queue.run(next, 'network-bandwidth', async () => {
+      nextStarted = true;
+      return 'next-result';
+    });
+
+    await Promise.resolve();
+    assert.equal(queue.cancel(active, 'network-bandwidth'), true);
+    assert.deepEqual(await activeRun, { cancelled: true });
+    assert.equal(await nextRun, 'next-result');
+    assert.equal(aborted, true);
+    assert.equal(nextStarted, true);
   });
 
   test(`${framework.name}: createState failures are guarded onto the instance`, () => {
@@ -894,12 +976,23 @@ test('lex utility: pomowave awaiting single tap confirms and starts the phase', 
     totalSec: 300,
     remainingSec: 300,
   });
+  let cueKilled = false;
+  instance.cueRepeating = true;
+  instance.cueProcess = {
+    killed: false,
+    kill() {
+      cueKilled = true;
+      this.killed = true;
+    },
+  };
 
   lexTesting.handlePomodoroTap(instance, { now });
   assert.equal(instance.awaiting, false);
   assert.equal(instance.running, true);
   assert.equal(instance.phase, 'shortBreak');
   assert.equal(instance.phaseEndAt, now + 300_000);
+  assert.equal(instance.cueRepeating, false);
+  assert.equal(cueKilled, true, 'starting the awaited phase stops the repeating cue');
 
   lexTesting.clearInstanceTimeout(instance, 'pomodoro');
   lexTesting.dropPersistedState(context);
@@ -967,6 +1060,14 @@ test('lex utility: pomowave cue plan honours preview override and enabled toggle
   assert.equal(plan({ soundEnabled: 'false', soundStyle: 'purr' }), null);
   // 开关开启时按 settings.soundStyle 发声。
   assert.equal(plan({ soundEnabled: 'true', soundStyle: 'purr' }), 'purr');
+});
+
+test('lex utility: pomowave repeats cues only while awaiting manual phase start', () => {
+  const shouldRepeat = lexTesting.shouldRepeatPomodoroCue;
+
+  assert.equal(shouldRepeat({ repeatManualCue: 'true' }, { autoStart: false }), true);
+  assert.equal(shouldRepeat({ repeatManualCue: 'false' }, { autoStart: false }), false);
+  assert.equal(shouldRepeat({ repeatManualCue: 'true' }, { autoStart: true }), false);
 });
 
 test('lex utility: cancelled latency feedback cannot commit stale result', async () => {
