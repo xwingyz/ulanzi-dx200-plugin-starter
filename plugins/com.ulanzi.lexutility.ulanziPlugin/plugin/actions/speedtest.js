@@ -661,7 +661,7 @@ function renderSpeedtestIcon(instance) {
   const history = instance.history || [];
   const dim = instance.phase === 'error' ? 0.48 : 1;
   return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+    <svg width="392" height="392" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
       ${background.outer}
       ${['queued', 'running', 'discovering'].includes(instance.phase) ? frameHighlight(frame, theme.accent, 0.9) : ''}
       ${frameContent(frame, `

@@ -555,7 +555,7 @@ function renderErrorState(instance) {
     const theme = themeFor(instance.settings || {});
     const actionKey = actionKeyFromUuid(instance.actionUuid);
     $UD.setBaseDataIcon(instance.context, toDataUrl(`
-      <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+      <svg width="392" height="392" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
         ${renderScreenFrame(theme, theme.accent, `
           <text x="128" y="116" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="700" font-family="Arial, Helvetica, sans-serif">ERR</text>
           <text x="128" y="150" text-anchor="middle" fill="${theme.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${escapeXml(actionKey)}</text>
