@@ -262,6 +262,10 @@ for (const copy of COPIES) {
         'data-off="max"',
         'id="showFrame"',
         'type="submit"',
+        // 主题必须走共享色卡：隐藏 theme 输入 + 空的 .theme-row 容器，
+        // 页面自建 select/色板会绕过 THEME_SWATCHES 的一致性校验。
+        'id="theme" name="theme" type="hidden"',
+        'class="theme-row"',
       ]) {
         assert.ok(source.includes(marker), `${file} is missing ${marker}`);
       }

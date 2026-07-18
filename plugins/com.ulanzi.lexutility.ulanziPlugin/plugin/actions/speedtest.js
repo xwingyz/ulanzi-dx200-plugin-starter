@@ -11,12 +11,9 @@ export function createSpeedtestAction(runtime) {
     exclusiveTasks,
     frameContent,
     frameFor,
-    frameHighlight,
     normalizeBooleanString,
     normalizeChoice,
-    normalizeServerId,
     normalizeTime,
-    persistSettings,
     readPersistedState,
     renderInstance,
     renderThemeBackdrop,
@@ -31,17 +28,21 @@ export function createSpeedtestAction(runtime) {
 const SPEEDTEST_STATE_VERSION = 1;
 const SPEEDTEST_HISTORY_MS = 7 * 24 * 60 * 60 * 1000;
 const SPEEDTEST_HISTORY_LIMIT = 672;
-const SPEEDTEST_CHART_POINTS = 24;
+// 图表窗口：只画最近 12 次。24 次在 170 宽里每根柱子不到 7 宽，
+// 挤成一片噪点；12 次既能看出趋势，单点也还分得清。
+const SPEEDTEST_CHART_POINTS = 12;
 const SPEEDTEST_RESOURCE = 'network-bandwidth';
 const SPEEDTEST_RETRY_MS = 60 * 1000;
 const SPEEDTEST_GEO_CACHE_MS = 30 * 24 * 60 * 60 * 1000;
 const SPEEDTEST_SERVER_CACHE_MS = 24 * 60 * 60 * 1000;
 const SPEEDTEST_DISCOVERY_RETRY_MS = 10 * 60 * 1000;
+// 相对时间标签的刷新节拍：一分钟一次，正好是标签的最小刻度。
+const SPEEDTEST_CLOCK_MS = 60 * 1000;
 const SPEEDTEST_DIRECTORY_URL = 'https://www.speedtest.net/api/js/servers';
 const SPEEDTEST_INTERVALS = ['15', '30', '60', 'manual'];
 const SPEEDTEST_TIMEOUTS = ['120', '180', '240', '300'];
-const SPEEDTEST_SCOPES = ['mainland', 'overseas'];
-const SPEEDTEST_SELECTION_MODES = ['fixed', 'dailyRandom'];
+// any 表示不筛选：候选池直接用全部节点，适合跨境网络或不确定该测哪边时。
+const SPEEDTEST_SCOPES = ['any', 'mainland', 'overseas'];
 const SPEEDTEST_CHART_TYPES = ['line', 'bar'];
 
 function parseSpeedtestResult(payload, now = Date.now()) {
@@ -171,12 +172,15 @@ function speedtestCandidates(settings, state) {
     configured = JSON.parse(sanitizeServerList(settings?.candidateServers || '[]'));
   } catch {}
   const source = configured.length ? configured : (Array.isArray(state?.serverCache) ? state.serverCache : []);
-  const mainland = settings?.scope !== 'overseas';
+  const scope = settings?.scope || 'mainland';
+  if (scope === 'any') {
+    return source.slice();
+  }
   return source.filter((server) => {
     const countryCode = String(server.countryCode || '').toUpperCase();
     const country = String(server.country || '').toLowerCase();
     const isMainland = countryCode === 'CN' || /^(china|中国|中国大陆|people'?s republic of china)$/i.test(country);
-    return mainland ? isMainland : !isMainland;
+    return scope === 'mainland' ? isMainland : !isMainland;
   });
 }
 
@@ -213,14 +217,17 @@ function mergeSpeedtestGeo(server, ip, geo = {}) {
   };
 }
 
-function chooseSpeedtestServer(settings, state, servers, now = Date.now(), random = Math.random) {
+// 选择模式由勾选数量决定，没有单独的开关：
+// 勾 1 个 = 固定该节点；勾 2 个及以上 = 在勾选的节点里每日随机；
+// 一个都不勾 = 在当前区域的全部节点里每日随机（pool 由 speedtestCandidates 兜底）。
+function chooseSpeedtestServer(state, servers, now = Date.now(), random = Math.random) {
   const pool = Array.isArray(servers) ? servers : [];
-  if (settings?.selectionMode === 'fixed') {
-    const id = normalizeServerId(settings?.fixedServerId);
-    return pool.find((server) => String(server.id) === id) || (id ? { id } : null);
-  }
   if (!pool.length) {
     return null;
+  }
+  // 只有一个候选时就是固定节点，不写 sticky 状态，换勾选后立刻生效。
+  if (pool.length === 1) {
+    return pool[0];
   }
   const dateKey = localDateKey(now);
   const sticky = state?.dailyServerDate === dateKey &&
@@ -482,6 +489,16 @@ function scheduleNextSpeedtest(instance, options = {}) {
   flushSpeedtestState(instance);
 }
 
+// 「12m ago」只有在会自己走的时候才是真的。两次测速之间默认隔 30 分钟，
+// 期间没有任何事件触发重绘，标签会一直停在测完那一刻的值。
+// 这里每分钟重绘一次；实例销毁时框架会统一清掉它的所有定时器。
+function scheduleSpeedtestClock(instance) {
+  setInstanceTimeout(instance, 'speedtestClock', () => {
+    renderInstance(instance);
+    scheduleSpeedtestClock(instance);
+  }, SPEEDTEST_CLOCK_MS);
+}
+
 function initializeSpeedtestInstance(instance) {
   if (instance.speedtestInitialized) {
     sendSpeedtestRuntime(instance);
@@ -494,6 +511,7 @@ function initializeSpeedtestInstance(instance) {
     instance.nextDueAt = now + 30_000 + Math.floor(Math.random() * 60_001);
   }
   if (intervalMs) scheduleNextSpeedtest(instance);
+  scheduleSpeedtestClock(instance);
   sendSpeedtestRuntime(instance);
   return ensureSpeedtestDiscovery(instance);
 }
@@ -509,7 +527,6 @@ function recordSpeedtestFailure(instance, errorCode) {
 function requestSpeedtest(instance, options = {}) {
   if (options.source !== 'retry') clearInstanceTimeout(instance, 'speedtestRetry');
   const selected = options.server || chooseSpeedtestServer(
-    instance.settings,
     instance,
     speedtestCandidates(instance.settings, instance),
   );
@@ -538,10 +555,10 @@ function requestSpeedtest(instance, options = {}) {
       renderInstance(instance);
       if (!['CLI', 'LICENSE'].includes(errorCode) && instance.retryCount < 1) {
         instance.retryCount += 1;
-        if (instance.settings.selectionMode === 'dailyRandom') {
-          instance.dailyServerId = '';
-          instance.dailyServerDate = '';
-        }
+        // 重试前丢掉当天的粘性节点，换一个再试；只勾了一个节点时
+        // 候选池本来就只有它，清空 sticky 不会改变选择。
+        instance.dailyServerId = '';
+        instance.dailyServerDate = '';
         setInstanceTimeout(instance, 'speedtestRetry', () => requestSpeedtest(instance, { source: 'retry' }), SPEEDTEST_RETRY_MS);
       } else {
         instance.retryCount = 0;
@@ -578,7 +595,11 @@ function requestSpeedtest(instance, options = {}) {
 }
 
 function handleSpeedtestParam(instance, param = {}) {
+  // 重新获取走 force：用户点了按钮就绕过退避，立刻重新拉一次。
   if (param.refreshServers === 'true') return ensureSpeedtestDiscovery(instance, { force: true });
+  // 面板发现节点清单为空时会发这个控制键。不 force，交给
+  // needsSpeedtestDiscovery + 退避判断，避免面板反复开合时打爆目录服务。
+  if (param.ensureServers === 'true') return ensureSpeedtestDiscovery(instance);
   if (param.testSelected === 'true') return requestSpeedtest(instance, { source: 'inspector' });
   if (param.clearSpeedtestHistory === 'true') {
     instance.history = [];
@@ -587,30 +608,6 @@ function handleSpeedtestParam(instance, param = {}) {
     flushSpeedtestState(instance);
     sendSpeedtestRuntime(instance);
     return;
-  }
-  if (param.verifyServerId) {
-    const id = normalizeServerId(param.verifyServerId);
-    if (id) {
-      return requestSpeedtest(instance, { source: 'verify', server: { id } }).then(async (result) => {
-        if (!result?.ok) return result;
-        const verified = await enrichSpeedtestServer(instance, result.server);
-        instance.serverCache = [
-          ...(instance.serverCache || []).filter((server) => String(server.id) !== id),
-          verified,
-        ];
-        let candidates = [];
-        try { candidates = JSON.parse(instance.settings.candidateServers || '[]'); } catch {}
-        instance.settings.candidateServers = sanitizeServerList([
-          ...candidates.filter((server) => String(server.id) !== id),
-          verified,
-        ]);
-        if (instance.settings.selectionMode === 'fixed') instance.settings.fixedServerId = id;
-        persistSettings(instance);
-        flushSpeedtestState(instance);
-        sendSpeedtestRuntime(instance);
-        return result;
-      });
-    }
   }
 }
 
@@ -630,25 +627,111 @@ function sendSpeedtestRuntime(instance) {
   sendParamFromPlugin({ ...instance.settings, speedtestRuntime: JSON.stringify(payload) }, instance.context);
 }
 
+const SPEEDTEST_CHART_LEFT = 44;
+const SPEEDTEST_CHART_WIDTH = 170;
+// 数值右对齐的基线，右边留给 Mbps 单位列（16 号 Arial 粗体约 39 宽，
+// 右对齐到 214 即占 175..214），中间空出一个字距免得数字和单位黏在一起。
+const SPEEDTEST_VALUE_RIGHT = 162;
+
+// 图表始终铺满整幅宽度：x 轴按实际样本数动态分配，采集 3 次和采集 12 次
+// 都占满 SPEEDTEST_CHART_WIDTH，只是疏密不同——固定 24 格会让早期只画左边一小截。
+// 数值叠在图表之上，所以这里画的是低透明度的背景层，不是前景读数。
 function speedChart(series, field, top, height, color, type) {
-  const points = series.slice(-SPEEDTEST_CHART_POINTS);
-  const max = Math.max(1, ...points.filter((entry) => entry.ok).map((entry) => Number(entry[field] || 0)));
-  const left = 44;
-  const width = 170;
-  const step = width / Math.max(1, SPEEDTEST_CHART_POINTS - 1);
-  if (type === 'bar') {
-    const barWidth = Math.max(2, width / SPEEDTEST_CHART_POINTS - 1.5);
-    return points.map((entry, index) => entry.ok
-      ? `<rect x="${(left + index * (width / SPEEDTEST_CHART_POINTS)).toFixed(1)}" y="${(top + height - Number(entry[field] || 0) / max * height).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, Number(entry[field] || 0) / max * height).toFixed(1)}" rx="1" fill="${color}" opacity="0.82"/>`
-      : '').join('');
+  const points = series.slice(-SPEEDTEST_CHART_POINTS).filter((entry) => entry.ok);
+  if (!points.length) {
+    return '';
   }
-  const coords = points.flatMap((entry, index) => entry.ok
-    ? [`${(left + index * step).toFixed(1)},${(top + height - Number(entry[field] || 0) / max * height).toFixed(1)}`]
-    : []);
-  return coords.length > 1 ? `<polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : '';
+  const max = Math.max(1, ...points.map((entry) => Number(entry[field] || 0)));
+  const left = SPEEDTEST_CHART_LEFT;
+  const width = SPEEDTEST_CHART_WIDTH;
+  const yFor = (entry) => top + height - Number(entry[field] || 0) / max * height;
+
+  if (type === 'bar') {
+    const slot = width / points.length;
+    const barWidth = Math.max(1.5, slot - Math.min(2, slot * 0.22));
+    // 样本少的时候柱子很宽，同样的透明度会糊掉压在上面的数字，按宽度回调。
+    const opacity = slot > 30 ? 0.2 : slot > 14 ? 0.26 : 0.34;
+    return points.map((entry, index) => {
+      const y = yFor(entry);
+      return `<rect x="${(left + index * slot).toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, top + height - y).toFixed(1)}" rx="1" fill="${color}" opacity="${opacity}"/>`;
+    }).join('');
+  }
+
+  // 只有一个样本时没有线段可画，落一个居中的点表示当前水位。
+  if (points.length === 1) {
+    return `<circle cx="${(left + width / 2).toFixed(1)}" cy="${yFor(points[0]).toFixed(1)}" r="3.5" fill="${color}" opacity="0.5"/>`;
+  }
+  const step = width / (points.length - 1);
+  const coords = points.map((entry, index) => `${(left + index * step).toFixed(1)},${yFor(entry).toFixed(1)}`);
+  // 折线下方补一层面积，背景感更强，也更容易看出变化趋势。
+  const area = `${left},${(top + height).toFixed(1)} ${coords.join(' ')} ${(left + width).toFixed(1)},${(top + height).toFixed(1)}`;
+  return `<polygon points="${area}" fill="${color}" opacity="0.16"/>`
+    + `<polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>`;
 }
 
-function renderSpeedtestIcon(instance) {
+// 方向箭头画成描边路径而不是 ↓↑ 文字：这两个字形通常来自 Arial 之外的
+// 回退字体，font-weight 对它们不一定生效（不同渲染器行为还不一样），
+// 想"加粗一点"就只能靠合成粗体碰运气。路径的 stroke-width 是确定的。
+function directionArrow(direction, baseline, theme) {
+  const cx = 51;
+  const bottom = baseline + 1;
+  const top = bottom - 19;
+  const head = direction === 'down'
+    ? `M ${cx - 6} ${bottom - 7} L ${cx} ${bottom} L ${cx + 6} ${bottom - 7}`
+    : `M ${cx - 6} ${top + 7} L ${cx} ${top} L ${cx + 6} ${top + 7}`;
+  return `<path d="M ${cx} ${top} V ${bottom} ${head}" fill="none" stroke="${theme.muted}" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+// 一条速度带：图表垫底，方向箭头和数值压在上面。数值占满整条带的高度，
+// 所以字号能比原来的上下分栏大不少（29 → 46）。
+// 数值右对齐到 SPEEDTEST_VALUE_RIGHT，单位固定占右边一列：两行的个位数
+// 对齐在同一条竖线上，扫一眼就能比大小，位数变化也不会让数字左右跳。
+// 千兆宽带会出现四位数，字号按位数收窄，避免顶到单位列。
+function speedBand(value, arrow, top, theme, chart) {
+  const baseline = top + 50;
+  const text = value === null ? '—' : String(value);
+  const fontSize = text.length >= 5 ? 32 : text.length === 4 ? 38 : 46;
+  return `
+    ${chart}
+    ${directionArrow(arrow, baseline, theme)}
+    <text x="${SPEEDTEST_VALUE_RIGHT}" y="${baseline}" text-anchor="end" fill="${theme.text}" font-size="${fontSize}" font-weight="800" font-family="Arial, sans-serif">${escapeXml(text)}</text>
+    <text x="214" y="${baseline}" text-anchor="end" fill="${theme.muted}" font-size="16" font-weight="700" font-family="Arial, sans-serif">Mbps</text>
+  `;
+}
+
+// 上次测速距今多久。这个键大部分时间显示的是「历史数据」，
+// 没有时间戳就无法判断屏幕上的数字是刚测的还是昨天的。
+// 用 `>` 前缀而不是 ` ago` 后缀：短 3 个字符，标题行才放得下 MAINLAND
+// 这样的全称；而且刻度是向下取整的，`>15m` 字面意思正好就是它的真实含义。
+// 天数封顶 99，免得长期没测出现 5 位数字把标题挤掉。
+function relativeAge(at, now) {
+  const minutes = Math.floor(Math.max(0, now - Number(at || 0)) / 60000);
+  if (minutes < 1) {
+    return 'now';
+  }
+  if (minutes < 60) {
+    return `>${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `>${hours}h` : `>${Math.min(99, Math.floor(hours / 24))}d`;
+}
+
+// 状态标签带底色块。SVG 里量不到文字宽度，按 Arial 粗体大写的经验值
+// （约 0.66em）加字距估算，两侧留 11 的内边距；估宽只用于画底块，
+// 文字仍按实际宽度渲染，估偏一点也只是底块松紧，不会截断。
+function statusPill(label, theme, isError) {
+  const fontSize = 20;
+  const spacing = 2;
+  const width = label.length * (fontSize * 0.66 + spacing) + 22;
+  // 错误用 latency action 同一支红（#ef4444）：theme.low 在多数主题里
+  // 和 accent 是同色系，错误块和"正在测速"块看起来会是同一个东西。
+  return `
+    <rect x="44" y="38" width="${width.toFixed(1)}" height="30" rx="9" fill="${isError ? '#ef4444' : theme.accent}"/>
+    <text x="55" y="60" fill="${isError ? '#ffffff' : theme.canvas}" font-size="${fontSize}" font-weight="800" letter-spacing="${spacing}" font-family="Arial, sans-serif">${escapeXml(label)}</text>
+  `;
+}
+
+function renderSpeedtestIcon(instance, now = Date.now()) {
   const theme = themeFor(instance.settings);
   const frame = frameFor(instance.settings);
   const background = renderThemeBackdrop(theme, theme.accent, frame);
@@ -657,30 +740,28 @@ function renderSpeedtestIcon(instance) {
     : instance.phase === 'running' ? 'TESTING'
       : instance.phase === 'discovering' ? 'NODES'
         : instance.phase === 'error' ? (instance.errorCode || 'ERROR') : '';
-  const scope = instance.settings.scope === 'overseas' ? 'OVERSEAS' : 'MAINLAND';
+  const scope = { any: 'GLOBAL', overseas: 'OVERSEAS' }[instance.settings.scope] || 'MAINLAND';
   const history = instance.history || [];
-  const dim = instance.phase === 'error' ? 0.48 : 1;
+  // 标题行两个槽位：左边是区域或当前状态，右边是上次测速距今多久。
+  // 状态直接顶掉区域而不是挤在右边——TESTING / QUEUE 1 这种长度会和
+  // MAINLAND 撞在一起，而正在测速时状态本来就比区域更该被看到；
+  // 出状态时右边的时间也一起让位，否则色块会盖住它。
+  // 也不用居中浮层：浮层正好压住下行速度，那是这个键存在的意义。
+  const dim = phaseLabel ? 0.5 : 1;
+  const age = last && !phaseLabel ? relativeAge(instance.lastCompletedAt || last.at, now) : '';
+  const headline = phaseLabel ? statusPill(phaseLabel, theme, instance.phase === 'error') : `
+    <text x="44" y="60" fill="${theme.muted}" font-size="18" font-weight="800" letter-spacing="1.5" font-family="Arial, sans-serif">${scope}</text>
+    ${age ? `<text x="214" y="60" text-anchor="end" fill="${theme.muted}" font-size="16" font-weight="700" font-family="Arial, sans-serif">${escapeXml(age)}</text>` : ''}
+  `;
   return toDataUrl(`
     <svg width="392" height="392" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
       ${background.outer}
-      ${['queued', 'running', 'discovering'].includes(instance.phase) ? frameHighlight(frame, theme.accent, 0.9) : ''}
       ${frameContent(frame, `
-        <text x="128" y="55" text-anchor="middle" fill="${theme.muted}" font-size="13" font-weight="800" letter-spacing="2" font-family="Arial, sans-serif">${scope}</text>
+        ${headline}
         <g opacity="${dim}">
-          <text x="54" y="91" fill="${theme.muted}" font-size="16" font-weight="700" font-family="Arial, sans-serif">↓</text>
-          <text x="72" y="91" fill="${theme.text}" font-size="29" font-weight="800" font-family="Arial, sans-serif">${last ? escapeXml(Math.round(last.downloadMbps)) : '—'}</text>
-          <text x="202" y="89" text-anchor="end" fill="${theme.low}" font-size="12" font-family="Arial, sans-serif">Mbps</text>
-          <text x="54" y="125" fill="${theme.muted}" font-size="16" font-weight="700" font-family="Arial, sans-serif">↑</text>
-          <text x="72" y="125" fill="${theme.text}" font-size="29" font-weight="800" font-family="Arial, sans-serif">${last ? escapeXml(Math.round(last.uploadMbps)) : '—'}</text>
-          <text x="202" y="123" text-anchor="end" fill="${theme.low}" font-size="12" font-family="Arial, sans-serif">Mbps</text>
-          <line x1="44" y1="154" x2="214" y2="154" stroke="${theme.low}" opacity="0.35"/>
-          ${speedChart(history, 'downloadMbps', 142, 25, theme.accent, instance.settings.chartType)}
-          ${speedChart(history, 'uploadMbps', 177, 25, theme.muted, instance.settings.chartType)}
-          <text x="44" y="176" fill="${theme.accent}" font-size="10" font-family="Arial, sans-serif">DL</text>
-          <text x="44" y="211" fill="${theme.muted}" font-size="10" font-family="Arial, sans-serif">UL</text>
+          ${speedBand(last ? Math.round(last.downloadMbps) : null, 'down', 70, theme, speedChart(history, 'downloadMbps', 70, 68, theme.accent, instance.settings.chartType))}
+          ${speedBand(last ? Math.round(last.uploadMbps) : null, 'up', 146, theme, speedChart(history, 'uploadMbps', 146, 68, theme.muted, instance.settings.chartType))}
         </g>
-        ${phaseLabel ? `<rect x="62" y="104" width="132" height="48" rx="15" fill="${theme.shell}" stroke="${theme.accent}" stroke-width="3"/><text x="128" y="135" text-anchor="middle" fill="${theme.text}" font-size="18" font-weight="800" font-family="Arial, sans-serif">${escapeXml(phaseLabel)}</text>` : ''}
-        ${!phaseLabel && last?.pingMs && history.length < 24 ? `<text x="202" y="211" text-anchor="end" fill="${theme.low}" font-size="10" font-family="Arial, sans-serif">${Math.round(last.pingMs)}ms</text>` : ''}
       `)}
     </svg>
   `);
@@ -695,13 +776,11 @@ const config = {
       frameSize: 'optimal',
       showFrame: 'true',
       scope: 'mainland',
-      intervalMin: '15',
+      intervalMin: '30',
       activeAllDay: 'false',
       activeStart: '08:00',
       activeEnd: '23:00',
       timeoutSec: '180',
-      selectionMode: 'dailyRandom',
-      fixedServerId: '',
       candidateServers: '[]',
       chartType: 'line',
       geoIpEnabled: 'true',
@@ -714,8 +793,6 @@ const config = {
       activeStart: normalizeTime(settings.activeStart, defaults.activeStart),
       activeEnd: normalizeTime(settings.activeEnd, defaults.activeEnd),
       timeoutSec: normalizeChoice(String(settings.timeoutSec ?? defaults.timeoutSec), defaults.timeoutSec, SPEEDTEST_TIMEOUTS),
-      selectionMode: normalizeChoice(settings.selectionMode, defaults.selectionMode, SPEEDTEST_SELECTION_MODES),
-      fixedServerId: normalizeServerId(settings.fixedServerId),
       candidateServers: sanitizeServerList(settings.candidateServers ?? defaults.candidateServers),
       chartType: normalizeChoice(settings.chartType, defaults.chartType, SPEEDTEST_CHART_TYPES),
       geoIpEnabled: normalizeBooleanString(settings.geoIpEnabled, defaults.geoIpEnabled),
@@ -738,8 +815,6 @@ const config = {
     onReady: (instance) => initializeSpeedtestInstance(instance),
     onSettingsChanged: (instance, previousSettings) => {
       const targetChanged = previousSettings.scope !== instance.settings.scope ||
-        previousSettings.selectionMode !== instance.settings.selectionMode ||
-        previousSettings.fixedServerId !== instance.settings.fixedServerId ||
         previousSettings.candidateServers !== instance.settings.candidateServers;
       if (targetChanged) {
         instance.dailyServerId = '';
@@ -767,7 +842,10 @@ const config = {
       mergeSpeedtestGeo,
       needsSpeedtestDiscovery,
       parseSpeedtestResult,
+      renderSpeedtestIcon,
       serializeSpeedtestState,
+      speedChart,
+      speedtestCandidates,
     },
   };
 }

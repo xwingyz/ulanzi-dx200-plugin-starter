@@ -5,6 +5,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { __testing as lexTesting } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
+import { Events as lexSdkEvents } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/libs/node/constants.js';
+import LexUlanzideckApi from '../plugins/com.ulanzi.lexutility.ulanziPlugin/libs/node/ulanzideckApi.js';
 import { __testing as templateTesting } from '../template/com.example.hello.ulanziPlugin/plugin/app.js';
 
 const lexActionConfigs = lexTesting.ACTION_CONFIGS;
@@ -17,13 +19,18 @@ const frameworks = [
   {
     name: 'lex utility',
     actionConfigs: lexActionConfigs,
+    beginPress: lexTesting.beginPress,
     clearTimeout: lexTesting.clearInstanceTimeout,
     createExclusiveTaskQueue: lexTesting.createExclusiveTaskQueue,
     createSettingsEventProcessor: lexTesting.createSettingsEventProcessor,
     delayInstance: lexTesting.delayInstance,
     dispatchActionParam: lexTesting.dispatchActionParam,
     disposeInstance: lexTesting.disposeInstance,
+    dispatchRunFallback: lexTesting.dispatchRunFallback,
+    endPress: lexTesting.endPress,
     frameFor: lexTesting.frameFor,
+    handleRunEvent: lexTesting.handleRunEvent,
+    longPressFeedbackIcon: lexTesting.longPressFeedbackIcon,
     initializeInstanceState: lexTesting.initializeInstanceState,
     resolveSettings: lexTesting.resolveSettingsForEvent,
     storageFactory: lexTesting.createSettingsStorage,
@@ -45,13 +52,18 @@ const frameworks = [
   {
     name: 'template',
     actionConfigs: templateActionConfigs,
+    beginPress: templateTesting.beginPress,
     clearTimeout: templateTesting.clearInstanceTimeout,
     createExclusiveTaskQueue: templateTesting.createExclusiveTaskQueue,
     createSettingsEventProcessor: templateTesting.createSettingsEventProcessor,
     delayInstance: templateTesting.delayInstance,
     dispatchActionParam: templateTesting.dispatchActionParam,
     disposeInstance: templateTesting.disposeInstance,
+    dispatchRunFallback: templateTesting.dispatchRunFallback,
+    endPress: templateTesting.endPress,
     frameFor: templateTesting.frameFor,
+    handleRunEvent: templateTesting.handleRunEvent,
+    longPressFeedbackIcon: templateTesting.longPressFeedbackIcon,
     initializeInstanceState: templateTesting.initializeInstanceState,
     resolveSettings: templateTesting.resolveSettingsForEvent,
     storageFactory: templateTesting.createSettingsStorage,
@@ -64,6 +76,13 @@ const frameworks = [
     }),
   },
 ];
+
+test('shared bridge exposes the latest SDK keydown and keyup events', () => {
+  assert.equal(lexSdkEvents.KEYDOWN, 'keydown');
+  assert.equal(lexSdkEvents.KEYUP, 'keyup');
+  assert.equal(typeof LexUlanzideckApi.prototype.onKeyDown, 'function');
+  assert.equal(typeof LexUlanzideckApi.prototype.onKeyUp, 'function');
+});
 
 test('Lex Utility only exposes production actions', () => {
   const manifestPath = path.resolve(
@@ -131,6 +150,137 @@ for (const framework of frameworks) {
 
     assert.deepEqual(await Promise.all([first, second]), [false, false]);
     assert.equal(instance.timers.size, 0);
+  });
+
+  test(`${framework.name}: keydown leaves visual feedback to the host and keyup renders the result`, () => {
+    const renders = [];
+    let shortPresses = 0;
+    let scheduled;
+    let cancelled = false;
+    const instance = { context: 'press', active: true };
+    const config = { onRun: () => { shortPresses += 1; } };
+    const runtime = {
+      render: (current) => { renders.push(current.pressed === true); },
+      setTimeout: (_instance, _slot, fn, ms) => { scheduled = { fn, ms }; },
+      clearTimeout: () => { cancelled = true; },
+    };
+
+    framework.beginPress(instance, config, runtime);
+    assert.equal(instance.usesKeyEvents, true);
+    assert.deepEqual(renders, [], 'keydown must not submit a plugin-generated press frame');
+    assert.equal(scheduled, undefined, 'actions without onLongPress do not allocate a timer');
+
+    framework.endPress(instance, config, runtime);
+    assert.equal(cancelled, true);
+    assert.equal(shortPresses, 1, 'short action fires on release, not keydown');
+    assert.deepEqual(renders, [false]);
+  });
+
+  test(`${framework.name}: long-press feedback inverts color without changing geometry`, () => {
+    const sourceSvg = '<svg width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" fill="#123456"/></svg>';
+    const source = `data:image/svg+xml;base64,${Buffer.from(sourceSvg).toString('base64')}`;
+    assert.equal(framework.longPressFeedbackIcon(source, false), source);
+
+    const feedback = Buffer.from(
+      framework.longPressFeedbackIcon(source, true).slice('data:image/svg+xml;base64,'.length),
+      'base64',
+    ).toString('utf8');
+    assert.ok(feedback.includes('viewBox="0 0 256 256"'));
+    assert.ok(feedback.includes('fill="#edcba9"'), 'RGB literals are inverted directly for host compatibility');
+    assert.equal(feedback.includes('<filter'), false, 'feedback cannot depend on unsupported SVG filters');
+    assert.equal(feedback.includes('transform="'), false, 'feedback must not introduce geometric scaling');
+  });
+
+  test(`${framework.name}: a 600ms hold qualifies at the threshold and fires long press on keyup`, () => {
+    let shortPresses = 0;
+    let longPresses = 0;
+    let renders = 0;
+    let scheduled;
+    const instance = { context: 'hold', active: true };
+    const config = {
+      onRun: () => { shortPresses += 1; },
+      onLongPress: () => { longPresses += 1; },
+    };
+    const runtime = {
+      render: () => { renders += 1; },
+      setTimeout: (_instance, slot, fn, ms) => { scheduled = { slot, fn, ms }; },
+      clearTimeout: () => {},
+    };
+
+    framework.beginPress(instance, config, runtime);
+    assert.equal(scheduled.ms, 600);
+    assert.equal(renders, 0, 'keydown delegates the pressed frame to the host');
+    scheduled.fn();
+    assert.equal(longPresses, 0, 'the threshold only qualifies the hold');
+    assert.equal(renders, 1, 'long-press activation submits one color-only feedback frame');
+    assert.equal(instance.longPressQualified, true);
+    assert.equal(instance.longPressFeedback, true);
+    framework.endPress(instance, config, runtime);
+    assert.equal(longPresses, 1);
+    assert.equal(shortPresses, 0);
+    assert.equal(renders, 2, 'keyup submits the latest normal-color business state once');
+    assert.equal(instance.longPressFeedback, false);
+
+    framework.dispatchRunFallback(instance, config, runtime.render, instance.lastKeyEventAt);
+    assert.equal(shortPresses, 0, 'legacy run is ignored right after real key events');
+  });
+
+  test(`${framework.name}: run following keydown is ignored before runtime can render again`, () => {
+    const context = 'keydown-then-run';
+    const now = Date.now();
+    const instance = { context, usesKeyEvents: true, pressed: true, lastKeyEventAt: now };
+    let runtimeCalls = 0;
+    const result = framework.handleRunEvent(context, {
+      instances: new Map([[context, instance]]),
+      now: now + 50,
+      eventProcessor: {
+        runtime: () => {
+          runtimeCalls += 1;
+          throw new Error('runtime must not run for a duplicate host event');
+        },
+      },
+    });
+
+    assert.equal(result, instance);
+    assert.equal(runtimeCalls, 0, 'duplicate run cannot submit a second pressed frame');
+    assert.equal(instance.pressed, true);
+  });
+
+  // 拖拽移动按键 = keyDown 之后那次 keyUp 被拖拽消费掉，实例永久停在 pressed=true。
+  // 曾经 usesKeyEvents 是永久锁存，此后宿主补发的 run 被无条件吞掉，这个键就再也按不动了。
+  // 抑制必须是时间窗：超窗即认为按键事件通路已断，回落到 run，让按键自愈。
+  test(`${framework.name}: run recovers the key after a keyup was lost to a drag`, () => {
+    const context = 'drag-lost-keyup';
+    const now = Date.now();
+    const instance = { context, usesKeyEvents: true, pressed: true, lastKeyEventAt: now };
+    let shortPresses = 0;
+    const config = { onRun: () => { shortPresses += 1; } };
+
+    framework.dispatchRunFallback(instance, config, () => {}, now + 100);
+    assert.equal(shortPresses, 0, 'the run right after a key event is still a duplicate');
+
+    framework.dispatchRunFallback(instance, config, () => {}, now + 5000);
+    assert.equal(shortPresses, 1, 'a later run must not stay swallowed forever');
+  });
+
+  // 拖拽期间长按判定已达标却没等到 keyUp；下一次全新按压必须重新计时，
+  // 否则第一次短按会被误判成长按。
+  test(`${framework.name}: a fresh keydown clears the stale long-press qualification`, () => {
+    const instance = { context: 'stale-long-press', pressed: true, longPressQualified: true };
+    let shortPresses = 0;
+    let longPresses = 0;
+    const config = {
+      onRun: () => { shortPresses += 1; },
+      onLongPress: () => { longPresses += 1; },
+    };
+    const runtime = { render: () => {}, setTimeout: () => {}, clearTimeout: () => {} };
+
+    framework.beginPress(instance, config, runtime);
+    assert.equal(instance.longPressQualified, false, 'a new press starts a clean hold');
+
+    framework.endPress(instance, config, runtime);
+    assert.equal(shortPresses, 1, 'the press dispatches as a short press');
+    assert.equal(longPresses, 0);
   });
 
   test(`${framework.name}: exclusive tasks sharing a resource run serially`, async () => {
@@ -921,7 +1071,7 @@ test('lex utility: pomowave key art drops the title and shows a tomato only off 
   assert.ok(!done.includes('translate(128 78)'), 'done must not draw the tomato');
 });
 
-test('lex utility: pomowave single tap toggles, double tap restarts the focus', () => {
+test('lex utility: pomowave short press toggles and long press restarts the focus', () => {
   const t0 = Date.now();
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___tap___t1';
   const instance = createPomodoroInstance(context, {
@@ -933,14 +1083,12 @@ test('lex utility: pomowave single tap toggles, double tap restarts the focus', 
     phaseEndAt: t0 + 300_000,
   });
 
-  // 单击（与上次点按间隔够大）：暂停。
-  lexTesting.handlePomodoroTap(instance, { now: t0 });
+  lexTesting.handlePomodoroShortPress(instance, { now: t0 });
   assert.equal(instance.running, false);
   assert.equal(instance.remainingSec, 300);
 
-  // 200ms 内第二击构成双击：重启当前专注为满时长并继续运行，轮次数保留。
-  const t1 = t0 + 200;
-  lexTesting.handlePomodoroTap(instance, { now: t1 });
+  const t1 = t0 + 600;
+  lexTesting.handlePomodoroLongPress(instance, { now: t1 });
   assert.equal(instance.phase, 'focus');
   assert.equal(instance.running, true);
   assert.equal(instance.remainingSec, 1500);
@@ -948,8 +1096,7 @@ test('lex utility: pomowave single tap toggles, double tap restarts the focus', 
   assert.equal(instance.completedFocusRounds, 2);
   assert.equal(instance.phaseEndAt, t1 + 1500 * 1000);
 
-  // 双击后 lastTapAt 归零，下一次单击不会被误判为三击。
-  lexTesting.handlePomodoroTap(instance, { now: t1 + 10 });
+  lexTesting.handlePomodoroShortPress(instance, { now: t1 + 10 });
   assert.equal(instance.running, false);
 
   lexTesting.clearInstanceTimeout(instance, 'pomodoro');
@@ -1006,7 +1153,7 @@ test('lex utility: pomowave short break end awaits the next focus when auto-focu
   lexTesting.dropPersistedState(context);
 });
 
-test('lex utility: pomowave awaiting single tap confirms and starts the phase', () => {
+test('lex utility: pomowave awaiting short press confirms and starts the phase', () => {
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t3';
   const now = Date.now();
   const instance = manualStartInstance(context, {
@@ -1026,7 +1173,7 @@ test('lex utility: pomowave awaiting single tap confirms and starts the phase', 
     },
   };
 
-  lexTesting.handlePomodoroTap(instance, { now });
+  lexTesting.handlePomodoroShortPress(instance, { now });
   assert.equal(instance.awaiting, false);
   assert.equal(instance.running, true);
   assert.equal(instance.phase, 'shortBreak');
@@ -1038,7 +1185,7 @@ test('lex utility: pomowave awaiting single tap confirms and starts the phase', 
   lexTesting.dropPersistedState(context);
 });
 
-test('lex utility: pomowave double tap while awaiting a break skips to a fresh focus', () => {
+test('lex utility: pomowave long press while awaiting a break skips to a fresh focus', () => {
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t4';
   const t0 = Date.now();
   const instance = manualStartInstance(context, {
@@ -1050,9 +1197,7 @@ test('lex utility: pomowave double tap while awaiting a break skips to a fresh f
     completedFocusRounds: 2,
   });
 
-  // 第一击确认进入休息，紧接的第二击（<400ms）把它重启为一段全新专注。
-  lexTesting.handlePomodoroTap(instance, { now: t0 });
-  lexTesting.handlePomodoroTap(instance, { now: t0 + 150 });
+  lexTesting.handlePomodoroLongPress(instance, { now: t0 + 600 });
   assert.equal(instance.phase, 'focus');
   assert.equal(instance.running, true);
   assert.equal(instance.awaiting, false);
@@ -1174,7 +1319,7 @@ test('lex utility: cancelled latency feedback cannot commit stale result', async
   assert.deepEqual(schedules, []);
 });
 
-// ---- latency：聚合桶、uptime 诚实性、重定向与双击 ----
+// ---- latency：聚合桶、uptime 诚实性、重定向与长按 ----
 
 const LATENCY_BUCKET_MS = 5 * 60 * 1000;
 const latencyInstance = (overrides = {}) => ({
@@ -1364,11 +1509,10 @@ test('lex utility: latency shows Pause instead of a stale number while paused', 
   assert.ok(!svg.includes('>42<'), 'a paused button must not keep showing the last latency as if it were live');
 });
 
-test('lex utility: a single tap refreshes immediately without waiting out the double-tap window', () => {
+test('lex utility: a short press refreshes immediately', () => {
   const runs = [];
   const instance = latencyInstance({ requestId: 0, paused: false });
-  lexTesting.handleLatencyTap(instance, {
-    now: 1000,
+  lexTesting.handleLatencyShortPress(instance, {
     run: (_i, opts) => { runs.push(opts); },
     render: () => {},
     flush: () => {},
@@ -1377,7 +1521,7 @@ test('lex utility: a single tap refreshes immediately without waiting out the do
   assert.equal(instance.paused, false);
 });
 
-test('lex utility: a second tap inside the window cancels the refresh and enters Pause', () => {
+test('lex utility: a long press cancels an in-flight refresh and enters Pause', () => {
   const runs = [];
   const flushes = [];
   const instance = latencyInstance({ requestId: 0, paused: false, checking: true });
@@ -1386,10 +1530,9 @@ test('lex utility: a second tap inside the window cancels the refresh and enters
     render: () => {},
     flush: (i) => { flushes.push(i.paused); },
   };
-  lexTesting.handleLatencyTap(instance, { ...opts, now: 1000 });
-  lexTesting.handleLatencyTap(instance, { ...opts, now: 1200 });
+  lexTesting.handleLatencyLongPress(instance, opts);
 
-  assert.equal(runs.length, 1, 'the second tap must not fire another probe');
+  assert.equal(runs.length, 0, 'entering Pause must not fire another probe');
   assert.equal(instance.paused, true);
   assert.equal(instance.status, 'paused');
   assert.equal(instance.checking, false);
@@ -1397,11 +1540,10 @@ test('lex utility: a second tap inside the window cancels the refresh and enters
   assert.deepEqual(flushes, [true], 'pause is user intent and must reach disk immediately');
 });
 
-test('lex utility: tapping a paused button refreshes and resumes', () => {
+test('lex utility: short pressing a paused button refreshes and resumes', () => {
   const runs = [];
   const instance = latencyInstance({ requestId: 0, paused: true, status: 'paused' });
-  lexTesting.handleLatencyTap(instance, {
-    now: 5000,
+  lexTesting.handleLatencyShortPress(instance, {
     run: (_i, o) => { runs.push(o); },
     render: () => {},
     flush: () => {},
@@ -1410,12 +1552,27 @@ test('lex utility: tapping a paused button refreshes and resumes', () => {
   assert.equal(runs.length, 1);
 });
 
-test('lex utility: taps outside the window are two independent refreshes', () => {
+test('lex utility: long pressing a paused button resumes and probes immediately', () => {
+  const runs = [];
+  const flushes = [];
+  const instance = latencyInstance({ requestId: 2, paused: true, status: 'paused' });
+  lexTesting.handleLatencyLongPress(instance, {
+    run: (_i, options) => { runs.push(options); },
+    render: () => {},
+    flush: (current) => { flushes.push(current.paused); },
+  });
+  assert.equal(instance.paused, false);
+  assert.equal(instance.requestId, 3);
+  assert.equal(runs.length, 1);
+  assert.deepEqual(flushes, [false]);
+});
+
+test('lex utility: repeated short presses are independent refreshes', () => {
   const runs = [];
   const instance = latencyInstance({ requestId: 0, paused: false });
   const opts = { run: () => { runs.push(1); }, render: () => {}, flush: () => {} };
-  lexTesting.handleLatencyTap(instance, { ...opts, now: 1000 });
-  lexTesting.handleLatencyTap(instance, { ...opts, now: 9000 });
+  lexTesting.handleLatencyShortPress(instance, opts);
+  lexTesting.handleLatencyShortPress(instance, opts);
   assert.equal(runs.length, 2);
   assert.equal(instance.paused, false, 'slow repeated taps must never silently pause monitoring');
 });

@@ -12,21 +12,161 @@ const {
   mapSpeedtestDirectoryServers,
   mergeSpeedtestGeo,
   needsSpeedtestDiscovery,
+  renderSpeedtestIcon,
   serializeSpeedtestState,
+  speedChart,
+  speedtestCandidates,
 } = __testing;
+
+const ICON_NOW = Date.UTC(2026, 6, 18, 12);
+
+function iconSvg(phase, extra = {}, now = ICON_NOW) {
+  return Buffer.from(
+    renderSpeedtestIcon({
+      settings: { theme: 'signal', frameSize: 'optimal', showFrame: 'true', scope: 'mainland', chartType: 'line' },
+      history: [{ at: ICON_NOW, ok: true, downloadMbps: 215, uploadMbps: 66 }],
+      lastResult: { at: ICON_NOW, downloadMbps: 215, uploadMbps: 66 },
+      lastCompletedAt: ICON_NOW,
+      phase, queuePosition: -1, errorCode: '', ...extra,
+    }, now).replace(/^data:image\/svg\+xml;base64,/, ''),
+    'base64',
+  ).toString('utf8');
+}
+
+test('speed values are right-aligned against a fixed unit column', () => {
+  // 两行数值共用一条右基线，位数变化不会让数字左右跳。
+  const twoRows = /text-anchor="end"[^>]*font-size="46"[^>]*>215<[\s\S]*text-anchor="end"[^>]*font-size="46"[^>]*>66</;
+  assert.match(iconSvg('idle'), twoRows);
+  assert.equal((iconSvg('idle').match(/x="162" y="\d+" text-anchor="end"/g) || []).length, 2);
+
+  // 单位是独立的一列，不再是贴着数字的小字。
+  assert.equal((iconSvg('idle').match(/<text x="214"[^>]*font-size="16"[^>]*>Mbps</g) || []).length, 2);
+
+  // 四位数收字号，避免顶到单位列。
+  const gigabit = iconSvg('idle', { lastResult: { at: ICON_NOW, downloadMbps: 1024, uploadMbps: 66 } });
+  assert.match(gigabit, /text-anchor="end"[^>]*font-size="38"[^>]*>1024</);
+
+  // 方向箭头是描边路径而不是 ↓↑ 文字：字形来自回退字体时 font-weight
+  // 不一定生效，粗细只有靠 stroke-width 才是确定的。
+  assert.equal((iconSvg('idle').match(/<path d="M 51 [^"]+" fill="none" stroke=/g) || []).length, 2);
+  assert.ok(!iconSvg('idle').includes('↓') && !iconSvg('idle').includes('↑'));
+});
+
+test('header shows how old the reading is, and yields to status', () => {
+  const minutes = (n) => ICON_NOW + n * 60_000;
+
+  assert.match(iconSvg('idle', {}, minutes(0)), />now</);
+  assert.match(iconSvg('idle', {}, minutes(15)), />&gt;15m</);
+  assert.match(iconSvg('idle', {}, minutes(90)), />&gt;1h</);
+  assert.match(iconSvg('idle', {}, minutes(60 * 24 * 3)), />&gt;3d</);
+  // 天数封顶 99，长期没测也不会挤掉标题。
+  assert.match(iconSvg('idle', {}, minutes(60 * 24 * 400)), />&gt;99d</);
+
+  // 测速中标题行让位给状态色块，否则色块会盖住时间。
+  const stamp = /x="214" y="60"/;
+  assert.doesNotMatch(iconSvg('running', {}, minutes(15)), stamp);
+  // 没有测速结果时不显示时间，避免出现从 0 时间戳算出来的荒谬值。
+  assert.doesNotMatch(iconSvg('idle', { lastResult: null, lastCompletedAt: 0 }, minutes(15)), stamp);
+});
+
+test('testing state drops the inner ring and puts the label on a filled pill', () => {
+  const svg = (phase, extra = {}) => iconSvg(phase, extra);
+
+  // frameHighlight 画的是 stroke-width="6" 的内框线，测速中不该再出现。
+  assert.ok(!svg('running').includes('stroke-width="6"'), '测速状态不应再画内框线');
+  assert.ok(!svg('idle').includes('stroke-width="6"'));
+
+  // 状态文字压在底色块上，而不是裸文字。
+  assert.match(svg('running'), /<rect x="44" y="38"[^>]*fill="#60a5fa"\/>\s*<text[^>]*>TESTING</);
+  // 错误用红底白字，和"正在测速"的强调色块区分开。
+  assert.match(svg('error', { errorCode: 'CLI' }), /<rect x="44" y="38"[^>]*fill="#ef4444"/);
+  // 空闲状态没有色块，标题就是区域代号。
+  assert.ok(!svg('idle').includes('y="38"'));
+  assert.match(svg('idle'), />MAINLAND</);
+});
+
+test('scope renders as a full word beside the timestamp', () => {
+  // 曾经缩成 CN/INTL 来腾地方，但那种简写带政治含义，不能为了排版用。
+  // 全称保留，改用 `>15m` 这种短格式的时间戳来腾空间。
+  const scoped = (scope) => Buffer.from(
+    renderSpeedtestIcon({
+      settings: { theme: 'signal', frameSize: 'optimal', showFrame: 'true', scope, chartType: 'line' },
+      history: [{ at: ICON_NOW, ok: true, downloadMbps: 215, uploadMbps: 66 }],
+      lastResult: { at: ICON_NOW, downloadMbps: 215, uploadMbps: 66 },
+      lastCompletedAt: ICON_NOW, phase: 'idle', queuePosition: -1, errorCode: '',
+    }, ICON_NOW).replace(/^data:image\/svg\+xml;base64,/, ''),
+    'base64',
+  ).toString('utf8');
+
+  assert.match(scoped('mainland'), />MAINLAND</);
+  assert.match(scoped('overseas'), />OVERSEAS</);
+  assert.match(scoped('any'), />GLOBAL</);
+});
+
+test('chart spans the full width whatever the sample count', () => {
+  const at = (n) => Array.from({ length: n }, (_, i) => ({ at: i, ok: true, downloadMbps: 100 + i }));
+  const xs = (svg) => [...svg.matchAll(/(?:points="|x=")([\d.]+)/g)].map((m) => Number(m[1]));
+  const span = (svg) => {
+    const all = [...svg.matchAll(/[\s"]([\d.]+),[\d.]+/g)].map((m) => Number(m[1]));
+    return all.length ? [Math.min(...all), Math.max(...all)] : xs(svg);
+  };
+
+  // 折线：首尾点必须落在绘图区左右边界，3 次和 12 次都一样。
+  for (const count of [2, 3, 12]) {
+    const [first, last] = span(speedChart(at(count), 'downloadMbps', 70, 68, '#fff', 'line'));
+    assert.equal(first, 44, `${count} 个样本时折线没有从左边界起`);
+    assert.equal(last, 214, `${count} 个样本时折线没有画到右边界`);
+  }
+
+  // 柱状：最后一根柱子的右缘要贴到右边界（允许柱间空隙的容差）。
+  for (const count of [3, 12]) {
+    const svg = speedChart(at(count), 'downloadMbps', 70, 68, '#fff', 'bar');
+    const rects = [...svg.matchAll(/x="([\d.]+)"[^>]*width="([\d.]+)"/g)].map((m) => Number(m[1]) + Number(m[2]));
+    assert.equal(rects.length, count);
+    assert.ok(Math.max(...rects) > 211, `${count} 根柱子没有铺满宽度`);
+  }
+
+  // 历史再长也只画最近 12 次，且画的是最新的那一段。
+  const long = speedChart(at(40), 'downloadMbps', 70, 68, '#fff', 'bar');
+  assert.equal([...long.matchAll(/<rect /g)].length, 12);
+  // 最后一根是最高的（样本值递增），说明取的是尾部而不是头部。
+  const heights = [...long.matchAll(/height="([\d.]+)"/g)].map((m) => Number(m[1]));
+  assert.equal(Math.max(...heights), heights.at(-1));
+
+  // 单个样本画不出线段，落一个居中的点。
+  assert.match(speedChart(at(1), 'downloadMbps', 70, 68, '#fff', 'line'), /<circle cx="129.0"/);
+  assert.equal(speedChart([], 'downloadMbps', 70, 68, '#fff', 'line'), '');
+});
+
+test('scope filters candidates to mainland, overseas, or everything', () => {
+  const serverCache = [
+    { id: '1', countryCode: 'CN', city: 'Nanjing' },
+    { id: '2', countryCode: 'HK', city: 'Hong Kong' },
+    { id: '3', country: '中国', city: 'Shanghai' },
+    { id: '4', countryCode: 'JP', city: 'Tokyo' },
+  ];
+  const ids = (scope) => speedtestCandidates({ scope }, { serverCache }).map((server) => server.id);
+
+  assert.deepEqual(ids('mainland'), ['1', '3']);
+  assert.deepEqual(ids('overseas'), ['2', '4']);
+  assert.deepEqual(ids('any'), ['1', '2', '3', '4']);
+});
 
 test('speedtest action defaults match the confirmed product contract', () => {
   const defaults = ACTION_CONFIGS.speedtest.defaults;
 
   assert.equal(defaults.scope, 'mainland');
-  assert.equal(defaults.intervalMin, '15');
+  assert.equal(defaults.intervalMin, '30');
   assert.equal(defaults.activeAllDay, 'false');
   assert.equal(defaults.activeStart, '08:00');
   assert.equal(defaults.activeEnd, '23:00');
   assert.equal(defaults.timeoutSec, '180');
-  assert.equal(defaults.selectionMode, 'dailyRandom');
+  assert.equal(defaults.candidateServers, '[]');
   assert.equal(defaults.chartType, 'line');
   assert.equal(defaults.geoIpEnabled, 'true');
+  // 选择模式由勾选数量推导，不再是独立设置项。
+  assert.equal(defaults.selectionMode, undefined);
+  assert.equal(defaults.fixedServerId, undefined);
 });
 
 test('official speedtest JSON is converted to Mbps without retaining client IP', () => {
@@ -94,33 +234,43 @@ test('active windows support normal and cross-midnight schedules', () => {
   assert.equal(isWithinActiveWindow({ activeAllDay: 'false', activeStart: '22:00', activeEnd: '06:00' }, at(12)), false);
 });
 
-test('fixed and daily-random server selection remain deterministic for the day', () => {
+test('checked nodes replace the full cache as the candidate pool', () => {
+  const serverCache = [
+    { id: '1', countryCode: 'CN', city: 'Nanjing' },
+    { id: '2', countryCode: 'CN', city: 'Shanghai' },
+    { id: '3', countryCode: 'CN', city: 'Beijing' },
+  ];
+  const checked = JSON.stringify([serverCache[0], serverCache[2]]);
+
+  assert.deepEqual(
+    speedtestCandidates({ scope: 'mainland', candidateServers: checked }, { serverCache })
+      .map((server) => server.id),
+    ['1', '3'],
+  );
+  // 勾选仍然要过区域筛选：勾了大陆节点但区域切到海外时候选池为空，
+  // 由 needsSpeedtestDiscovery 触发重新发现，而不是拿着不匹配的节点硬测。
+  assert.deepEqual(
+    speedtestCandidates({ scope: 'overseas', candidateServers: checked }, { serverCache }),
+    [],
+  );
+});
+
+test('one checked node is fixed and several stay deterministic for the day', () => {
   const servers = [
     { id: '1', countryCode: 'CN', city: 'Nanjing' },
     { id: '2', countryCode: 'CN', city: 'Shanghai' },
   ];
   const now = new Date(2026, 6, 18, 9).getTime();
 
-  assert.equal(
-    chooseSpeedtestServer({ selectionMode: 'fixed', fixedServerId: '2' }, {}, servers, now)?.id,
-    '2',
-  );
+  // 勾一个：候选池只剩它，固定使用，且不写当日粘性状态。
+  const singleState = {};
+  assert.equal(chooseSpeedtestServer(singleState, [servers[1]], now, () => 0)?.id, '2');
+  assert.equal(singleState.dailyServerId, undefined);
 
+  // 一个都没勾：候选池是全部节点，随机结果当天保持不变。
   const state = {};
-  const first = chooseSpeedtestServer(
-    { selectionMode: 'dailyRandom' },
-    state,
-    servers,
-    now,
-    () => 0.99,
-  );
-  const second = chooseSpeedtestServer(
-    { selectionMode: 'dailyRandom' },
-    state,
-    servers,
-    now + 60 * 60 * 1000,
-    () => 0,
-  );
+  const first = chooseSpeedtestServer(state, servers, now, () => 0.99);
+  const second = chooseSpeedtestServer(state, servers, now + 60 * 60 * 1000, () => 0);
 
   assert.equal(first.id, '2');
   assert.equal(second.id, '2');

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --import ./tests/setup.mjs tests/*.test.js",
     "new": "node scripts/create-plugin.mjs",
     "sync-plugin": "node scripts/sync-plugin.mjs",
     "install-plugin": "node scripts/sync-plugin.mjs --target desktop",

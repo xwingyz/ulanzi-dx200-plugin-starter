@@ -47,8 +47,6 @@ const SPEEDTEST_TIMEOUTS = ['120', '180', '240', '300'];
 const SPEEDTEST_SCOPES = ['mainland', 'overseas'];
 const SPEEDTEST_SELECTION_MODES = ['fixed', 'dailyRandom'];
 const SPEEDTEST_CHART_TYPES = ['line', 'bar'];
-// 双击窗口：单击不等待这 400ms（刷新是幂等的，先发出去），第二次按键到达时再撤销。
-const LATENCY_DOUBLE_TAP_MS = 400;
 const LATENCY_SSL_WARN_DAYS = 30;
 
 function hostFromUrl(url) {
@@ -538,44 +536,33 @@ function commitLatencyResult(instance, result, options = {}) {
   return true;
 }
 
-// 宿主协议只有单一 `run` 事件，没有按下/抬起分离，因此长按无法实现（见 constants.js）。
-// 双击代之：单击不等待窗口关闭就立刻刷新——刷新是幂等且无副作用的，先发出去；
-// 若 400ms 内第二次按键到达，再把它作废并转成 Pause。这样单击零延迟，代价只是
-// 进入 Pause 时浪费一次探测请求。
-function handleLatencyTap(instance, options = {}) {
-  const now = options.now ?? Date.now();
+// SDK 的 keyup 会把未触发长按的操作分派到这里：短按立即刷新；Pause 中短按恢复。
+function handleLatencyShortPress(instance, options = {}) {
   const run = options.run ?? runLatencyCheck;
-  const render = options.render ?? renderInstance;
   const flush = options.flush ?? flushLatencyState;
-  const doubleTapMs = options.doubleTapMs ?? LATENCY_DOUBLE_TAP_MS;
-
-  const previousTapAt = instance.lastTapAt ?? 0;
-  instance.lastTapAt = now;
-
-  if (now - previousTapAt < doubleTapMs) {
-    // 第二击：作废刚发出的那次刷新（提升 requestId 让它的结果被 isInstanceCurrent 丢弃）。
-    instance.lastTapAt = 0;
-    instance.requestId += 1;
-    instance.checking = false;
-    clearLatencyTimer(instance);
-    clearInstanceTimeout(instance, 'latencyFeedback');
-    instance.paused = !instance.paused;
-    if (instance.paused) {
-      instance.status = 'paused';
-      instance.lastMs = null;
-      flush(instance);
-      render(instance);
-      return undefined;
-    }
-    // 从 Pause 退出走的是与单击相同的路径：立即刷新并恢复轮询。
-    flush(instance);
-    return run(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true });
-  }
-
   if (instance.paused) {
     instance.paused = false;
     flush(instance);
   }
+  return run(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true });
+}
+
+// 长按切换 Pause。进入 Pause 时提升 requestId，使正在飞行的探测结果失效；退出时立即首探。
+function handleLatencyLongPress(instance, options = {}) {
+  const run = options.run ?? runLatencyCheck;
+  const flush = options.flush ?? flushLatencyState;
+  instance.requestId += 1;
+  instance.checking = false;
+  clearLatencyTimer(instance);
+  clearInstanceTimeout(instance, 'latencyFeedback');
+  instance.paused = !instance.paused;
+  if (instance.paused) {
+    instance.status = 'paused';
+    instance.lastMs = null;
+    flush(instance);
+    return undefined;
+  }
+  flush(instance);
   return run(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true });
 }
 
@@ -654,7 +641,8 @@ const config = {
       // 历史跨重启水合：24h uptime 的全部意义就在于此，重建实例不能把它清零。
       ...hydrateLatencyState(readPersistedState(instance.context)),
     }),
-    onRun: (instance) => handleLatencyTap(instance),
+    onRun: (instance) => handleLatencyShortPress(instance),
+    onLongPress: (instance) => handleLatencyLongPress(instance),
     onReady: (instance) => {
       if (instance.paused) {
         return undefined;
@@ -702,7 +690,8 @@ const config = {
       checkUrl,
       commitLatencyResult,
       formatUptimeLabel,
-      handleLatencyTap,
+      handleLatencyLongPress,
+      handleLatencyShortPress,
       hydrateLatencyState,
       latencyStats,
       recordLatencySample,

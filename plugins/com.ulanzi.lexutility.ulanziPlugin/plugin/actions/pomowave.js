@@ -27,7 +27,6 @@ const POMODORO_ALERT_WINDOW_SEC = 5;
 const POMODORO_CYCLE_COMPLETE_SEC = 4;
 const POMODORO_STATE_VERSION = 1;
 const POMODORO_PHASES = ['idle', 'focus', 'shortBreak', 'longBreak', 'done'];
-const POMODORO_DOUBLE_TAP_MS = 400;
 const POMODORO_BLINK_MS = 550;
 const POMODORO_CUE_REPEAT_DELAY_MS = 150;
 const POMODORO_MAC_SOUND_MAP = {
@@ -364,7 +363,7 @@ function advancePomodoroPhase(instance, options = {}) {
     instance.completedFocusRounds += 1;
     const hitLongBreak = instance.completedFocusRounds % roundsGoal === 0;
     const nextBreak = hitLongBreak ? 'longBreak' : 'shortBreak';
-    // 专注结束：自动则直接开始休息，否则进入待命（圆环闪烁，等按键 / 双击跳过休息）。
+    // 专注结束：自动则直接开始休息，否则进入待命（圆环闪烁，等短按确认 / 长按跳过休息）。
     if (isEnabled(instance.settings.autoStartBreaks)) {
       startPomodoroPhase(instance, nextBreak, { autoStart: true, playSound });
     } else {
@@ -508,32 +507,20 @@ function resetPomodoroWork(instance, now = Date.now()) {
   startPomodoroPhase(instance, 'focus', { autoStart: true, playSound: false, now });
 }
 
-// 单击开始/暂停，双击重启当前工作时间。沿用 latency 的"先动作、被第二击覆盖"策略：
-// 单击零延迟即时生效，双击时第一击的瞬时切换会在 400ms 内被重启覆盖，不需要预置延迟。
-// 待命态（awaiting）另有语义：单击确认进入该阶段；等待进休息时双击=跳过休息直接开始下一个专注。
-function handlePomodoroTap(instance, options = {}) {
+// 短按开始/暂停；待命态短按确认进入下一阶段。按压时序和长按判定由基座统一处理，
+// action 只表达业务语义，不再维护双击窗口或 lastTapAt。
+function handlePomodoroShortPress(instance, options = {}) {
   const now = options.now ?? Date.now();
-  const doubleTapMs = options.doubleTapMs ?? POMODORO_DOUBLE_TAP_MS;
-  const previousTapAt = instance.lastTapAt ?? 0;
-  instance.lastTapAt = now;
-  const isDouble = now - previousTapAt < doubleTapMs;
-  if (isDouble) {
-    instance.lastTapAt = 0;
-  }
-
-  // 待命态第一击即确认进入该阶段开始计时（第一击必然清掉 awaiting）。
-  // 若紧接第二击构成双击，会落到下方 resetPomodoroWork——把刚开始的休息重启为一段全新专注，
-  // 即"专注结束等待进休息时双击=跳过休息、直接进入下一个专注"。
   if (instance.awaiting) {
     beginAwaitedPhase(instance, now);
     return;
   }
-
-  if (isDouble) {
-    resetPomodoroWork(instance, now);
-    return;
-  }
   togglePomodoro(instance, now);
+}
+
+// 长按把当前工作重启为一段全新的完整专注；处于待命休息时等价于跳过休息。
+function handlePomodoroLongPress(instance, options = {}) {
+  resetPomodoroWork(instance, options.now ?? Date.now());
 }
 
 function renderPomodoroIcon(instance) {
@@ -551,6 +538,14 @@ function renderPomodoroIcon(instance) {
   const isAwaiting = instance.awaiting === true;
   const alertPulse = instance.running && instance.phase !== 'done' && remainingSec <= POMODORO_ALERT_WINDOW_SEC && remainingSec % 2 === 0;
   const accent = alertPulse ? background.text : phaseColor;
+  const isBreak = instance.phase === 'shortBreak' || instance.phase === 'longBreak';
+  // 专注与休息对调番茄/时间的用色，两种状态一眼可分；仍只用主题既有 token，不引入第二套色板。
+  // 专注：番茄用强调色（醒目）+ 时间中性；休息：番茄转中性（静下来）+ 时间染上阶段色。
+  const tomatoFill = isBreak ? background.text : accent;
+  // 休息时间向 text 混合再上色：longBreak 的阶段色是偏暗的 muted，直接用会读不清。
+  const timeFill = instance.phase === 'done'
+    ? accent
+    : isBreak ? mixHex(phaseColor, background.text, 0.3) : background.text;
   const displayText = instance.phase === 'done' ? '✓' : formatPomodoroTime(remainingSec);
   const displaySize = instance.phase === 'done' ? 88 : 40;
   const label = pomodoroPhaseLabel(instance);
@@ -583,11 +578,11 @@ function renderPomodoroIcon(instance) {
         stroke-dasharray="${fillLength} ${circumference.toFixed(1)}"
         transform="rotate(-90 128 128)"
       />`}
-      ${instance.phase === 'done' ? '' : `<g transform="translate(128 78)" fill="${accent}">
+      ${instance.phase === 'done' ? '' : `<g transform="translate(128 78)" fill="${tomatoFill}">
         <circle cx="0" cy="2" r="12"/>
         <path d="M0,-14 L1.88,-9.09 L7.13,-8.82 L3.04,-5.51 L4.41,-0.43 L0,-3.3 L-4.41,-0.43 L-3.04,-5.51 L-7.13,-8.82 L-1.88,-9.09 Z"/>
       </g>`}
-      <text x="128" y="${instance.phase === 'done' ? 160 : 126}" text-anchor="middle" fill="${instance.phase === 'done' ? accent : background.text}" font-size="${displaySize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(displayText)}</text>
+      <text x="128" y="${instance.phase === 'done' ? 160 : 126}" text-anchor="middle" fill="${timeFill}" font-size="${displaySize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(displayText)}</text>
       ${instance.phase === 'done' ? '' : `<text x="128" y="152" text-anchor="middle" fill="${accent}" font-size="19" font-weight="800" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">${escapeXml(label)}</text>${dots}`}
       `)}
     </svg>
@@ -641,9 +636,8 @@ const config = {
       // 进行中的番茄靠 phaseEndAt 跨重启恢复真实剩余时间，重建实例不能把它吞掉。
       ...(instance?.context ? hydratePomodoroState(readPersistedState(instance.context)) : {}),
     }),
-    onRun: (instance) => {
-      handlePomodoroTap(instance);
-    },
+    onRun: (instance) => handlePomodoroShortPress(instance),
+    onLongPress: (instance) => handlePomodoroLongPress(instance),
     onReady: (instance) => {
       initializePomodoroInstance(instance);
       if (instance.running) {
@@ -688,7 +682,8 @@ const config = {
       tickPomodoro,
       togglePomodoro,
       skipPomodoroPhase,
-      handlePomodoroTap,
+      handlePomodoroLongPress,
+      handlePomodoroShortPress,
       resetPomodoroWork,
       pomodoroCuePlan,
       shouldRepeatPomodoroCue,

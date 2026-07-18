@@ -4,6 +4,8 @@ export const Events = Object.freeze({
   ERROR: 'error',
   ADD: 'add',
   RUN: 'run',
+  KEYDOWN: 'keydown',
+  KEYUP: 'keyup',
   PARAMFROMAPP: 'paramfromapp',
   PARAMFROMPLUGIN: 'paramfromplugin',
   SETACTIVE: 'setactive',

@@ -159,6 +159,8 @@ class UlanzideckApi extends EventEmitter {
   onParamFromApp(handler) { this.on(Events.PARAMFROMAPP, handler); return this; }
   onParamFromPlugin(handler) { this.on(Events.PARAMFROMPLUGIN, handler); return this; }
   onRun(handler) { this.on(Events.RUN, handler); return this; }
+  onKeyDown(handler) { this.on(Events.KEYDOWN, handler); return this; }
+  onKeyUp(handler) { this.on(Events.KEYUP, handler); return this; }
   onSetActive(handler) { this.on(Events.SETACTIVE, handler); return this; }
   onClear(handler) { this.on(Events.CLEAR, handler); return this; }
 }

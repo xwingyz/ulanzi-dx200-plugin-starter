@@ -59,6 +59,15 @@ class FakeElement extends FakeEventTarget {
     this.children.push(child);
     return child;
   }
+
+  // 节点清单是唯一走 innerHTML 的地方，这里只存字符串供断言，不做解析。
+  set innerHTML(html) {
+    this._innerHTML = String(html);
+  }
+
+  get innerHTML() {
+    return this._innerHTML || '';
+  }
 }
 
 function createHarness(entryFile) {
@@ -84,6 +93,11 @@ function createHarness(entryFile) {
   if (entryFile === 'pomowave.js') {
     selectors.set('[data-sound-style]', [
       new FakeElement({ dataset: { soundStyle: 'bell' } }),
+    ]);
+  }
+  if (entryFile === 'speedtest.js') {
+    selectors.set('[data-chart-type]', [
+      new FakeElement({ dataset: { chartType: 'bar' } }),
     ]);
   }
   selectors.set('[data-theme-value]', []);
@@ -352,13 +366,12 @@ test('pomowave inspector submits the manual-stage continuous cue setting', () =>
   assert.equal(harness.sends.at(-1).settings.repeatManualCue, 'true');
 });
 
-test('speedtest inspector persists scope, schedule, node mode and chart type', () => {
+test('speedtest inspector persists scope, schedule, checked nodes and chart type', () => {
   const harness = createHarness('speedtest.js');
   harness.callbacks.connected[0]();
   harness.elements.get('scope').value = 'overseas';
   harness.elements.get('intervalMin').value = '30';
-  harness.elements.get('selectionMode').value = 'fixed';
-  harness.elements.get('fixedServerId').value = '12345';
+  harness.elements.get('candidateServers').value = '[{"id":"12345"}]';
   harness.elements.get('chartType').value = 'bar';
 
   harness.form.dispatchEvent({ type: 'submit' });
@@ -366,9 +379,94 @@ test('speedtest inspector persists scope, schedule, node mode and chart type', (
   const settings = harness.sends.at(-1).settings;
   assert.equal(settings.scope, 'overseas');
   assert.equal(settings.intervalMin, '30');
-  assert.equal(settings.selectionMode, 'fixed');
-  assert.equal(settings.fixedServerId, '12345');
+  assert.equal(settings.candidateServers, '[{"id":"12345"}]');
   assert.equal(settings.chartType, 'bar');
+  // 模式不再是独立设置项，勾选数量就是模式。
+  assert.equal(settings.selectionMode, undefined);
+  assert.equal(settings.fixedServerId, undefined);
+});
+
+test('speedtest chart button commits the chart type once after reconnect', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+  harness.callbacks.connected[0]();
+  // 面板打开时空清单会先要一次节点，这里只关心图表按钮自己发了几次。
+  const before = harness.sends.length;
+
+  harness.selectors.get('[data-chart-type]')[0].dispatchEvent({ type: 'click' });
+
+  assert.equal(harness.sends.length - before, 1);
+  assert.equal(harness.sends.at(-1).settings.chartType, 'bar');
+});
+
+test('speedtest inspector asks for nodes once while the list is empty', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+
+  // 建 harness 时已经跑过一次 onAdd，空清单应该恰好要了一次节点。
+  const asks = () => harness.sends.filter(({ settings }) => settings.ensureServers === 'true').length;
+  assert.equal(asks(), 1);
+
+  // 清单仍为空时重复推送运行态不再追加请求，避免打爆目录服务。
+  harness.callbacks.app[0]({ context: 'ctx-1', param: { speedtestRuntime: JSON.stringify({ servers: [] }) } });
+  assert.equal(asks(), 1);
+
+  // 拉到节点后解除标记，之后再次变空还能再要一次。
+  harness.callbacks.app[0]({
+    context: 'ctx-1',
+    param: { speedtestRuntime: JSON.stringify({ servers: [{ id: '1', countryCode: 'CN' }] }) },
+  });
+  assert.equal(asks(), 1);
+  harness.callbacks.app[0]({ context: 'ctx-1', param: { speedtestRuntime: JSON.stringify({ servers: [] }) } });
+  assert.equal(asks(), 2);
+});
+
+test('speedtest node list renders checkboxes and derives the mode from how many are checked', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+  harness.elements.get('scope').value = 'mainland';
+
+  const servers = [
+    { id: '3633', name: 'China Telecom', city: 'Nanjing', country: 'China', countryCode: 'CN' },
+    { id: '5083', name: 'China Unicom', city: 'Shanghai', country: 'China', countryCode: 'CN' },
+  ];
+  harness.callbacks.app[0]({
+    context: 'ctx-1',
+    param: { candidateServers: '[]', speedtestRuntime: JSON.stringify({ servers }) },
+  });
+
+  const list = harness.elements.get('serverList');
+  assert.equal((list.innerHTML.match(/type="checkbox"/g) || []).length, 2);
+  assert.ok(!list.innerHTML.includes('checked'), '未勾选时不应有 checked 属性');
+  assert.equal(harness.elements.get('selectionSummary').textContent, '不勾选：在当前区域的全部节点里每日随机。');
+
+  // 勾第一个：写入候选池，文案切到「固定」。
+  const check = (id, checked) => list.dispatchEvent({
+    type: 'change',
+    target: { closest: () => ({ dataset: { serverId: id }, checked, closest: () => null }) },
+  });
+  check('3633', true);
+  assert.deepEqual(
+    JSON.parse(harness.elements.get('candidateServers').value).map((server) => server.id),
+    ['3633'],
+  );
+  assert.equal(harness.elements.get('selectionSummary').textContent, '已勾选 1 个：固定使用该节点。');
+
+  // 再勾一个：变成在两个节点里随机。
+  check('5083', true);
+  assert.deepEqual(
+    JSON.parse(harness.elements.get('candidateServers').value).map((server) => server.id),
+    ['3633', '5083'],
+  );
+  assert.equal(harness.elements.get('selectionSummary').textContent, '已勾选 2 个：每天在这些节点里随机选一个。');
+
+  // 取消勾选会从候选池里移除，且发出去的设置里带的是新值。
+  check('3633', false);
+  assert.deepEqual(
+    JSON.parse(harness.elements.get('candidateServers').value).map((server) => server.id),
+    ['5083'],
+  );
+  assert.equal(harness.sends.at(-1).settings.candidateServers, harness.elements.get('candidateServers').value);
 });
 
 test('speedtest inspector sends an immediate-test control without rewriting settings', () => {

@@ -7,12 +7,25 @@ import { fileURLToPath } from 'node:url';
 
 const PLUGIN_UUID = 'com.ulanzi.ulanzistudio.lexutility';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// 数据目录默认在插件目录下，但允许 ULANZI_PLUGIN_DATA_DIR 覆盖。宿主永远不设它——
+// 这是给测试用的：测试会 import 本文件并触发真实落盘，不隔离就会把测试键写进仓库的
+// data/，再被同步脚本带到用户机器上。路径常量在 import 期求值，所以只能靠进程级环境
+// 变量注入（见 tests/setup.mjs），不能等测试里再改。
+// 覆盖时按 PLUGIN_UUID 分子目录：同一个测试进程会同时 import 本框架与 template 框架，
+// 共用一份存储会让两边同名的 `actionid::key` 互相覆盖。
+const DATA_DIR = process.env.ULANZI_PLUGIN_DATA_DIR
+  ? path.resolve(process.env.ULANZI_PLUGIN_DATA_DIR, PLUGIN_UUID)
+  : path.join(__dirname, '..', 'data');
 // 框架层持久化：所有 action 的设置都落到同一份 data/action-settings.json，
 // 按 `${actionid}::${key}` 归档。旧版 latency 专属文件仅用于一次性迁移。
-const SETTINGS_STORE_PATH = path.join(__dirname, '..', 'data', 'action-settings.json');
-const LEGACY_LATENCY_STORE_PATH = path.join(__dirname, '..', 'data', 'latency-settings.json');
+const SETTINGS_STORE_PATH = path.join(DATA_DIR, 'action-settings.json');
+const LEGACY_LATENCY_STORE_PATH = path.join(DATA_DIR, 'latency-settings.json');
 // 运行态与设置分开存：设置由框架自动落盘，运行态由 action 自己按语义边界批量写。
-const STATE_STORE_PATH = path.join(__dirname, '..', 'data', 'action-state.json');
+const STATE_STORE_PATH = path.join(DATA_DIR, 'action-state.json');
+const LONG_PRESS_MS = 600;
+// keydown/keyup 之后宿主补发 run 的容忍窗口，超过即认为按键事件通路已断，回落到 run。
+const RUN_AFTER_KEY_EVENT_MS = 1500;
+const LONG_PRESS_TIMER_SLOT = 'baseLongPress';
 
 const THEMES = {
   mint: {
@@ -410,6 +423,35 @@ function renderErrorState(instance) {
 function toDataUrl(svg) {
   const encoded = Buffer.from(svg).toString('base64');
   return `data:image/svg+xml;base64,${encoded}`;
+}
+
+function invertHexColor(_match, hex) {
+  const expanded = hex.length <= 4
+    ? [...hex].map((digit) => `${digit}${digit}`).join('')
+    : hex;
+  const rgb = expanded.slice(0, 6);
+  const alpha = expanded.slice(6);
+  const inverted = [0, 2, 4]
+    .map((offset) => (255 - Number.parseInt(rgb.slice(offset, offset + 2), 16)).toString(16).padStart(2, '0'))
+    .join('');
+  return `#${inverted}${alpha}`;
+}
+
+// 宿主 SVG 渲染器会忽略部分 filter。直接反转颜色字面量，不改变任何几何属性。
+function longPressFeedbackIcon(icon, active = false) {
+  if (!active) {
+    return icon;
+  }
+  const prefix = 'data:image/svg+xml;base64,';
+  if (typeof icon !== 'string' || !icon.startsWith(prefix)) {
+    return icon;
+  }
+  try {
+    const svg = Buffer.from(icon.slice(prefix.length), 'base64').toString('utf8');
+    return toDataUrl(svg.replace(/#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b/gi, invertHexColor));
+  } catch {
+    return icon;
+  }
 }
 
 function createSettingsStorage(options = {}) {
@@ -899,7 +941,91 @@ function renderInstance(instance) {
     reportActionError(instance, 'render', error);
     return;
   }
-  $UD.setBaseDataIcon(instance.context, icon);
+  $UD.setBaseDataIcon(instance.context, longPressFeedbackIcon(icon, instance.longPressFeedback === true));
+}
+
+function dispatchShortPress(instance, config = configFromUuid(instance.actionUuid), render = renderInstance) {
+  guardAction(instance, 'onRun', () => config.onRun(instance));
+  render(instance);
+}
+
+function beginPress(instance, config = configFromUuid(instance.actionUuid), runtime = {}) {
+  if (instance.active === false) {
+    return;
+  }
+  const schedule = runtime.setTimeout ?? setInstanceTimeout;
+  const cancel = runtime.clearTimeout ?? clearInstanceTimeout;
+  // 上一次按压可能没等到 keyUp（拖拽移动按键最典型：按住抓起、松手给了拖拽），
+  // 残留的 pressed 与长按判定会把下一次短按误判成长按。新的 keyDown 一律按全新按压重置。
+  cancel(instance, LONG_PRESS_TIMER_SLOT);
+  instance.usesKeyEvents = true;
+  instance.lastKeyEventAt = runtime.now ?? Date.now();
+  instance.pressed = true;
+  instance.longPressQualified = false;
+  instance.longPressFeedback = false;
+  if (!config.onLongPress) {
+    return;
+  }
+  schedule(instance, LONG_PRESS_TIMER_SLOT, () => {
+    if (!instance.pressed || instance.active === false) {
+      return;
+    }
+    instance.longPressQualified = true;
+    instance.longPressFeedback = true;
+    (runtime.render ?? renderInstance)(instance);
+  }, config.longPressMs ?? LONG_PRESS_MS);
+}
+
+function endPress(instance, config = configFromUuid(instance.actionUuid), runtime = {}) {
+  if (!instance.pressed) {
+    return;
+  }
+  const render = runtime.render ?? renderInstance;
+  const cancel = runtime.clearTimeout ?? clearInstanceTimeout;
+  instance.lastKeyEventAt = runtime.now ?? Date.now();
+  cancel(instance, LONG_PRESS_TIMER_SLOT);
+  const wasLongPress = instance.longPressQualified === true;
+  instance.pressed = false;
+  instance.longPressQualified = false;
+  instance.longPressFeedback = false;
+  if (wasLongPress) {
+    guardAction(instance, 'onLongPress', () => config.onLongPress(instance));
+    render(instance);
+    return;
+  }
+  dispatchShortPress(instance, config, render);
+}
+
+// 新宿主会在 keydown/keyup 之后补发 run，需要短路掉，否则业务会重复执行一次。
+// 但这个判断不能做成"见过按键事件就永久锁存"：拖拽移动按键会留下一次收不到 keyUp 的
+// 半程按压，此后宿主补发的 run 若被无条件吞掉，这个键就再也按不动了（已复现）。
+// 因此只在"刚刚发生过按键事件"的时间窗内短路，超时自动回落到 run，保证按键可自愈。
+function keyEventsFresh(instance, now = Date.now()) {
+  return Boolean(instance?.usesKeyEvents)
+    && now - (instance.lastKeyEventAt ?? 0) < RUN_AFTER_KEY_EVENT_MS;
+}
+
+function dispatchRunFallback(instance, config = configFromUuid(instance.actionUuid), render = renderInstance, now = Date.now()) {
+  if (keyEventsFresh(instance, now)) {
+    return;
+  }
+  dispatchShortPress(instance, config, render);
+}
+
+// 必须在 runtime() 之前短路，否则 runtime() 自带的 render 会重复执行业务。
+// 实体按压视觉由宿主负责，插件在 keydown 不提交图标。
+function handleRunEvent(context, runtime = {}) {
+  const instances = runtime.instances ?? INSTANCES;
+  const now = runtime.now ?? Date.now();
+  const current = instances.get(context);
+  if (keyEventsFresh(current, now)) {
+    return current;
+  }
+  const processor = runtime.eventProcessor;
+  const instance = processor.runtime(context);
+  const config = configFromUuid(instance.actionUuid);
+  dispatchRunFallback(instance, config, runtime.render ?? renderInstance, now);
+  return instance;
 }
 
 function ensureInstance(context, incomingSettings = {}, eventType = 'hostRestore', runtime = {}) {
@@ -1034,10 +1160,17 @@ $UD.onParamFromPlugin(safeHandler('paramFromPlugin', (message) => {
 }));
 
 $UD.onRun(safeHandler('run', (message) => {
-  const instance = eventProcessor.runtime(message.context);
-  const config = configFromUuid(instance.actionUuid);
-  guardAction(instance, 'onRun', () => config.onRun(instance));
-  renderInstance(instance);
+  handleRunEvent(message.context, { eventProcessor, instances: INSTANCES });
+}));
+
+$UD.onKeyDown(safeHandler('keyDown', (message) => {
+  const instance = INSTANCES.get(message.context) ?? eventProcessor.runtime(message.context);
+  beginPress(instance);
+}));
+
+$UD.onKeyUp(safeHandler('keyUp', (message) => {
+  const instance = INSTANCES.get(message.context) ?? eventProcessor.runtime(message.context);
+  endPress(instance);
 }));
 
 $UD.onSetActive(safeHandler('setActive', (message) => {
@@ -1048,6 +1181,11 @@ $UD.onSetActive(safeHandler('setActive', (message) => {
   instance.active = Boolean(message.active);
   if (instance.active) {
     renderInstance(instance);
+  } else {
+    clearInstanceTimeout(instance, LONG_PRESS_TIMER_SLOT);
+    instance.pressed = false;
+    instance.longPressQualified = false;
+    instance.longPressFeedback = false;
   }
 }));
 
@@ -1101,6 +1239,7 @@ export const __testing = Object.freeze({
   ...ACTION_TESTING,
   frameFor,
   frameHighlight,
+  beginPress,
   clearInstanceTimeout,
   createSettingsEventProcessor,
   createExclusiveTaskQueue,
@@ -1108,8 +1247,12 @@ export const __testing = Object.freeze({
   delayInstance,
   dispatchActionParam,
   disposeInstance,
+  dispatchRunFallback,
+  endPress,
+  handleRunEvent,
   dropPersistedState,
   initializeInstanceState,
+  longPressFeedbackIcon,
   readPersistedState,
   resolveSettingsForEvent,
   setInstanceTimeout,

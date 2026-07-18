@@ -70,6 +70,7 @@
 - `defaults` 只放可序列化设置，不放运行态临时值。
 - `createState(instance)` 只初始化实例态，例如计数、开关、轮播步进；调用时 `instance` 的 `context` 与归一化后的 `settings` 已就绪，可据此水合持久化运行态（见「运行态持久化」），但不得在此发起探测、定时器或任何 I/O 以外的副作用。
 - `onRun` 只处理按键行为，不直接写死 SVG 字符串。
+- `onRun` 表示短按业务；长按业务声明在可选 `onLongPress`，不得在 action 内自行维护双击窗口或裸长按定时器。
 - `render` 必须是纯渲染函数输入，依赖 `settings + state` 产出图标。
 - 所有设置都先经 `normalizeSettings` 归一化，再进入 `render`。
 - 通用字段（`title` / `subtitle` / `theme` / `frameSize` / `showFrame`）由框架归一化；action 私有字段由该 action 的可选 `normalizeSettings(settings, defaults)` 返回，框架不得持有 action 私有枚举或字段分支。
@@ -81,6 +82,8 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 
 - `normalizeSettings(settings, defaults)`：只归一化本 action 的私有字段，返回的新对象与框架通用字段合并。
 - `onReady(instance)`：实例完成本轮设置合并与渲染后的准备工作。
+- `onLongPress(instance)`：按住达到基座阈值后标记成立，并在随后的 `keyup` 执行的业务。基座使用 SDK `keydown` / `keyup` 判定，默认阈值 600ms；同一次按压不再调用 `onRun`。
+- `longPressMs`：可选长按阈值；没有明确交互理由时沿用 600ms 默认值。
 - `onSettingsChanged(instance, previousSettings)`：响应归一化后的设置变化。
 - `onParamFromPlugin(instance, param)`：处理 Property Inspector 来件中的 action 私有语义。
 - `onDispose(instance)`：实例被宿主移除（`onClear`）或进程退出前的最后一次回调，用于把攒在内存里的运行态 flush 落盘。框架在此之后统一回收定时器，因此 `onDispose` 内不得再登记定时器或发起异步续作——只做同步落盘。
@@ -95,6 +98,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 运行态必须能在缺失或损坏时降级为空，action 不得因为读不到历史而报错——历史是增益，不是前置条件。
 - 运行态落盘频率由 action 控制，但不得逐次探测就写盘；按语义边界（如聚合桶滚动）批量写，并在 `onDispose` 补一次 flush。
 - 两个存储共用 `createSettingsStorage` 工厂：传 `storePath` 指定文件，传 `legacyPath: null` 关闭 legacy 迁移（legacy 迁移只对设置存储有意义）。
+- 数据目录默认在插件目录下，`ULANZI_PLUGIN_DATA_DIR` 可覆盖（按 `PLUGIN_UUID` 分子目录）。宿主永远不设它，**它只服务于测试隔离**：多个测试会 import 真实 `app.js` 并触发真实落盘，不隔离就会把测试键写进仓库的 `plugins/*/data/`，再被 `install-plugin` 带到用户机器上。因此**用 `npm test` 跑测试，不要直接 `node --test`**——隔离靠 `--import ./tests/setup.mjs` 在模块加载前注入环境变量，路径常量是 import 期求值的，等测试跑起来再改已经晚了。`tests/test-isolation.test.js` 会在隔离失效时直接报错。
 
 框架事件处理器只负责通用的实例管理、设置合并、持久化、回推和钩子分发，不得出现任何具体业务 action key，也不得为某个 action 新增专属分支。action 特有常量、I/O、状态机、渲染与字段归一化必须全部留在对应的 `plugin/actions/<key>.js`。
 
@@ -115,8 +119,8 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 - action 代码不得直接调用 `setTimeout` / `setInterval`。统一使用框架的 `setInstanceTimeout(instance, slot, fn, ms)` / `clearInstanceTimeout(instance, slot)` / `hasInstanceTimeout(instance, slot)`，定时器句柄按实例登记，回调自动带异常兜底；实例被 `onClear` 移除时由框架 `disposeInstance` 统一回收，action 不需要（也不允许）自己维护裸句柄。
 - 多实例争用同一排他资源（例如带宽测速）时，统一使用框架 `createExclusiveTaskQueue()` 创建的共享队列；资源名由业务定义，框架只负责同资源串行、同实例去重、排队/运行取消和 `AbortSignal`。不得在 action 内另造模块级 busy 标志或私有队列，`disposeInstance` 必须取消该实例仍在排队或运行的任务。
-- 框架对所有进入 action 代码的入口统一兜底：`onRun`、`render`、`createState`、定时器回调、宿主事件处理均经 `guardAction` / `safeHandler` 包裹。单个 action 抛错只影响该实例：记日志、该键位显示 ERR 状态图（`renderErrorState`），进程与其他 action 不受影响。
-- 异步 `onRun` 必须 return Promise（箭头函数省略大括号，或显式 `return`），否则 rejection 逃逸出框架兜底。
+- 框架对所有进入 action 代码的入口统一兜底：`onRun`、`onLongPress`、`render`、`createState`、定时器回调、宿主事件处理均经 `guardAction` / `safeHandler` 包裹。单个 action 抛错只影响该实例：记日志、该键位显示 ERR 状态图（`renderErrorState`），进程与其他 action 不受影响。
+- 异步 `onRun` / `onLongPress` 必须 return Promise（箭头函数省略大括号，或显式 `return`），否则 rejection 逃逸出框架兜底。
 - 进程级 `unhandledRejection` / `uncaughtException` 只是最后一道网：记日志并维持进程存活，不作为常规错误处理途径；正常路径的错误必须在 `guardAction` 层被拦下。
 
 ## 5. 图标与按钮 UI 规范
@@ -125,6 +129,8 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 - 静态层：`manifest.json` 和 `States[].Image` 使用 `assets/icons/*.svg`，用于宿主未拉起运行态前的默认图标。
 - 动态层：`plugin/app.js` 用 `setBaseDataIcon` 推送运行态 `data:image/svg+xml;base64,...`。
+
+实体按压视觉由 Ulanzi Studio / 设备宿主原生实现，行为以官方 Codex Usage 插件为参考：插件不得在 `keydown` 时通过 SVG 矩阵、`viewBox` 或额外 `STATE` 图标模拟缩放，否则会与宿主动画叠加成两次缩放。共享基座只使用 SDK `keydown` / `keyup` 维护长按状态；按下期间不为按压反馈提交图标。达到长按阈值时，定时器只标记长按成立，并由基座直接反转 SVG 内的十六进制 RGB 色值、提交一次同尺寸图作为确认反馈；此时不得调用 `onLongPress`。不得依赖宿主可能忽略的 SVG filter，也不得改变 `viewBox`、transform 或任何几何尺寸，并保持到 `keyup`。松开时，若长按已成立则调用 `onLongPress` 并抑制 `onRun`，否则调用 `onRun`；随后清除反色态并按最新业务状态绘制一次正常颜色图。业务 action 不得各自绘制按压态或长按反馈。`run` 仅作为旧宿主兼容回退；当前 context 一旦观察到真实 key 事件，必须在调用 `eventProcessor.runtime()` 之前短路后续 `run`，防止重复执行业务。
 
 统一要求：
 
@@ -258,7 +264,21 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - `restart` 模式会先清理宿主拉起的插件 Node 子进程再重启 Studio（孤儿进程会导致 Studio 重启失败或继续跑旧代码）。重启后验证顺序：主进程新 PID → `lsof -iTCP:3906` 有监听 → 插件子进程新 PID → 同步副本内容为新代码。
 - **实机行为与新代码不符（改了没生效、无声音、按钮无反应）时，先证伪"旧进程 / 未同步"，再怀疑逻辑**。诊断命令：对仓库与宿主副本中实际修改的 `plugin/app.js` 或 `plugin/actions/<key>.js` 执行 `grep -c '<新加的符号>' <file>` 并比较——部署副本计数为 0，说明新代码根本没进 Studio 加载的那份副本，是常驻旧进程在跑，`restart` 即可，不是逻辑 bug。别在源码里反复找错。改插件侧 JS 后必须 `restart`（§10.E），Node 不热重载；纯 PI 页面改动 `sync` 后重开 PI 面板即可。
 
-## 11. 多智能体协作规范
+## 11. 协作与文档同步规范
+
+### 文档先行与变更同步（强制项）
+
+- **修改任何 action 功能或技术实现之前，必须先完整阅读该 action 的对应规格**：`docs/specifications/actions/<key>.md`。修改范围包括业务模块、manifest 声明、Property Inspector、静态/动态图标、设置、状态机、I/O、持久化、交互、渲染和测试契约。
+- **修改任何基座功能或共享层之前，必须先完整阅读 `docs/specifications/base.md`**。修改范围包括 `plugin/app.js` 框架段、`plugin/actions/index.js` 注册协议、`libs/`、`inspector-shared.js`、共享主题/渲染原语、实例生命周期、存储、隔离、桥接和通用脚本语义。
+- 同一次任务同时影响基座与 action 时，两类对应文档都必须在改代码前读取；影响多个 action 时，逐份读取所有受影响 action 规格，不能只读其中一份。
+- 新增 action 时，先读 `docs/specifications/base.md`，并在实现前为新 action 建立 `docs/specifications/actions/<key>.md` 的初始规格，明确 identity、功能边界和技术契约。
+- 修改完成后，必须在同一次任务中把必要的功能和技术变化更新到对应规格，并更新“最后代码核对”日期。必要变化至少包括：功能/交互、字段与默认值、状态机、生命周期、I/O 或依赖、持久化结构、渲染、错误语义、测试与部署要求中实际发生变化的部分。
+- 纯内部重构若确认没有改变任何既有功能或技术契约，可以不改规格正文，但完成前仍必须逐项核对对应规格，并在任务交付中明确说明“已核对，无需更新正文”。不得以“只是重构”为由跳过修改前阅读。
+- 对应规格未读取，或实现已经变化但规格尚未同步时，任务不得宣告完成、提交合并或进入部署验收。
+
+文档映射与统一入口见 `docs/specifications/README.md`。长期硬约束仍以本文件为权威，具体实现行为以对应规格维护。
+
+### 多智能体协作
 
 - 开工前先声明本次只改哪个插件、哪个 action、哪一层。
 - 一次任务最多同时改一个插件内的一类问题，避免一边改主题一边改同步脚本。
@@ -272,6 +292,8 @@ settings 与运行态是两套东西，不得混用同一个存储：
 一个 action 开发完成，至少满足：
 
 - `manifest.json`、`plugin/actions/<key>.js`、`property-inspector/`、`assets/icons/` 四层齐全，且已加入 `plugin/actions/index.js`。
+- 修改前已完整阅读对应 action 规格；涉及基座时也已完整阅读基座规格。
+- 必要的功能与技术变化已同步到对应规格，并更新“最后代码核对”日期；无正文变化时已完成逐项核对并在交付中说明。
 - `npm test` 全绿（仓库根目录跑，覆盖框架段、持久化与 inspector 生命周期）。
 - `sync` 或 `restart` 后能在宿主看到正确按钮。
 - Inspector 改值后，按钮能实时或预期地刷新。

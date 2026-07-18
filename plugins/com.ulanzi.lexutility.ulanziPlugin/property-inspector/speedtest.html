@@ -5,47 +5,183 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Network Speed</title>
     <style>
-      :root { color-scheme: dark; --bg:#07101d; --panel:#111c30; --text:#e2e8f0; --muted:#94a3b8; --line:#23314f; --accent:#60a5fa; }
-      * { box-sizing:border-box; } body { margin:0; padding:14px; background:linear-gradient(180deg,#07101d,#111827); color:var(--text); font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-      .hidden,[hidden] { display:none!important; } .panel { background:rgba(17,28,48,.94); border:1px solid var(--line); border-radius:14px; padding:14px; }
-      h1 { margin:0 0 4px; font-size:17px; } h2 { margin:18px 0 10px; font-size:12px; color:#bfdbfe; text-transform:uppercase; letter-spacing:1.4px; }
-      p,.hint,.status { color:var(--muted); } p { margin:0 0 12px; } .field { display:grid; gap:6px; margin-bottom:11px; } label { color:var(--muted); }
-      input,select { width:100%; border:1px solid var(--line); border-radius:9px; background:#0b1220; color:var(--text); padding:9px 10px; }
-      input[type=checkbox] { width:auto; } input[type=hidden] { display:none; } .grid { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
-      .check { display:flex; gap:8px; align-items:center; padding:7px 0; } button { border:1px solid var(--line); border-radius:9px; padding:9px 10px; background:#101b30; color:var(--text); font-weight:700; cursor:pointer; }
-      button.primary { background:var(--accent); color:#082f49; border:0; } .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
-      .runtime { padding:10px; border-radius:10px; background:#0b1220; border:1px solid var(--line); margin-bottom:10px; } .runtime strong { color:#bfdbfe; }
-      .server-list { max-height:150px; overflow:auto; display:grid; gap:6px; } .server { padding:8px; border:1px solid var(--line); border-radius:8px; color:var(--muted); }
-      .server b { color:var(--text); } .danger { color:#fca5a5; } .uspi-feedback { text-align:center; color:var(--accent); margin-top:9px; }
+      :root { color-scheme: dark; --bg: #0f172a; --panel: #111c30; --text: #e2e8f0; --muted: #94a3b8; --line: #23314f; --accent: #60a5fa; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #07101d 0%, #111827 100%); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(17, 28, 48, 0.92); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 16px; }
+      h2 { margin: 18px 0 10px; font-size: 11px; color: #bfdbfe; text-transform: uppercase; letter-spacing: 1.4px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      label { color: var(--muted); }
+      input, select { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; color: var(--text); padding: 10px 12px; }
+      input[type="hidden"] { display: none; }
+      input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .theme-row, .seg-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #0b1220; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active, .seg-btn.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .seg-btn { min-width: 72px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: #0b1220; color: var(--text); cursor: pointer; font-size: 12px; font-weight: 700; }
+      .toggle-row { display: grid; gap: 8px; }
+      .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; }
+      .toggle strong { display: block; font-size: 12px; }
+      .toggle span { color: var(--muted); font-size: 12px; }
+      .action-row { display: flex; gap: 10px; margin-top: 10px; }
+      .action-row button { flex: 1; }
+      button[type="submit"], .ghost-btn, .danger-btn {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button[type="submit"] { background: var(--accent); color: #082f49; }
+      .ghost-btn { background: rgba(148, 163, 184, 0.14); color: var(--text); border: 1px solid var(--line); }
+      .danger-btn { background: rgba(248, 113, 113, 0.12); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.28); }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+      .frame-row { display: flex; gap: 10px; align-items: center; }
+      .frame-toggle { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; cursor: pointer; }
+      .frame-toggle input { width: auto; }
+      .runtime { padding: 10px 12px; border-radius: 10px; background: #0b1220; border: 1px solid var(--line); margin-bottom: 10px; color: var(--muted); }
+      .runtime strong { color: #bfdbfe; }
+      .server-list { max-height: 190px; overflow: auto; display: grid; gap: 6px; }
+      .server { width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; color: var(--muted); font: inherit; }
+      label.server { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+      label.server input { flex: none; margin-top: 2px; }
+      label.server.checked { border-color: var(--accent); background: rgba(96, 165, 250, 0.1); }
+      .server b { color: var(--text); }
+      .danger { color: #fca5a5; }
     </style>
   </head>
   <body>
-    <div class="uspi-wrapper hidden"><div class="panel">
-      <h1>Network Speed</h1><p>一个 action 可放置多个实例；每个实例独立选择中国大陆或海外节点。</p>
-      <form id="property-inspector">
-        <div id="runtime" class="runtime">等待插件状态…</div><div id="recentDetails" class="server-list"></div>
-        <h2>概览与计划</h2>
-        <div class="grid"><div class="field"><label for="scope">节点区域</label><select id="scope" name="scope"><option value="mainland">中国大陆</option><option value="overseas">海外（含港澳台）</option></select></div><div class="field"><label for="intervalMin">自动测速</label><select id="intervalMin" name="intervalMin"><option value="15">每 15 分钟</option><option value="30">每 30 分钟</option><option value="60">每 60 分钟</option><option value="manual">仅手动</option></select></div></div>
-        <label class="check"><input id="activeAllDay" name="activeAllDay" type="checkbox">全天活跃</label>
-        <div class="grid"><div class="field"><label for="activeStart">开始</label><input id="activeStart" name="activeStart" type="time" value="08:00"></div><div class="field"><label for="activeEnd">结束</label><input id="activeEnd" name="activeEnd" type="time" value="23:00"></div></div>
-        <div class="field"><label for="timeoutSec">单次超时</label><select id="timeoutSec" name="timeoutSec"><option value="120">120 秒</option><option value="180">180 秒</option><option value="240">240 秒</option><option value="300">300 秒</option></select></div>
-        <h2>节点选择</h2>
-        <div class="field"><label for="selectionMode">模式</label><select id="selectionMode" name="selectionMode"><option value="dailyRandom">候选池每日随机</option><option value="fixed">固定节点</option></select></div>
-        <div class="field"><label for="serverSearch">筛选自动获取的节点</label><input id="serverSearch" type="search" placeholder="城市、运营商、IP、Server ID"></div>
-        <div id="serverList" class="server-list"><div class="server">尚未发现节点</div></div>
-        <input id="candidateServers" name="candidateServers" type="hidden" value="[]">
-        <div class="grid"><div class="field"><label for="fixedServerId">固定 Server ID</label><input id="fixedServerId" name="fixedServerId" inputmode="numeric" maxlength="12"></div><div class="field"><label for="manualServerId">手动验证 ID</label><input id="manualServerId" inputmode="numeric" maxlength="12"></div></div>
-        <div class="actions"><button id="refreshServers" type="button">重新获取节点</button><button id="verifyServer" type="button">验证手动 ID</button></div>
-        <h2>图表与外观</h2>
-        <div class="grid"><div class="field"><label for="chartType">最近 24 次</label><select id="chartType" name="chartType"><option value="line">折线图</option><option value="bar">柱状图</option></select></div><div class="field"><label for="theme">主题</label><select id="theme" name="theme"><option value="signal">Signal</option><option value="mint">Mint</option><option value="ember">Ember</option><option value="mono">Mono</option><option value="sand">Sand</option></select></div></div>
-        <label class="check"><input id="geoIpEnabled" name="geoIpEnabled" type="checkbox" checked>使用 IPWhois 校验节点 IP 位置（服务方可见请求公网 IP）</label>
-        <div class="grid"><label class="check"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked>适当放大</label><label class="check"><input id="showFrame" name="showFrame" type="checkbox" checked>显示边框</label></div>
-        <h2>诊断</h2>
-        <div class="field"><label for="cliPath">Ookla CLI 路径（可留空自动查找）</label><input id="cliPath" name="cliPath" placeholder="/opt/homebrew/bin/speedtest"><div class="hint">插件不会下载 CLI，也不会代为接受 Ookla 条款。</div></div>
-        <div class="actions"><button id="testSelected" class="primary" type="button">立即测速</button><button id="clearHistory" class="danger" type="button">清除历史</button><button id="resetDefaults" type="button">恢复默认</button><button class="primary" type="submit">保存</button></div>
-        <div class="uspi-feedback" id="inspector-feedback" hidden><span id="feedback-saved" hidden>已保存</span><span id="feedback-reset" hidden>已恢复默认</span></div>
-      </form>
-    </div></div>
-    <script src="../libs/js/constants.js"></script><script src="../libs/js/eventEmitter.js"></script><script src="../libs/js/utils.js"></script><script src="../libs/js/ulanzideckApi.js"></script><script src="./inspector-shared.js"></script><script src="./speedtest.js"></script>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1>Network Speed</h1>
+        <p>一个 action 可放置多个实例；每个实例独立选择节点区域：不限、中国大陆或海外。</p>
+        <form id="property-inspector">
+          <div id="runtime" class="runtime">等待插件状态…</div>
+
+          <h2>概览与计划</h2>
+          <div class="grid">
+            <div class="field">
+              <label for="scope">节点区域</label>
+              <select id="scope" name="scope">
+                <option value="any">不限</option>
+                <option value="mainland" selected>中国大陆</option>
+                <option value="overseas">海外（含港澳台）</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="intervalMin">自动测速</label>
+              <select id="intervalMin" name="intervalMin">
+                <option value="15">每 15 分钟</option>
+                <option value="30" selected>每 30 分钟</option>
+                <option value="60">每 60 分钟</option>
+                <option value="manual">仅手动</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="activeStart">开始</label>
+              <input id="activeStart" name="activeStart" type="time" value="08:00">
+            </div>
+            <div class="field">
+              <label for="activeEnd">结束</label>
+              <input id="activeEnd" name="activeEnd" type="time" value="23:00">
+            </div>
+          </div>
+          <div class="field">
+            <label for="timeoutSec">单次超时</label>
+            <select id="timeoutSec" name="timeoutSec">
+              <option value="120">120 秒</option>
+              <option value="180" selected>180 秒</option>
+              <option value="240">240 秒</option>
+              <option value="300">300 秒</option>
+            </select>
+          </div>
+
+          <h2>节点选择</h2>
+          <div class="field">
+            <label for="serverSearch">筛选自动获取的节点</label>
+            <input id="serverSearch" type="search" placeholder="城市、运营商、IP、Server ID">
+          </div>
+          <div id="selectionSummary" class="hint">不勾选：在当前区域的全部节点里每日随机。</div>
+          <div id="serverList" class="server-list"><div class="server">正在获取节点…</div></div>
+          <input id="candidateServers" name="candidateServers" type="hidden" value="[]">
+          <div class="action-row">
+            <button class="ghost-btn" id="refreshServers" type="button">重新获取节点</button>
+          </div>
+
+          <h2>图表与外观</h2>
+          <div class="field">
+            <label for="theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="signal">
+            <div class="theme-row" role="group" aria-label="Theme">
+            </div>
+          </div>
+          <div class="field">
+            <label for="chartType">最近 12 次</label>
+            <input id="chartType" name="chartType" type="hidden" value="line">
+            <div class="seg-row" role="group" aria-label="Chart">
+              <button class="seg-btn" type="button" data-chart-type="line">折线图</button>
+              <button class="seg-btn" type="button" data-chart-type="bar">柱状图</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle" for="activeAllDay">
+              <div>
+                <strong>全天活跃</strong>
+                <span>忽略上面的时间段，任何时刻都自动测速</span>
+              </div>
+              <input id="activeAllDay" name="activeAllDay" type="checkbox">
+            </label>
+            <label class="toggle" for="geoIpEnabled">
+              <div>
+                <strong>IP 位置校验</strong>
+                <span>用 IPWhois 校验节点 IP 位置（服务方可见请求公网 IP）</span>
+              </div>
+              <input id="geoIpEnabled" name="geoIpEnabled" type="checkbox" checked>
+            </label>
+          </div>
+
+          <h2>诊断</h2>
+          <div class="field">
+            <label for="cliPath">Ookla CLI 路径（可留空自动查找）</label>
+            <input id="cliPath" name="cliPath" placeholder="/opt/homebrew/bin/speedtest">
+            <div class="hint">插件不会下载 CLI，也不会代为接受 Ookla 条款。</div>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="testSelected" type="button">立即测速</button>
+            <button class="danger-btn" id="clearHistory" type="button">清除历史</button>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+            <button type="submit" data-localize="Save">Save</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./speedtest.js"></script>
   </body>
 </html>

@@ -2,7 +2,7 @@
 
 这个仓库提供一个可直接扩展的 Ulanzi DX200 / Ulanzi Deck JavaScript 插件最小框架。
 
-长期协作规则见 [docs/development-rules.md](docs/development-rules.md)，基座架构分析见 [docs/base-architecture.md](docs/base-architecture.md)。
+长期协作规则见 [docs/development-rules.md](docs/development-rules.md)，基座架构分析见 [docs/base-architecture.md](docs/base-architecture.md)，Lex Utility 基座与 3 个生产 action 的持续维护规格见 [docs/specifications/](docs/specifications/README.md)。
 
 当前已经按官方 SDK 的公开约定收敛了最关键的命名规则：
 
@@ -42,7 +42,7 @@
 │       │   └── actions/<key>.js   # 每个 action 的私有实现
 │       └── property-inspector/   # 每个 action 一组 <key>.html + <key>.js，共用 inspector-shared.js
 └── plugins/
-    └── com.ulanzi.lexutility.ulanziPlugin/   # 示例插件（6 个 action）
+    └── com.ulanzi.lexutility.ulanziPlugin/   # 示例插件（3 个生产 action）
 ```
 
 ## 快速开始
@@ -122,8 +122,18 @@ npm run install-plugin -- --plugin com.ulanzi.lexutility.ulanziPlugin
 - 校验插件目录是否存在
 - 自动复制整个插件目录
 - 覆盖同名旧版本
+- **保留目标目录下的 `data/`**（运行态：键位设置、latency 历史、speedtest 记录）
 
-装完后重启 `UlanziDeck Studio`。
+`data/` 只存在于目标目录那一份，仓库里的同名目录通常只是本地调试残留。所以同步只部署代码，
+既不删除目标运行态，也不用仓库的 `data/` 覆盖它。确实要从干净运行态重来时，显式加
+`--reset-data`：
+
+```bash
+npm run install-plugin -- --plugin com.ulanzi.lexutility.ulanziPlugin --reset-data
+```
+
+装完后重启 `UlanziDeck Studio`。Studio 只在自身启动时拉起插件进程，**不会自动重启已退出的插件**——
+手动结束插件进程后，需要重启 Studio 才能让它重新托管。
 
 ## 开发流
 
