@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 插件框架 | `template/` 母版 + `libs/`（宿主桥接）+ `inspector-shared.js` + `plugin/app.js` 里的框架段（`THEMES`、`normalizeSettings`、`INSTANCES`、事件分发、`renderScreenFrame`） | 框架不含业务，负责连接宿主、实例管理、设置归一化、渲染骨架 |
 | 运行实例 | 每个插件一个 Node.js 主服务进程（`plugin/app.js`，经 `run-plugin.mjs` 或宿主拉起） | 单进程内用 `INSTANCES: Map<context, instance>` 管理所有按键实例 |
-| 子功能集合 | `ACTION_CONFIGS` 注册表中的各 action（当前 6 个：counter / badge / swatch / fontprobe / latency / pomowave） | 每个 action 通过 `defaults + createState + onRun + render` 四件套接入框架 |
+| 子功能集合 | `ACTION_CONFIGS` 注册表中的各 action（当前 2 个：latency / pomowave） | 每个 action 通过 `defaults + createState + onRun + render` 四件套接入框架 |
 | 复制基座 | `scripts/create-plugin.mjs` 从 `template/` 生成新插件 | 一套框架可派生多个独立插件 |
 
 结论：**架构方向与需求一致，不需要推倒重来。** 仓库本身就是按“一个框架、一个运行实例、多个 action 子功能”设计的。
@@ -67,7 +67,7 @@
 
 ### 4.4 领域边界
 
-`lexutility` 当前 6 个 action 仍属“工具集”同一领域。若后续出现明显不同领域（如设备控制、IM 通知），按 [development-rules.md](development-rules.md) §9 拆新插件（即新的运行实例），而不是无限堆 action——基座的复制单位是插件，不是 action。
+`lexutility` 当前 2 个 action 仍属“工具集”同一领域。若后续出现明显不同领域（如设备控制、IM 通知），按 [development-rules.md](development-rules.md) §9 拆新插件（即新的运行实例），而不是无限堆 action——基座的复制单位是插件，不是 action。
 
 ## 4.5 进程内隔离层（已落地）
 

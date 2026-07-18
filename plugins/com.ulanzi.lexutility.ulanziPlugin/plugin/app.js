@@ -111,7 +111,6 @@ const THEMES = {
 };
 
 const THEME_NAMES = Object.keys(THEMES);
-const SWATCH_COLORS = ['#8b5cf6', '#14b8a6', '#f97316', '#ef4444', '#22c55e'];
 const LATENCY_HISTORY_LIMIT = 24;
 const LATENCY_GRAPH_MODES = ['bars', 'line'];
 const LATENCY_MANUAL_FEEDBACK_MS = 650;
@@ -155,70 +154,7 @@ const POMODORO_WINDOWS_SOUND_MAP = {
   purr: [659, 220],
   submarine: [392, 260],
 };
-const FONT_TEST_LINES = [
-  { size: 28, y: 96 },
-  { size: 32, y: 144 },
-  { size: 36, y: 198 },
-];
-const FONT_TEST_TEXT = '测速128Kbps';
-const FONT_TEST_FAMILY = '"Arial Black", "Helvetica Neue", Arial, Helvetica, sans-serif';
-
 const ACTION_CONFIGS = {
-  counter: {
-    defaults: {
-      title: 'Lex Utility',
-      subtitle: 'Counter',
-      theme: 'mint',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({ count: 0 }),
-    onRun: (instance) => {
-      instance.count += 1;
-    },
-    render: (instance) => renderCounterIcon(instance.settings, instance.count),
-  },
-  badge: {
-    defaults: {
-      title: 'Lex Utility',
-      subtitle: 'Status',
-      theme: 'ember',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({ activeBadge: true }),
-    onRun: (instance) => {
-      instance.activeBadge = !instance.activeBadge;
-    },
-    render: (instance) => renderBadgeIcon(instance.settings, instance.activeBadge),
-  },
-  swatch: {
-    defaults: {
-      title: 'Lex Utility',
-      subtitle: 'Palette',
-      theme: 'signal',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({ step: 0, currentColor: SWATCH_COLORS[0] }),
-    onRun: (instance) => {
-      instance.step = (instance.step + 1) % SWATCH_COLORS.length;
-      instance.currentColor = SWATCH_COLORS[instance.step];
-    },
-    render: (instance) => renderSwatchIcon(instance.settings, instance.step, instance.currentColor),
-  },
-  fontprobe: {
-    defaults: {
-      title: 'Lex Utility',
-      subtitle: 'Font Test',
-      theme: 'mono',
-      frameSize: 'optimal',
-      showFrame: 'true',
-    },
-    createState: () => ({}),
-    onRun: () => {},
-    render: (instance) => renderFontTestIcon(instance.settings),
-  },
   pomowave: {
     defaults: {
       focusMin: '25',
@@ -697,7 +633,7 @@ function actionFromContext(context) {
 }
 
 function actionKeyFromUuid(actionUuid) {
-  return ACTION_KEY_BY_UUID[actionUuid] || 'counter';
+  return ACTION_KEY_BY_UUID[actionUuid] || 'unknown';
 }
 
 function configFromUuid(actionUuid) {
@@ -998,105 +934,6 @@ function renderScreenFrame(theme, accent, innerSvg, frame = frameFor()) {
     ${chrome}
     ${frameContent(frame, innerSvg)}
   `;
-}
-
-function renderCounterIcon(settings, count) {
-  const theme = themeFor(settings);
-  const accent = theme.accent;
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="54" y="54" width="148" height="20" rx="10" fill="${accent}" opacity="0.2"/>
-          <text x="128" y="78" text-anchor="middle" fill="${theme.text}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.title)}</text>
-          <text x="128" y="138" text-anchor="middle" fill="${accent}" font-size="72" font-weight="700" font-family="Arial, Helvetica, sans-serif">${count}</text>
-          <text x="128" y="174" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
-          <text x="128" y="204" text-anchor="middle" fill="${theme.low}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to increment</text>
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
-}
-
-function renderBadgeIcon(settings, active) {
-  const theme = themeFor(settings);
-  const accent = theme.accent;
-  const pillFill = active ? accent : theme.low;
-  const pillText = active ? theme.contrast : theme.text;
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="54" y="56" width="148" height="42" rx="21" fill="${pillFill}"/>
-          <text x="128" y="84" text-anchor="middle" fill="${pillText}" font-size="20" font-weight="700" font-family="Arial, Helvetica, sans-serif">${active ? 'LIVE' : 'PAUSED'}</text>
-          <text x="128" y="136" text-anchor="middle" fill="${theme.text}" font-size="30" font-weight="700" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.title)}</text>
-          <text x="128" y="170" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
-          <text x="128" y="202" text-anchor="middle" fill="${accent}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to toggle</text>
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
-}
-
-function renderSwatchIcon(settings, step, currentColor) {
-  const theme = themeFor(settings);
-  const accent = normalizeColor(currentColor, theme.accent);
-  const dots = SWATCH_COLORS.map((color, index) => {
-    const cx = 72 + index * 28;
-    const stroke = step % SWATCH_COLORS.length === index ? theme.text : theme.shell;
-    return `<circle cx="${cx}" cy="194" r="10" fill="${color}" stroke="${stroke}" stroke-width="3"/>`;
-  }).join('');
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="54" y="54" width="148" height="76" rx="20" fill="${accent}"/>
-          <text x="128" y="162" text-anchor="middle" fill="${theme.text}" font-size="28" font-weight="700" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.title)}</text>
-          <text x="128" y="188" text-anchor="middle" fill="${theme.muted}" font-size="17" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
-          <text x="128" y="218" text-anchor="middle" fill="${theme.text}" font-size="17" font-family="Arial, Helvetica, sans-serif">${escapeXml(accent.toUpperCase())}</text>
-          ${dots}
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
-}
-
-function renderFontTestIcon(settings) {
-  const theme = themeFor(settings);
-  const accent = theme.accent;
-  const samples = FONT_TEST_LINES.map(({ size, y }, index) => {
-    const fill = index === 2 ? accent : theme.text;
-    return `
-      <text x="128" y="${y}" text-anchor="middle" fill="${fill}" font-size="${size}" font-weight="800" font-family="${FONT_TEST_FAMILY}">${escapeXml(FONT_TEST_TEXT)}</text>
-    `;
-  }).join('');
-
-  return toDataUrl(`
-    <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-      ${renderScreenFrame(
-        theme,
-        accent,
-        `
-          <rect x="50" y="50" width="156" height="156" rx="20" fill="none" stroke="${accent}" stroke-width="2"/>
-          <rect x="40" y="40" width="176" height="176" rx="24" fill="none" stroke="${theme.muted}" stroke-width="1.5" stroke-dasharray="6 6" opacity="0.8"/>
-          ${samples}
-        `,
-        frameFor(settings),
-      )}
-    </svg>
-  `);
 }
 
 function pomodoroPalette(settings) {

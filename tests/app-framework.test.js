@@ -27,7 +27,19 @@ const frameworks = [
     resolveSettings: lexTesting.resolveSettingsForEvent,
     storageFactory: lexTesting.createSettingsStorage,
     writePersistedSettings: lexTesting.writePersistedSettings,
-    context: 'com.ulanzi.ulanzistudio.lexutility.counter___key-1___action-1',
+    configKey: 'latency',
+    context: 'com.ulanzi.ulanzistudio.lexutility.latency___key-1___action-1',
+    renderInstance: (overrides = {}) => ({
+      settings: { ...lexActionConfigs.latency.defaults, ...overrides },
+      lastMs: null,
+      status: 'checking',
+      checking: false,
+      requestId: 0,
+      buckets: [],
+      recent: [],
+      paused: false,
+      certExpiresAt: null,
+    }),
   },
   {
     name: 'template',
@@ -42,9 +54,28 @@ const frameworks = [
     resolveSettings: templateTesting.resolveSettingsForEvent,
     storageFactory: templateTesting.createSettingsStorage,
     writePersistedSettings: templateTesting.writePersistedSettings,
+    configKey: 'counter',
     context: '__PLUGIN_UUID__.counter___key-1___action-1',
+    renderInstance: (overrides = {}) => ({
+      settings: { ...templateActionConfigs.counter.defaults, ...overrides },
+      count: 0,
+    }),
   },
 ];
+
+test('Lex Utility only exposes production actions', () => {
+  const manifestPath = path.resolve(
+    import.meta.dirname,
+    '../plugins/com.ulanzi.lexutility.ulanziPlugin/manifest.json',
+  );
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+  assert.deepEqual(Object.keys(lexActionConfigs).sort(), ['latency', 'pomowave']);
+  assert.deepEqual(
+    manifest.Actions.map((action) => action.UUID.split('.').at(-1)).sort(),
+    ['latency', 'pomowave'],
+  );
+});
 
 for (const framework of frameworks) {
   test(`${framework.name}: host restore keeps persisted settings authoritative`, () => {
@@ -119,19 +150,6 @@ for (const framework of frameworks) {
     assert.equal(instance.lastError?.message, 'state exploded');
   });
 
-  test(`${framework.name}: swatch rotation changes runtime state without mutating settings`, () => {
-    const config = framework.actionConfigs.swatch;
-    const settings = { ...config.defaults };
-    const originalSettings = { ...settings };
-    const instance = { settings, ...config.createState() };
-
-    config.onRun(instance);
-
-    assert.deepEqual(instance.settings, originalSettings);
-    assert.equal(instance.step, 1);
-    assert.equal(instance.currentColor, '#14b8a6');
-  });
-
   test(`${framework.name}: production event processor restores persisted settings and syncs them to host`, () => {
     const sent = [];
     const writes = [];
@@ -140,21 +158,20 @@ for (const framework of frameworks) {
         sendParamFromPlugin: (settings, context) => sent.push({ settings, context }),
       },
       instances: new Map(),
-      readPersisted: () => ({ title: 'persisted', theme: 'mono' }),
+      readPersisted: () => ({
+        ...framework.actionConfigs[framework.configKey].defaults,
+        theme: 'mono',
+      }),
       writePersisted: (context, config, settings) => writes.push({ context, config, settings }),
       render: () => {},
       ready: () => {},
     });
 
-    const instance = controller.hostRestore(framework.context, {
-      title: 'stale host',
-      theme: 'mint',
-    });
+    const instance = controller.hostRestore(framework.context, { theme: 'mint' });
 
-    assert.equal(instance.settings.title, 'persisted');
     assert.equal(instance.settings.theme, 'mono');
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].settings.title, 'persisted');
+    assert.equal(sent[0].settings.theme, 'mono');
     assert.equal(sent[0].context, framework.context);
     assert.equal(writes.length, 0);
   });
@@ -164,21 +181,20 @@ for (const framework of frameworks) {
     const controller = framework.createSettingsEventProcessor({
       ud: { sendParamFromPlugin: () => {} },
       instances: new Map(),
-      readPersisted: () => ({ title: 'persisted', theme: 'mono' }),
+      readPersisted: () => ({
+        ...framework.actionConfigs[framework.configKey].defaults,
+        theme: 'mono',
+      }),
       writePersisted: (context, config, settings) => writes.push({ context, config, settings }),
       render: () => {},
       ready: () => {},
     });
 
-    const instance = controller.pluginSubmit(framework.context, {
-      title: 'fresh PI',
-      theme: 'signal',
-    });
+    const instance = controller.pluginSubmit(framework.context, { theme: 'signal' });
 
-    assert.equal(instance.settings.title, 'fresh PI');
     assert.equal(instance.settings.theme, 'signal');
     assert.equal(writes.length, 1);
-    assert.equal(writes[0].settings.title, 'fresh PI');
+    assert.equal(writes[0].settings.theme, 'signal');
   });
 
   test(`${framework.name}: createState error invokes the injected ERR renderer and returns control`, () => {
@@ -203,11 +219,7 @@ for (const framework of frameworks) {
   });
 
   test(`${framework.name}: repeated host restore and unchanged PI do not write, changed PI writes once`, () => {
-    let persisted = {
-      title: 'persisted',
-      subtitle: 'Counter',
-      theme: 'mono',
-    };
+    let persisted = { theme: 'mono' };
     const writes = [];
     const controller = framework.createSettingsEventProcessor({
       ud: { sendParamFromPlugin: () => {} },
@@ -221,14 +233,14 @@ for (const framework of frameworks) {
       ready: () => {},
     });
 
-    controller.hostRestore(framework.context, { title: 'stale host' });
-    controller.hostRestore(framework.context, { title: 'stale host' });
-    controller.pluginSubmit(framework.context, { title: 'persisted' });
+    controller.hostRestore(framework.context, { theme: 'mint' });
+    controller.hostRestore(framework.context, { theme: 'mint' });
+    controller.pluginSubmit(framework.context, { theme: 'mono' });
     assert.equal(writes.length, 0);
 
-    controller.pluginSubmit(framework.context, { title: 'changed' });
+    controller.pluginSubmit(framework.context, { theme: 'signal' });
     assert.equal(writes.length, 1);
-    assert.equal(writes[0].settings.title, 'changed');
+    assert.equal(writes[0].settings.theme, 'signal');
   });
 
   test(`${framework.name}: runtime ensure ignores host params and never persists existing instance`, () => {
@@ -237,29 +249,25 @@ for (const framework of frameworks) {
       ud: { sendParamFromPlugin: () => {} },
       instances: new Map(),
       readPersisted: () => ({
-        title: 'persisted',
-        subtitle: 'Counter',
+        ...framework.actionConfigs[framework.configKey].defaults,
         theme: 'mono',
       }),
       writePersisted: (...args) => writes.push(args),
       render: () => {},
       ready: () => {},
     });
-    const instance = controller.hostRestore(framework.context, { title: 'stale host' });
+    const instance = controller.hostRestore(framework.context, { theme: 'mint' });
 
-    controller.runtime(framework.context, { title: 'runtime stale value' });
+    controller.runtime(framework.context, { theme: 'signal' });
 
-    assert.equal(instance.settings.title, 'persisted');
+    assert.equal(instance.settings.theme, 'mono');
     assert.equal(writes.length, 0);
   });
 
   test(`${framework.name}: safe frame scales content and toggles the frame chrome`, () => {
-    const render = framework.actionConfigs.counter.render;
+    const render = framework.actionConfigs[framework.configKey].render;
     const decode = (icon) => Buffer.from(icon.split(',')[1], 'base64').toString('utf8');
-    const instanceFor = (overrides) => ({
-      count: 0,
-      settings: { title: 'T', subtitle: 'S', theme: 'mint', frameSize: 'optimal', showFrame: 'true', ...overrides },
-    });
+    const instanceFor = framework.renderInstance;
 
     // 几何：optimal 内容箱收到 30（壳→面板留白 12，放大 ~1.11）；max 放大 1.25。
     assert.equal(framework.frameFor({ frameSize: 'optimal' }).scale, (256 - 30 * 2) / 176);
@@ -282,23 +290,27 @@ for (const framework of frameworks) {
       assert.equal(frame.highlightRadius, Math.max(2, frame.bleedRadius - (frame.highlight - frame.bleed)), size);
     }
 
-    const optimal = decode(render(instanceFor({})));
-    assert.ok(optimal.includes('stroke'), 'frame chrome should be drawn by default');
-    assert.ok(optimal.includes('scale(1.1136'), 'optimal frame scales content into the tightened 30-inset box');
-    assert.ok(
-      optimal.includes('x="12" y="12" width="232" height="232" rx="38"'),
-      'optimal background is inset to the safe frame instead of filling the key',
-    );
+    // template 的 counter 直接消费 renderScreenFrame，可作为共享骨架的端到端夹具；
+    // Lex Utility 的 latency 使用自己的主题背景，另有专门的安全框渲染测试覆盖。
+    if (framework.name === 'template') {
+      const optimal = decode(render(instanceFor({})));
+      assert.ok(optimal.includes('stroke'), 'frame chrome should be drawn by default');
+      assert.ok(optimal.includes('scale(1.1136'), 'optimal frame scales content into the tightened 30-inset box');
+      assert.ok(
+        optimal.includes('x="12" y="12" width="232" height="232" rx="38"'),
+        'optimal background is inset to the safe frame instead of filling the key',
+      );
 
-    const max = decode(render(instanceFor({ frameSize: 'max' })));
-    assert.ok(max.includes('scale(1.25'), 'max frame scales content to the larger safe area');
-    assert.ok(
-      max.includes('x="0" y="0" width="256" height="256" rx="42"'),
-      'max background fills the whole key',
-    );
+      const max = decode(render(instanceFor({ frameSize: 'max' })));
+      assert.ok(max.includes('scale(1.25'), 'max frame scales content to the larger safe area');
+      assert.ok(
+        max.includes('x="0" y="0" width="256" height="256" rx="42"'),
+        'max background fills the whole key',
+      );
 
-    const hidden = decode(render(instanceFor({ showFrame: 'false' })));
-    assert.ok(!hidden.includes('stroke'), 'hidden frame removes the chrome strokes');
+      const hidden = decode(render(instanceFor({ showFrame: 'false' })));
+      assert.ok(!hidden.includes('stroke'), 'hidden frame removes the chrome strokes');
+    }
   });
 
   test(`${framework.name}: frame settings normalize with safe fallbacks`, () => {
@@ -321,9 +333,9 @@ for (const framework of frameworks) {
     const sent = [];
     const writes = [];
     const hookCalls = [];
-    let persisted = { title: 'persisted', subtitle: 'Sub', theme: 'mono' };
-    const counterConfig = framework.actionConfigs.counter;
-    counterConfig.onParamFromPlugin = (instance, param) => hookCalls.push(param);
+    let persisted = { theme: 'mono' };
+    const actionConfig = framework.actionConfigs[framework.configKey];
+    actionConfig.onParamFromPlugin = (instance, param) => hookCalls.push(param);
     try {
       const controller = framework.createSettingsEventProcessor({
         ud: { sendParamFromPlugin: (settings, context) => sent.push({ settings, context }) },
@@ -341,15 +353,13 @@ for (const framework of frameworks) {
 
       const instance = controller.pluginSubmit(framework.context, { __resetDefaults: 'true' });
 
-      const defaults = counterConfig.defaults;
-      const expectedTitle = String(defaults.title).slice(0, 14);
-      assert.equal(instance.settings.title, expectedTitle);
+      const defaults = actionConfig.defaults;
       assert.equal(instance.settings.theme, defaults.theme);
       assert.equal(writes.length, 1);
-      assert.equal(writes[0].title, expectedTitle);
+      assert.equal(writes[0].theme, defaults.theme);
       assert.equal(Object.hasOwn(writes[0], '__resetDefaults'), false);
       assert.equal(sent.length, 1);
-      assert.equal(sent[0].settings.title, expectedTitle);
+      assert.equal(sent[0].settings.theme, defaults.theme);
       assert.equal(sent[0].settings.__resetDefaults, undefined);
       assert.equal(sent[0].context, framework.context);
       assert.deepEqual(hookCalls, [], 'control param must not reach action onParamFromPlugin');
@@ -359,7 +369,7 @@ for (const framework of frameworks) {
       assert.equal(writes.length, 1);
       assert.equal(sent.length, 2);
     } finally {
-      delete counterConfig.onParamFromPlugin;
+      delete actionConfig.onParamFromPlugin;
     }
   });
 
@@ -481,14 +491,17 @@ for (const framework of frameworks) {
       render: () => {},
       ready: () => {},
     });
+    const retryTheme = framework.actionConfigs[framework.configKey].defaults.theme === 'signal'
+      ? 'mono'
+      : 'signal';
 
-    controller.pluginSubmit(framework.context, { title: 'retry me' });
+    controller.pluginSubmit(framework.context, { theme: retryTheme });
     assert.equal(attempts, 1);
     assert.deepEqual(mirror, {});
 
-    controller.pluginSubmit(framework.context, { title: 'retry me' });
+    controller.pluginSubmit(framework.context, { theme: retryTheme });
     assert.equal(attempts, 2);
-    assert.equal(mirror.slot.title, 'retry me');
+    assert.equal(mirror.slot.theme, retryTheme);
     assert.deepEqual(disk, mirror);
   });
 }
@@ -1291,13 +1304,15 @@ const persistenceFrameworks = [
     name: 'lex utility',
     t: lexTesting,
     configs: lexActionConfigs,
-    actionUuid: 'com.ulanzi.ulanzistudio.lexutility.counter',
-    context: 'com.ulanzi.ulanzistudio.lexutility.counter___key-1___action-1',
+    configKey: 'latency',
+    actionUuid: 'com.ulanzi.ulanzistudio.lexutility.latency',
+    context: 'com.ulanzi.ulanzistudio.lexutility.latency___key-1___action-1',
   },
   {
     name: 'template',
     t: templateTesting,
     configs: templateActionConfigs,
+    configKey: 'counter',
     actionUuid: '__PLUGIN_UUID__.counter',
     context: '__PLUGIN_UUID__.counter___key-1___action-1',
   },
@@ -1337,7 +1352,7 @@ for (const framework of persistenceFrameworks) {
   });
 
   test(`${framework.name}: onDispose runs before timers are reclaimed`, async () => {
-    const config = framework.configs.counter;
+    const config = framework.configs[framework.configKey];
     const events = [];
     const instance = { context: framework.context, actionUuid: framework.actionUuid };
     const pending = framework.t.delayInstance(instance, 'slot', 10_000);
@@ -1358,7 +1373,7 @@ for (const framework of persistenceFrameworks) {
   });
 
   test(`${framework.name}: a throwing onDispose still cannot leak timers`, async () => {
-    const config = framework.configs.counter;
+    const config = framework.configs[framework.configKey];
     const instance = { context: framework.context, actionUuid: framework.actionUuid };
     const pending = framework.t.delayInstance(instance, 'slot', 10_000);
     const originalConsoleLog = console.log;
@@ -1378,12 +1393,11 @@ for (const framework of persistenceFrameworks) {
   });
 
   test(`${framework.name}: disposing an instance with an unknown action does not dispatch a foreign hook`, () => {
-    const config = framework.configs.counter;
+    const config = framework.configs[framework.configKey];
     let called = false;
     config.onDispose = () => { called = true; };
     try {
-      // actionKeyFromUuid 对未知 UUID 会兜底成 counter，disposeInstance 不能因此把
-      // counter 的钩子派发给一个根本不属于它的实例。
+      // 未知 UUID 不能把任一已注册 action 的钩子派发给一个不属于它的实例。
       framework.t.disposeInstance({ context: 'x', actionUuid: 'totally-unknown' });
     } finally {
       delete config.onDispose;

@@ -301,18 +301,14 @@ npm test
 
 > 约定：action key 用于 UUID、`ACTION_CONFIGS`、`property-inspector/<key>.html` 与 `<key>.js`、`assets/icons/action<Key>.svg` 四层命名，必须保持一致（详见 [docs/development-rules.md](docs/development-rules.md) §4、§8）。`Font Test` 的展示名是 “Font Test”，但 key 是 `fontprobe`，对应文件即 `fontprobe.html` / `fontprobe.js`。
 
-仓库内的示例插件 `plugins/com.ulanzi.lexutility.ulanziPlugin` 在上述 4 个 action 之外，额外演示了两个扩展 action：
+仓库内的业务插件 `plugins/com.ulanzi.lexutility.ulanziPlugin` 不携带上述模板测试 action，只保留实际使用的工具：
 
 - `Latency`（key `latency`）：网络/接口延迟监测展示
 - `Pomowave`（key `pomowave`）：番茄钟节奏可视化
 
 新增 action 时按相同四层命名扩展即可，不需要改脚手架。
 
-每个 action 都有内置主题切换：
-
-- `Counter` / `Badge` 同时支持 `theme + accent color`
-- `Swatch` 用 `theme` 切换外框风格，点击按钮继续轮换内置色板
-- `Font Test` 只保留主题切换，使用较粗的无衬线字体做固定 3 行真机字号对照
+两个业务 action 都复用内置主题、安全框和共享 Inspector。
 
 图标基线：
 
