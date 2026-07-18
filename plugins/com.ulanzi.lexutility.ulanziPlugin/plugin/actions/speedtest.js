@@ -9,6 +9,7 @@ export function createSpeedtestAction(runtime) {
     clearInstanceTimeout,
     escapeXml,
     exclusiveTasks,
+    frameContent,
     frameFor,
     frameHighlight,
     normalizeBooleanString,

@@ -11,7 +11,7 @@ export function createLatencyAction(runtime) {
     frameFor,
     frameHighlight,
     guardAction,
-    instances,
+    instances: INSTANCES,
     mixHex,
     normalizeChoice,
     normalizeNumberString,
@@ -504,7 +504,7 @@ function scheduleLatencyCheck(instance) {
   setInstanceTimeout(instance, 'latency', () => runLatencyCheck(instance), intervalSec * 1000);
 }
 
-function isInstanceCurrent(instance, requestId, instances = instances) {
+function isInstanceCurrent(instance, requestId, instances = INSTANCES) {
   return instances.get(instance.context) === instance && requestId === instance.requestId;
 }
 
@@ -512,7 +512,7 @@ function commitLatencyResult(instance, result, options = {}) {
   const {
     requestId,
     feedbackCompleted = true,
-    instances = instances,
+    instances = INSTANCES,
     warnMs = Number.parseInt(instance.settings.warnMs, 10) || 400,
     render = renderInstance,
     schedule = scheduleLatencyCheck,

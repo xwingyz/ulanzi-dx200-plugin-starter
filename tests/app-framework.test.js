@@ -766,6 +766,46 @@ test('lex utility: pomowave overdue tick advances the phase after a sleep gap', 
   lexTesting.dropPersistedState(context);
 });
 
+// 拆分 action 模块后，pomowave 曾漏接 runtime 的 instances / frameHighlight，
+// 而既有用例每次都显式传 instances、又从不构造告警脉冲，两条真机路径全部脱网。
+// 这两个用例专门守住「按模块自身闭包解析依赖」这件事。
+test('lex utility: pomowave tick without an explicit instance map falls back to the runtime registry', () => {
+  const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___tick___fallback';
+  const instance = createPomodoroInstance(context, {
+    phase: 'focus',
+    running: true,
+    totalSec: 1500,
+    remainingSec: 1500,
+    phaseEndAt: Date.now() + 91_000,
+  });
+
+  // 实例不在框架注册表里，tick 应安静退出；修复前这里是 ReferenceError: INSTANCES is not defined。
+  assert.doesNotThrow(() => lexTesting.tickPomodoro(instance));
+
+  lexTesting.clearInstanceTimeout(instance, 'pomodoro');
+  lexTesting.dropPersistedState(context);
+});
+
+test('lex utility: pomowave renders the alert pulse inside the final countdown window', () => {
+  const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___render___pulse';
+  const instance = createPomodoroInstance(context, {
+    phase: 'focus',
+    running: true,
+    totalSec: 1500,
+    remainingSec: 4,
+    phaseEndAt: Date.now() + 4_000,
+  });
+
+  // 剩余 4 秒触发 frameHighlight；修复前渲染整键报 ReferenceError 并退化成 ERR 图。
+  const icon = lexActionConfigs.pomowave.render(instance);
+  assert.match(icon, /^data:image\/svg\+xml;base64,/);
+  const svg = Buffer.from(icon.split(',')[1], 'base64').toString('utf8');
+  assert.match(svg, /stroke-width="6"/);
+
+  lexTesting.clearInstanceTimeout(instance, 'pomodoro');
+  lexTesting.dropPersistedState(context);
+});
+
 test('lex utility: pomowave pause freezes remaining and resume rebuilds the deadline', () => {
   const now = Date.now();
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___toggle___t1';
@@ -1068,6 +1108,35 @@ test('lex utility: pomowave repeats cues only while awaiting manual phase start'
   assert.equal(shouldRepeat({ repeatManualCue: 'true' }, { autoStart: false }), true);
   assert.equal(shouldRepeat({ repeatManualCue: 'false' }, { autoStart: false }), false);
   assert.equal(shouldRepeat({ repeatManualCue: 'true' }, { autoStart: true }), false);
+});
+
+// 既有 commit 用例要么显式传 instances、要么以 feedbackCompleted:false 短路，
+// 默认参数 `instances = INSTANCES` 那条路径从没被走过——而拆分时它一度被写成
+// `instances = instances`（自引用默认值），真机每次定时检查都 TDZ 崩在这里。
+test('lex utility: latency commit falls back to the runtime registry without an instance map', () => {
+  const instance = {
+    context: 'com.ulanzi.ulanzistudio.lexutility.latency___commit___fallback',
+    requestId: 1,
+    recent: [],
+    buckets: [],
+    status: 'checking',
+    checking: true,
+    settings: { warnMs: '800' },
+  };
+
+  let committed;
+  assert.doesNotThrow(() => {
+    committed = frameworkLatencyCommit(instance, { ok: true, ms: 25, code: 200 }, {
+      requestId: 1,
+      flush: () => {},
+      render: () => {},
+      schedule: () => {},
+    });
+  });
+
+  // 实例不在框架注册表里，提交应被判定为过期而安静丢弃
+  assert.equal(committed, false);
+  assert.equal(instance.status, 'checking');
 });
 
 test('lex utility: cancelled latency feedback cannot commit stale result', async () => {
