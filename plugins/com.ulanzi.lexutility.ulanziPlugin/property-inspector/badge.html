@@ -15,17 +15,20 @@
       .field { display: grid; gap: 6px; margin-bottom: 12px; }
       label { color: var(--muted); }
       input { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #09090b; color: var(--text); padding: 10px 12px; }
-      input[type="color"] { padding: 4px; height: 44px; }
       input[type="hidden"] { display: none; }
       .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
       .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #09090b; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
       .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
       .theme-chip span { display: block; width: 100%; height: 100%; }
-      .theme-chip[data-theme-value="mint"] span { background: linear-gradient(90deg, #07111f 0 20%, #08131f 20% 40%, #0f172a 40% 65%, #14b8a6 65% 100%); }
-      .theme-chip[data-theme-value="ember"] span { background: linear-gradient(90deg, #1a0d08 0 20%, #140a06 20% 40%, #2a140c 40% 65%, #f97316 65% 100%); }
-      .theme-chip[data-theme-value="mono"] span { background: linear-gradient(90deg, #09090b 0 20%, #111111 20% 40%, #18181b 40% 65%, #d4d4d8 65% 100%); }
-      .theme-chip[data-theme-value="signal"] span { background: linear-gradient(90deg, #06111f 0 20%, #07101d 20% 40%, #0b1730 40% 65%, #60a5fa 65% 100%); }
       button { width: 100%; border: 0; border-radius: 10px; padding: 10px 12px; background: var(--accent); color: #431407; font-weight: 700; cursor: pointer; }
+      .action-row { display: flex; gap: 10px; }
+      .action-row button { width: auto; flex: 1; }
+      .ghost-btn { background: rgba(148, 163, 184, 0.14); color: var(--text); border: 1px solid var(--line); }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+      .frame-row { display: flex; gap: 10px; align-items: center; }
+      .frame-toggle { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; cursor: pointer; }
+      .frame-toggle input { width: auto; }
     </style>
   </head>
   <body>
@@ -43,20 +46,26 @@
             <input id="subtitle" name="subtitle" maxlength="18" value="Status">
           </div>
           <div class="field">
-            <label for="color">Accent</label>
-            <input id="color" name="color" type="color" value="#f97316">
-          </div>
-          <div class="field">
             <label for="theme">Theme</label>
             <input id="theme" name="theme" type="hidden" value="ember">
             <div class="theme-row" role="group" aria-label="Theme">
-              <button class="theme-chip" type="button" data-theme-value="mint" aria-label="CRT Mint"><span></span></button>
-              <button class="theme-chip" type="button" data-theme-value="ember" aria-label="CRT Ember"><span></span></button>
-              <button class="theme-chip" type="button" data-theme-value="mono" aria-label="CRT Mono"><span></span></button>
-              <button class="theme-chip" type="button" data-theme-value="signal" aria-label="CRT Signal"><span></span></button>
             </div>
           </div>
-          <button type="submit">Save</button>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+            <button type="submit" data-localize="Save">Save</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
+          </div>
         </form>
       </div>
     </div>

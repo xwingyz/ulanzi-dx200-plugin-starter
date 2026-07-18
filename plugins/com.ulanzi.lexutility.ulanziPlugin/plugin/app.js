@@ -14,6 +14,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 按 `${actionid}::${key}` 归档。旧版 latency 专属文件仅用于一次性迁移。
 const SETTINGS_STORE_PATH = path.join(__dirname, '..', 'data', 'action-settings.json');
 const LEGACY_LATENCY_STORE_PATH = path.join(__dirname, '..', 'data', 'latency-settings.json');
+// 运行态与设置分开存：设置由框架自动落盘，运行态由 action 自己按语义边界批量写。
+const STATE_STORE_PATH = path.join(__dirname, '..', 'data', 'action-state.json');
 
 const THEMES = {
   mint: {
@@ -56,22 +58,88 @@ const THEMES = {
     low: '#1d4ed8',
     contrast: '#082f49',
   },
+  neon: {
+    accent: '#e879f9',
+    canvas: '#0d0221',
+    panel: '#1b0f3b',
+    shell: '#130829',
+    text: '#f3e8ff',
+    muted: '#c084fc',
+    low: '#6d28d9',
+    contrast: '#2e1065',
+  },
+  ice: {
+    accent: '#67e8f9',
+    canvas: '#051820',
+    panel: '#0b2a38',
+    shell: '#07202b',
+    text: '#ecfeff',
+    muted: '#a5f3fc',
+    low: '#0e7490',
+    contrast: '#083344',
+  },
+  sunset: {
+    accent: '#fb7185',
+    canvas: '#1f0910',
+    panel: '#38121f',
+    shell: '#2a0d17',
+    text: '#fff1f2',
+    muted: '#fda4af',
+    low: '#9f1239',
+    contrast: '#4c0519',
+  },
+  forest: {
+    accent: '#4ade80',
+    canvas: '#04150c',
+    panel: '#0d2b1a',
+    shell: '#082012',
+    text: '#ecfdf5',
+    muted: '#86efac',
+    low: '#166534',
+    contrast: '#052e16',
+  },
+  sand: {
+    accent: '#b45309',
+    canvas: '#f6f1e7',
+    panel: '#fffcf5',
+    shell: '#efe6d4',
+    text: '#292524',
+    muted: '#78716c',
+    low: '#d6c7ab',
+    contrast: '#fef3c7',
+  },
 };
 
 const THEME_NAMES = Object.keys(THEMES);
 const SWATCH_COLORS = ['#8b5cf6', '#14b8a6', '#f97316', '#ef4444', '#22c55e'];
 const LATENCY_HISTORY_LIMIT = 24;
 const LATENCY_GRAPH_MODES = ['bars', 'line'];
-const LATENCY_BACKGROUNDS = ['gradient', 'stars', 'mist', 'paper'];
 const LATENCY_MANUAL_FEEDBACK_MS = 650;
+// uptime 聚合：5 分钟一桶、只保留 24h（288 桶）。逐条存样本在 3s 间隔下会到 28800 条，
+// 所以桶内延迟分布用固定分箱直方图压成 17 个整数——p95 精度到箱宽，对按钮上的三位数足够。
+const LATENCY_BUCKET_MS = 5 * 60 * 1000;
+const LATENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const LATENCY_BUCKET_LIMIT = LATENCY_WINDOW_MS / LATENCY_BUCKET_MS;
+const LATENCY_BINS = [25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400, 3200, 5000, 8000, Infinity];
+const LATENCY_STATE_VERSION = 1;
+// 双击窗口：单击不等待这 400ms（刷新是幂等的，先发出去），第二次按键到达时再撤销。
+const LATENCY_DOUBLE_TAP_MS = 400;
+const LATENCY_SSL_WARN_DAYS = 30;
 const POMODORO_SOUND_STYLES = ['glass', 'hero', 'purr', 'submarine'];
 const POMODORO_ALERT_WINDOW_SEC = 5;
 const POMODORO_CYCLE_COMPLETE_SEC = 4;
+const POMODORO_STATE_VERSION = 1;
+const POMODORO_PHASES = ['idle', 'focus', 'shortBreak', 'longBreak', 'done'];
 const POMODORO_PALETTES = {
   mint: { focus: '#14b8a6', shortBreak: '#22c55e', longBreak: '#38bdf8', done: '#84cc16' },
   ember: { focus: '#ff7f50', shortBreak: '#7ddf64', longBreak: '#74a9ff', done: '#facc15' },
   mono: { focus: '#f4f4f5', shortBreak: '#d4d4d8', longBreak: '#a1a1aa', done: '#86efac' },
   signal: { focus: '#fb7185', shortBreak: '#34d399', longBreak: '#60a5fa', done: '#fbbf24' },
+  neon: { focus: '#e879f9', shortBreak: '#34d399', longBreak: '#22d3ee', done: '#fde047' },
+  ice: { focus: '#67e8f9', shortBreak: '#4ade80', longBreak: '#818cf8', done: '#fbbf24' },
+  sunset: { focus: '#fb7185', shortBreak: '#4ade80', longBreak: '#38bdf8', done: '#facc15' },
+  forest: { focus: '#4ade80', shortBreak: '#2dd4bf', longBreak: '#60a5fa', done: '#fbbf24' },
+  sand: { focus: '#b45309', shortBreak: '#15803d', longBreak: '#1d4ed8', done: '#a16207' },
 };
 const POMODORO_MAC_SOUND_MAP = {
   glass: 'Glass',
@@ -98,8 +166,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: 'Lex Utility',
       subtitle: 'Counter',
-      color: '#14b8a6',
       theme: 'mint',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({ count: 0 }),
     onRun: (instance) => {
@@ -111,8 +180,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: 'Lex Utility',
       subtitle: 'Status',
-      color: '#f97316',
       theme: 'ember',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({ activeBadge: true }),
     onRun: (instance) => {
@@ -124,8 +194,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: 'Lex Utility',
       subtitle: 'Palette',
-      color: '#8b5cf6',
       theme: 'signal',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({ step: 0, currentColor: SWATCH_COLORS[0] }),
     onRun: (instance) => {
@@ -138,8 +209,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: 'Lex Utility',
       subtitle: 'Font Test',
-      color: '#d4d4d8',
       theme: 'mono',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({}),
     onRun: () => {},
@@ -151,28 +223,32 @@ const ACTION_CONFIGS = {
       shortBreakMin: '5',
       longBreakMin: '15',
       roundsBeforeLongBreak: '4',
-      color: '#ff7f50',
       theme: 'ember',
-      backgroundStyle: 'gradient',
+      frameSize: 'optimal',
+      showFrame: 'true',
       soundStyle: 'glass',
       soundEnabled: 'true',
       autoStartBreaks: 'true',
       autoStartFocus: 'true',
     },
-    createState: () => ({
+    createState: (instance) => ({
       phase: 'idle',
       remainingSec: null,
       totalSec: null,
       completedFocusRounds: 0,
       running: false,
+      phaseEndAt: null,
+      // 进行中的番茄靠 phaseEndAt 跨重启恢复真实剩余时间，重建实例不能把它吞掉。
+      ...(instance?.context ? hydratePomodoroState(readPersistedState(instance.context)) : {}),
     }),
     onRun: (instance) => {
       togglePomodoro(instance);
     },
     onReady: (instance) => {
       initializePomodoroInstance(instance);
-      if (instance.running && !hasInstanceTimeout(instance, 'pomodoro')) {
-        schedulePomodoroTick(instance);
+      if (instance.running) {
+        // 先按时钟对齐再续排定时器：睡眠唤醒/进程重启期间流逝的时间在这里一次性追平。
+        tickPomodoro(instance);
       }
     },
     onSettingsChanged: (instance, previousSettings) => {
@@ -182,7 +258,14 @@ const ACTION_CONFIGS = {
     onParamFromPlugin: (instance, param) => {
       if (param?.resetTimer === 'true') {
         resetPomodoroInstance(instance);
+        return;
       }
+      if (param?.skipPhase === 'true') {
+        skipPomodoroPhase(instance);
+      }
+    },
+    onDispose: (instance) => {
+      flushPomodoroState(instance);
     },
     render: (instance) => renderPomodoroIcon(instance),
   },
@@ -192,42 +275,57 @@ const ACTION_CONFIGS = {
       intervalSec: '30',
       warnMs: '800',
       timeoutMs: '8000',
+      sslWarnDays: '30',
       theme: 'signal',
-      color: '#60a5fa',
+      frameSize: 'optimal',
+      showFrame: 'true',
       graphMode: 'bars',
-      backgroundStyle: 'gradient',
     },
-    createState: () => ({
-      history: [],
+    createState: (instance) => ({
       lastMs: null,
       status: 'checking',
       checking: false,
       requestId: 0,
+      // 历史跨重启水合：24h uptime 的全部意义就在于此，重建实例不能把它清零。
+      ...hydrateLatencyState(readPersistedState(instance.context)),
     }),
-    onRun: (instance) =>
-      runLatencyCheck(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true }),
+    onRun: (instance) => handleLatencyTap(instance),
     onReady: (instance) => {
+      if (instance.paused) {
+        return undefined;
+      }
       scheduleLatencyCheck(instance);
-      if (!instance.history.length && !instance.checking) {
+      if (!instance.recent.length && !instance.checking) {
         return runLatencyCheck(instance, { immediateRender: true });
       }
       return undefined;
     },
     onSettingsChanged: (instance, previousSettings) => {
+      // 换 URL 意味着监控对象变了，历史与证书都不再属于它，必须连同落盘的记录一起丢弃；
+      // 只改间隔/阈值/超时则是同一个对象的观测方式变化，历史继续有效。
+      const targetChanged = previousSettings.url !== instance.settings.url;
       const probeChanged =
-        previousSettings.url !== instance.settings.url ||
+        targetChanged ||
         previousSettings.intervalSec !== instance.settings.intervalSec ||
-        previousSettings.warnMs !== instance.settings.warnMs ||
         previousSettings.timeoutMs !== instance.settings.timeoutMs;
+      if (targetChanged) {
+        instance.buckets = [];
+        instance.recent = [];
+        instance.certExpiresAt = null;
+        dropPersistedState(instance.context);
+      }
+      // 仅 warnMs / 主题这类纯展示项变化时无需重探——框架会在钩子返回后统一渲染。
       if (!probeChanged) {
         return;
       }
-      instance.history = [];
       instance.lastMs = null;
       instance.status = 'checking';
       clearLatencyTimer(instance);
       instance.checking = false;
       guardAction(instance, 'ready', () => onInstanceReady(instance));
+    },
+    onDispose: (instance) => {
+      flushLatencyState(instance);
     },
     render: (instance) => renderLatencyIcon(instance),
   },
@@ -244,6 +342,8 @@ const $UD = new UlanzideckApi();
 const INSTANCES = new Map();
 const SETTINGS_STORAGE = createSettingsStorage();
 const PERSISTED_SETTINGS = SETTINGS_STORAGE.load();
+const STATE_STORAGE = createSettingsStorage({ storePath: STATE_STORE_PATH, legacyPath: null });
+const PERSISTED_STATE = STATE_STORAGE.load();
 
 // ---- 框架隔离层：单进程内按实例隔离异常与定时器（见 docs/development-rules.md §4）----
 
@@ -275,7 +375,8 @@ function guardAction(instance, phase, fn, onError = reportActionError) {
 
 function initializeInstanceState(instance, config, options = {}) {
   const onError = (failedInstance, phase, error) => reportActionError(failedInstance, phase, error, options);
-  const state = guardAction(instance, 'createState', () => config.createState() || {}, onError);
+  // createState 收到的 instance 已带 context 与归一化 settings，据此可水合持久化运行态。
+  const state = guardAction(instance, 'createState', () => config.createState(instance) || {}, onError);
   if (state) {
     Object.assign(instance, state);
   }
@@ -323,7 +424,16 @@ function clearInstanceTimeout(instance, slot) {
 }
 
 function disposeInstance(instance) {
-  if (!instance?.timers) {
+  if (!instance) {
+    return;
+  }
+  // 先给 action 最后一次同步 flush 的机会，再回收定时器——顺序反了 onDispose 就拿不到
+  // 还在等定时器里落盘的运行态。onDispose 抛错不得阻断定时器回收。
+  const config = ACTION_KEY_BY_UUID[instance.actionUuid] ? configFromUuid(instance.actionUuid) : null;
+  if (config?.onDispose) {
+    guardAction(instance, 'dispose', () => config.onDispose(instance));
+  }
+  if (!instance.timers) {
     return;
   }
   for (const slot of [...instance.timers.keys()]) {
@@ -350,7 +460,7 @@ function renderErrorState(instance) {
           <text x="128" y="116" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="700" font-family="Arial, Helvetica, sans-serif">ERR</text>
           <text x="128" y="150" text-anchor="middle" fill="${theme.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${escapeXml(actionKey)}</text>
           <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">see plugin log</text>
-        `)}
+        `, frameFor(instance.settings || {}))}
       </svg>
     `));
   } catch {}
@@ -363,7 +473,8 @@ function toDataUrl(svg) {
 
 function createSettingsStorage(options = {}) {
   const storePath = options.storePath ?? SETTINGS_STORE_PATH;
-  const legacyPath = options.legacyPath ?? LEGACY_LATENCY_STORE_PATH;
+  // legacyPath: null 表示该存储没有历史包袱（如运行态存储），直接跳过迁移分支。
+  const legacyPath = options.legacyPath === undefined ? LEGACY_LATENCY_STORE_PATH : options.legacyPath;
   const fsImpl = options.fsImpl ?? fs;
   const logger = options.logger ?? log;
   let sequence = 0;
@@ -398,6 +509,9 @@ function createSettingsStorage(options = {}) {
           logger('persist store read failed', error?.stack || error);
           return {};
         }
+      }
+      if (!legacyPath) {
+        return {};
       }
       try {
         const legacyData = readJson(legacyPath);
@@ -484,6 +598,48 @@ function pickPersistedSettings(config, settings) {
   return clean;
 }
 
+// 运行态持久化：与设置存储同构（同一个 `${actionid}::${key}`），但框架不自动读写。
+// action 自己决定落盘时机，框架不感知运行态结构。读不到就返回空——历史是增益，不是前置条件。
+function readPersistedState(context, options = {}) {
+  const store = options.store ?? PERSISTED_STATE;
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const value = store[keyFromContext(context)];
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  return value;
+}
+
+function writePersistedState(context, data, options = {}) {
+  const store = options.store ?? PERSISTED_STATE;
+  const storage = options.storage ?? STATE_STORAGE;
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const key = keyFromContext(context);
+  const candidate = { ...store, [key]: data };
+  if (!storage.write(candidate)) {
+    return false;
+  }
+  store[key] = data;
+  return true;
+}
+
+function dropPersistedState(context, options = {}) {
+  const store = options.store ?? PERSISTED_STATE;
+  const storage = options.storage ?? STATE_STORAGE;
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const key = keyFromContext(context);
+  if (!(key in store)) {
+    return false;
+  }
+  const candidate = { ...store };
+  delete candidate[key];
+  if (!storage.write(candidate)) {
+    return false;
+  }
+  delete store[key];
+  return true;
+}
+
 function persistedSettingsEqual(actionUuid, config, settings, persistedSettings) {
   const desired = pickPersistedSettings(config, settings);
   const previous = pickPersistedSettings(config, normalizeSettings(actionUuid, persistedSettings));
@@ -507,6 +663,14 @@ function resolveSettingsForEvent(eventType, {
 
 function dispatchActionParam(config, instance, param) {
   return config.onParamFromPlugin?.(instance, param);
+}
+
+// 框架保留控制参数：PI 的“恢复默认配置”按钮通过它触发重置。
+// 控制参数不进入设置合并，也不透传给 action 的 onParamFromPlugin。
+const RESET_DEFAULTS_PARAM = '__resetDefaults';
+
+function isResetDefaultsRequest(param) {
+  return String(param?.[RESET_DEFAULTS_PARAM] ?? '') === 'true';
 }
 
 function escapeXml(value) {
@@ -572,14 +736,71 @@ function themeFor(settings) {
   return THEMES[normalizeTheme(settings.theme, 'mint')];
 }
 
+// ---- 安全边框：所有内容画在 40..216 的设计箱内，框架按 frameSize 等比
+// 缩放到目标安全区；showFrame 只控制边框绘制，不改变内容布局几何。----
+const FRAME_DESIGN_INSET = 40;
+const FRAME_DESIGN_BOX = 256 - FRAME_DESIGN_INSET * 2;
+const FRAME_PRESETS = {
+  // 最佳显示范围：边框紧贴背景边缘（背景→壳留白 6）；面板/内容箱收到 30，
+  // 壳→面板留白 12（与 max 一致）。曾经的 40（设计箱 1:1）会让内容挤在中央、
+  // 离外框过远，等比放大 ~1.11 后字号也随之变大。
+  optimal: { bleed: 12, ring: 14, shell: 18, panel: 30, content: 30 },
+  // 最大化范围：边框收薄贴边（背景→壳留白 6），内容区扩到 18..238（等比放大 1.25）。
+  max: { bleed: 0, ring: 2, shell: 6, panel: 18, content: 18 },
+};
+const FRAME_SIZE_NAMES = Object.keys(FRAME_PRESETS);
+// 圆角规则参考 Apple 图标的同心嵌套（内层圆角 = 外层圆角 − 层间距，下限 2），
+// 但比例按 DX200 实体键角实测收小为 42/256 ≈ 16.41%（256 全幅时圆角 42）——
+// Apple 的 22.37% 对本硬件偏大。squircle 在键面尺寸下差异可忽略，用圆弧近似。
+const FRAME_RADIUS_RATIO = 42 / 256;
+
+function frameFor(settings = {}) {
+  const preset = FRAME_PRESETS[normalizeChoice(settings.frameSize, 'optimal', FRAME_SIZE_NAMES)];
+  const scale = (256 - preset.content * 2) / FRAME_DESIGN_BOX;
+  const bleedRadius = Math.round((256 - preset.bleed * 2) * FRAME_RADIUS_RATIO);
+  const radiusAt = (inset) => Math.max(2, bleedRadius - (inset - preset.bleed));
+  return {
+    ...preset,
+    bleedRadius,
+    ringRadius: radiusAt(preset.ring),
+    shellRadius: radiusAt(preset.shell),
+    panelRadius: radiusAt(preset.panel),
+    highlight: preset.panel + 4,
+    highlightRadius: radiusAt(preset.panel + 4),
+    radiusAt,
+    show: String(settings.showFrame) !== 'false',
+    scale,
+    offset: preset.content - FRAME_DESIGN_INSET * scale,
+  };
+}
+
+function frameRect(inset, radius, extras) {
+  const size = 256 - inset * 2;
+  return `<rect x="${inset}" y="${inset}" width="${size}" height="${size}" rx="${radius}" ${extras}/>`;
+}
+
+function frameContent(frame, innerSvg) {
+  if (frame.scale === 1) {
+    return innerSvg;
+  }
+  return `<g transform="translate(${frame.offset.toFixed(2)} ${frame.offset.toFixed(2)}) scale(${frame.scale.toFixed(4)})">${innerSvg}</g>`;
+}
+
+// 内框线：默认不绘制；action 需要强调运行态时把它画出来作为高亮区域。
+// 位置贴面板内缘（panel + 4），圆角同样由 radiusAt 同心推导，不受 showFrame 影响。
+function frameHighlight(frame, color, opacity = 1) {
+  return frameRect(frame.highlight, frame.highlightRadius, `fill="none" stroke="${color}" stroke-width="6" opacity="${opacity}"`);
+}
+
 function normalizeSettings(actionUuid, settings = {}) {
   const config = configFromUuid(actionUuid);
   const defaults = config.defaults;
   return {
     title: typeof defaults.title === 'string' ? normalizeText(settings.title, defaults.title, 14) : undefined,
     subtitle: typeof defaults.subtitle === 'string' ? normalizeText(settings.subtitle, defaults.subtitle, 18) : undefined,
-    color: normalizeColor(settings.color, defaults.color),
     theme: normalizeTheme(settings.theme, defaults.theme),
+    frameSize: typeof defaults.frameSize === 'string' ? normalizeChoice(settings.frameSize, defaults.frameSize, FRAME_SIZE_NAMES) : undefined,
+    showFrame: typeof defaults.showFrame === 'string' ? normalizeBooleanString(settings.showFrame, defaults.showFrame) : undefined,
     focusMin: typeof defaults.focusMin === 'string' ? normalizeNumberString(settings.focusMin, defaults.focusMin, 1, 180) : undefined,
     shortBreakMin: typeof defaults.shortBreakMin === 'string' ? normalizeNumberString(settings.shortBreakMin, defaults.shortBreakMin, 1, 60) : undefined,
     longBreakMin: typeof defaults.longBreakMin === 'string' ? normalizeNumberString(settings.longBreakMin, defaults.longBreakMin, 1, 120) : undefined,
@@ -592,8 +813,8 @@ function normalizeSettings(actionUuid, settings = {}) {
     intervalSec: typeof defaults.intervalSec === 'string' ? normalizeNumberString(settings.intervalSec, defaults.intervalSec, 3, 3600) : undefined,
     warnMs: typeof defaults.warnMs === 'string' ? normalizeNumberString(settings.warnMs, defaults.warnMs, 50, 10000) : undefined,
     timeoutMs: typeof defaults.timeoutMs === 'string' ? normalizeNumberString(settings.timeoutMs, defaults.timeoutMs, 500, 30000) : undefined,
+    sslWarnDays: typeof defaults.sslWarnDays === 'string' ? normalizeNumberString(settings.sslWarnDays, defaults.sslWarnDays, 1, 365) : undefined,
     graphMode: typeof defaults.graphMode === 'string' ? normalizeChoice(settings.graphMode, defaults.graphMode, LATENCY_GRAPH_MODES) : undefined,
-    backgroundStyle: typeof defaults.backgroundStyle === 'string' ? normalizeChoice(settings.backgroundStyle, defaults.backgroundStyle, LATENCY_BACKGROUNDS) : undefined,
   };
 }
 
@@ -614,18 +835,31 @@ function clipText(value, maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
-function checkUrl(rawUrl, timeoutMs) {
-  return new Promise((resolve) => {
-    let url;
-    try {
-      url = new URL(normalizeUrl(rawUrl, ''));
-    } catch {
-      resolve({ ok: false, ms: 0, code: 0, error: 'bad_url' });
-      return;
-    }
+// host 超宽时中段省略：保留开头与结尾（结尾带着 TLD），比尾部截断保住更多辨识度——
+// `dashboard.internal.example.com` 截成 `dashboard.inter…` 就没人认得出它是谁了。
+function clipHostMiddle(value, maxLength, tail = 7) {
+  const text = String(value || '');
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - tail - 1)}…${text.slice(-tail)}`;
+}
 
+const LATENCY_MAX_REDIRECTS = 3;
+
+// 专用 agent，禁用 TLS 会话缓存：默认 agent 会按 host 复用 TLS session，恢复的
+// 会话里服务器不重发证书、getPeerCertificate() 返回空对象——一旦 certExpiresAt
+// 被清（恢复默认、改 URL），之后的探测就永远补不回证书。每次完整握手还让延迟
+// 口径一致：测的都是"冷访客"的真实首连成本，而不是快慢混杂的会话恢复。
+const LATENCY_TLS_AGENT = new https.Agent({ maxCachedSessions: 0 });
+
+// 单跳探测。延迟计到响应头到达为止（不含响应体），拿到头就 destroy 连接：
+// 监控只关心“站点是否响应、多快响应”，把首页正文每 30 秒下载一遍纯属浪费带宽。
+function requestHop(url, timeoutMs, deadlineAt) {
+  return new Promise((resolve) => {
     const client = url.protocol === 'http:' ? http : https;
     const started = Date.now();
+    const budget = Math.max(1, Math.min(timeoutMs, deadlineAt - started));
     let settled = false;
     const finish = (payload) => {
       if (settled) {
@@ -639,48 +873,126 @@ function checkUrl(rawUrl, timeoutMs) {
       url,
       {
         method: 'GET',
-        timeout: timeoutMs,
+        timeout: budget,
+        agent: url.protocol === 'https:' ? LATENCY_TLS_AGENT : undefined,
         headers: {
-          'user-agent': 'LexUtilityLatency/0.1.0',
+          'user-agent': 'LexUtilityLatency/0.2.0',
           accept: '*/*',
         },
       },
       (response) => {
         const ms = Date.now() - started;
         const code = response.statusCode || 0;
-        response.resume();
-        response.on('end', () => {
-          finish({ ok: code > 0 && code < 400, ms, code });
-        });
+        // 证书只在 https 跳有意义，且必须在 destroy 之前从 socket 上取。
+        const cert = url.protocol === 'https:'
+          ? peerCertExpiry(response.socket)
+          : null;
+        const location = response.headers?.location || '';
+        // 必须先 finish 再 destroy：中止连接会同步触发 request 的 'error'，
+        // 若顺序反了，那个 ECONNRESET 会抢先 settle 成 network 错误，把这次成功的探测吃掉。
+        finish({ ms, code, cert, location });
+        response.destroy();
+        request.destroy();
       },
     );
 
     request.on('timeout', () => {
       request.destroy();
-      finish({ ok: false, ms: timeoutMs, code: 0, error: 'timeout' });
+      finish({ ms: Date.now() - started, code: 0, error: 'timeout' });
     });
 
     request.on('error', () => {
-      finish({ ok: false, ms: Date.now() - started, code: 0, error: 'network' });
+      finish({ ms: Date.now() - started, code: 0, error: 'network' });
     });
 
     request.end();
   });
 }
 
-function renderScreenFrame(theme, accent, innerSvg) {
+function peerCertExpiry(socket) {
+  try {
+    const cert = socket?.getPeerCertificate?.();
+    if (!cert || !cert.valid_to) {
+      return null;
+    }
+    const expiresAt = Date.parse(cert.valid_to);
+    return Number.isFinite(expiresAt) ? expiresAt : null;
+  } catch {
+    return null;
+  }
+}
+
+// 跟随重定向到最终状态码：监控的问题是“这个站还活着吗”，不是“这个 URL 返回了什么”。
+// 一个 301 到抢注域名的站点不该显示为正常。延迟只记第一跳——那是用户实际感知到的
+// 首字节时间，把多跳累加会让数字随重定向链长度漂移而失去可比性。
+// 证书同样只取第一跳（用户配置的那个 host），重定向目标的证书不是他要监控的对象。
+async function checkUrl(rawUrl, timeoutMs, options = {}) {
+  const maxRedirects = options.maxRedirects ?? LATENCY_MAX_REDIRECTS;
+  const hop = options.requestHop ?? requestHop;
+  let url;
+  try {
+    url = new URL(normalizeUrl(rawUrl, ''));
+  } catch {
+    return { ok: false, ms: 0, code: 0, error: 'bad_url' };
+  }
+
+  const deadlineAt = Date.now() + timeoutMs;
+  let firstMs = null;
+  let cert = null;
+
+  for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
+    const hopResult = await hop(url, timeoutMs, deadlineAt);
+    if (firstMs === null) {
+      firstMs = hopResult.ms;
+      cert = hopResult.cert ?? null;
+    }
+    const ms = firstMs;
+
+    if (hopResult.error) {
+      return { ok: false, ms, code: 0, error: hopResult.error, cert };
+    }
+
+    const { code, location } = hopResult;
+    const isRedirect = code >= 300 && code < 400 && location;
+    if (!isRedirect) {
+      return { ok: code >= 200 && code < 400, ms, code, cert };
+    }
+    if (redirects === maxRedirects) {
+      return { ok: false, ms, code, error: 'too_many_redirects', cert };
+    }
+    try {
+      url = new URL(location, url);
+    } catch {
+      return { ok: false, ms, code, error: 'bad_redirect', cert };
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return { ok: false, ms, code, error: 'bad_redirect', cert };
+    }
+    if (Date.now() >= deadlineAt) {
+      return { ok: false, ms, code: 0, error: 'timeout', cert };
+    }
+  }
+  return { ok: false, ms: firstMs ?? 0, code: 0, error: 'too_many_redirects', cert };
+}
+
+function renderScreenFrame(theme, accent, innerSvg, frame = frameFor()) {
+  const chrome = frame.show
+    ? `
+    ${frameRect(frame.ring, frame.ringRadius, `fill="none" stroke="${theme.low}" stroke-width="2" opacity="0.4"`)}
+    ${frameRect(frame.shell, frame.shellRadius, `fill="${theme.shell}" stroke="${accent}" stroke-width="4"`)}
+    ${frameRect(frame.panel, frame.panelRadius, `fill="${theme.panel}" stroke="${accent}" stroke-width="1.5" opacity="0.98"`)}
+  `
+    : '';
   return `
-    <rect width="256" height="256" rx="48" fill="${theme.canvas}"/>
-    <rect x="16" y="16" width="224" height="224" rx="40" fill="none" stroke="${theme.low}" stroke-width="2" opacity="0.4"/>
-    <rect x="28" y="28" width="200" height="200" rx="30" fill="${theme.shell}" stroke="${accent}" stroke-width="4"/>
-    <rect x="40" y="40" width="176" height="176" rx="24" fill="${theme.panel}" stroke="${accent}" stroke-width="1.5" opacity="0.98"/>
-    ${innerSvg}
+    ${frameRect(frame.bleed, frame.bleedRadius, `fill="${theme.canvas}"`)}
+    ${chrome}
+    ${frameContent(frame, innerSvg)}
   `;
 }
 
 function renderCounterIcon(settings, count) {
   const theme = themeFor(settings);
-  const accent = normalizeColor(settings.color, theme.accent);
+  const accent = theme.accent;
 
   return toDataUrl(`
     <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
@@ -694,6 +1006,7 @@ function renderCounterIcon(settings, count) {
           <text x="128" y="174" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
           <text x="128" y="204" text-anchor="middle" fill="${theme.low}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to increment</text>
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
@@ -701,7 +1014,7 @@ function renderCounterIcon(settings, count) {
 
 function renderBadgeIcon(settings, active) {
   const theme = themeFor(settings);
-  const accent = normalizeColor(settings.color, theme.accent);
+  const accent = theme.accent;
   const pillFill = active ? accent : theme.low;
   const pillText = active ? theme.contrast : theme.text;
 
@@ -717,12 +1030,13 @@ function renderBadgeIcon(settings, active) {
           <text x="128" y="170" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
           <text x="128" y="202" text-anchor="middle" fill="${accent}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to toggle</text>
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
 }
 
-function renderSwatchIcon(settings, step, currentColor = settings.color) {
+function renderSwatchIcon(settings, step, currentColor) {
   const theme = themeFor(settings);
   const accent = normalizeColor(currentColor, theme.accent);
   const dots = SWATCH_COLORS.map((color, index) => {
@@ -743,6 +1057,7 @@ function renderSwatchIcon(settings, step, currentColor = settings.color) {
           <text x="128" y="218" text-anchor="middle" fill="${theme.text}" font-size="17" font-family="Arial, Helvetica, sans-serif">${escapeXml(accent.toUpperCase())}</text>
           ${dots}
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
@@ -750,7 +1065,7 @@ function renderSwatchIcon(settings, step, currentColor = settings.color) {
 
 function renderFontTestIcon(settings) {
   const theme = themeFor(settings);
-  const accent = normalizeColor(settings.color, theme.accent);
+  const accent = theme.accent;
   const samples = FONT_TEST_LINES.map(({ size, y }, index) => {
     const fill = index === 2 ? accent : theme.text;
     return `
@@ -768,6 +1083,7 @@ function renderFontTestIcon(settings) {
           <rect x="40" y="40" width="176" height="176" rx="24" fill="none" stroke="${theme.muted}" stroke-width="1.5" stroke-dasharray="6 6" opacity="0.8"/>
           ${samples}
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
@@ -776,7 +1092,7 @@ function renderFontTestIcon(settings) {
 function pomodoroPalette(settings) {
   const palette = POMODORO_PALETTES[normalizeTheme(settings.theme, 'ember')] || POMODORO_PALETTES.ember;
   return {
-    focus: normalizeColor(settings.color, palette.focus),
+    focus: palette.focus,
     shortBreak: palette.shortBreak,
     longBreak: palette.longBreak,
     done: palette.done,
@@ -857,29 +1173,93 @@ function playPomodoroCue(settings) {
   process.stdout.write('\u0007');
 }
 
+// 剩余时间只有一个事实源：运行中看 phaseEndAt 与时钟的差，暂停/空闲看冻结的 remainingSec。
+// 逐秒递减计数会把 setTimeout 误差累积成漂移，还会在系统睡眠时凭空"丢时间"。
+function pomodoroRemainingSec(instance, now = Date.now()) {
+  if (instance.running && Number.isFinite(instance.phaseEndAt)) {
+    return Math.max(0, Math.ceil((instance.phaseEndAt - now) / 1000));
+  }
+  return Math.max(0, Math.round(instance.remainingSec ?? instance.totalSec ?? 0));
+}
+
+function serializePomodoroState(instance) {
+  return {
+    v: POMODORO_STATE_VERSION,
+    phase: instance.phase,
+    running: Boolean(instance.running),
+    remainingSec: instance.remainingSec,
+    totalSec: instance.totalSec,
+    completedFocusRounds: instance.completedFocusRounds || 0,
+    phaseEndAt: instance.phaseEndAt ?? null,
+  };
+}
+
+function hydratePomodoroState(raw, now = Date.now()) {
+  const valid = raw && typeof raw === 'object' && raw.v === POMODORO_STATE_VERSION
+    && POMODORO_PHASES.includes(raw.phase);
+  if (!valid) {
+    return {};
+  }
+  const completedFocusRounds = Number.isFinite(raw.completedFocusRounds)
+    ? Math.max(0, Math.round(raw.completedFocusRounds))
+    : 0;
+  const totalSec = Number.isFinite(raw.totalSec) && raw.totalSec > 0 ? Math.round(raw.totalSec) : null;
+  const running = Boolean(raw.running) && Number.isFinite(raw.phaseEndAt);
+  const remainingSec = running
+    ? Math.max(0, Math.ceil((raw.phaseEndAt - now) / 1000))
+    : Number.isFinite(raw.remainingSec) ? Math.max(0, Math.round(raw.remainingSec)) : null;
+  if (raw.phase === 'idle' || totalSec == null || remainingSec == null) {
+    // 数据残缺时只保底轮次进度，其余交给 initialize 走干净初始态。
+    return { completedFocusRounds };
+  }
+  return {
+    phase: raw.phase,
+    running,
+    totalSec,
+    remainingSec,
+    phaseEndAt: running ? raw.phaseEndAt : null,
+    completedFocusRounds,
+  };
+}
+
+// 只在阶段转换/暂停恢复/重置时落盘——remainingSec 可由 phaseEndAt 反推，不需要逐秒写磁盘。
+function flushPomodoroState(instance, options = {}) {
+  if (!instance.context) {
+    return false;
+  }
+  const write = options.write ?? writePersistedState;
+  return write(instance.context, serializePomodoroState(instance));
+}
+
 function resetPomodoroInstance(instance, { preserveRounds = false } = {}) {
   clearPomodoroTimer(instance);
   instance.phase = 'idle';
   instance.running = false;
+  instance.phaseEndAt = null;
   instance.totalSec = pomodoroDurationSecFromSettings(instance.settings, 'focus');
   instance.remainingSec = instance.totalSec;
   if (!preserveRounds) {
     instance.completedFocusRounds = 0;
   }
+  flushPomodoroState(instance);
 }
 
-function schedulePomodoroTick(instance) {
+function schedulePomodoroTick(instance, now = Date.now()) {
   if (!instance.running) {
     clearPomodoroTimer(instance);
     return;
   }
-  setInstanceTimeout(instance, 'pomodoro', () => tickPomodoro(instance), 1000);
+  // 对齐到整秒边界而不是固定 1000ms：每个 tick 的调度误差都会被下一次对齐吸收。
+  const msLeft = Number.isFinite(instance.phaseEndAt) ? instance.phaseEndAt - now : 1000;
+  const delay = msLeft > 0 ? ((msLeft - 1) % 1000) + 1 : 1;
+  setInstanceTimeout(instance, 'pomodoro', () => tickPomodoro(instance), delay);
 }
 
 function startPomodoroPhase(instance, phase, options = {}) {
   const {
     autoStart = true,
     playSound = false,
+    now = Date.now(),
   } = options;
 
   clearPomodoroTimer(instance);
@@ -887,10 +1267,7 @@ function startPomodoroPhase(instance, phase, options = {}) {
   instance.totalSec = pomodoroDurationSecFromSettings(instance.settings, phase);
   instance.remainingSec = instance.totalSec;
   instance.running = autoStart;
-
-  if (phase === 'focus' && !autoStart) {
-    instance.remainingSec = instance.totalSec;
-  }
+  instance.phaseEndAt = autoStart ? now + instance.totalSec * 1000 : null;
 
   if (phase === 'done') {
     instance.completedFocusRounds = 0;
@@ -900,11 +1277,13 @@ function startPomodoroPhase(instance, phase, options = {}) {
     playPomodoroCue(instance.settings);
   }
 
+  flushPomodoroState(instance);
   renderInstance(instance);
-  schedulePomodoroTick(instance);
+  schedulePomodoroTick(instance, now);
 }
 
-function advancePomodoroPhase(instance) {
+function advancePomodoroPhase(instance, options = {}) {
+  const { playSound = true } = options;
   const roundsGoal = pomodoroRoundsGoal(instance.settings);
 
   if (instance.phase === 'focus') {
@@ -912,7 +1291,7 @@ function advancePomodoroPhase(instance) {
     const hitLongBreak = instance.completedFocusRounds % roundsGoal === 0;
     startPomodoroPhase(instance, hitLongBreak ? 'longBreak' : 'shortBreak', {
       autoStart: isEnabled(instance.settings.autoStartBreaks),
-      playSound: true,
+      playSound,
     });
     return;
   }
@@ -920,7 +1299,7 @@ function advancePomodoroPhase(instance) {
   if (instance.phase === 'shortBreak') {
     startPomodoroPhase(instance, 'focus', {
       autoStart: isEnabled(instance.settings.autoStartFocus),
-      playSound: true,
+      playSound,
     });
     return;
   }
@@ -928,7 +1307,7 @@ function advancePomodoroPhase(instance) {
   if (instance.phase === 'longBreak') {
     startPomodoroPhase(instance, 'done', {
       autoStart: true,
-      playSound: true,
+      playSound,
     });
     return;
   }
@@ -946,19 +1325,21 @@ function advancePomodoroPhase(instance) {
   }
 }
 
-function tickPomodoro(instance) {
-  if (!instance || !INSTANCES.has(instance.context) || !instance.running) {
+function tickPomodoro(instance, options = {}) {
+  const instances = options.instances ?? INSTANCES;
+  const now = options.now ?? Date.now();
+  if (!instance || !instances.has(instance.context) || !instance.running) {
     return;
   }
 
-  instance.remainingSec = Math.max(0, (instance.remainingSec ?? instance.totalSec ?? 0) - 1);
+  instance.remainingSec = pomodoroRemainingSec(instance, now);
   if (instance.remainingSec <= 0) {
     advancePomodoroPhase(instance);
     return;
   }
 
   renderInstance(instance);
-  schedulePomodoroTick(instance);
+  schedulePomodoroTick(instance, now);
 }
 
 function initializePomodoroInstance(instance) {
@@ -988,37 +1369,67 @@ function reconcilePomodoroSettings(instance, previousSettings) {
     return;
   }
 
-  const ratio = Math.max(0, Math.min(1, (instance.remainingSec ?? nextTotal) / previousTotal));
+  const now = Date.now();
+  const ratio = Math.max(0, Math.min(1, pomodoroRemainingSec(instance, now) / previousTotal));
   instance.totalSec = nextTotal;
   instance.remainingSec = Math.max(1, Math.round(nextTotal * ratio));
+  if (instance.running) {
+    instance.phaseEndAt = now + instance.remainingSec * 1000;
+    schedulePomodoroTick(instance, now);
+  }
+  flushPomodoroState(instance);
 }
 
-function togglePomodoro(instance) {
+function togglePomodoro(instance, now = Date.now()) {
   initializePomodoroInstance(instance);
 
   if (instance.phase === 'idle') {
-    startPomodoroPhase(instance, 'focus', { autoStart: true, playSound: false });
+    startPomodoroPhase(instance, 'focus', { autoStart: true, playSound: false, now });
     return;
   }
 
   if (instance.phase === 'done') {
     resetPomodoroInstance(instance);
-    startPomodoroPhase(instance, 'focus', { autoStart: true, playSound: false });
+    startPomodoroPhase(instance, 'focus', { autoStart: true, playSound: false, now });
     return;
   }
 
-  instance.running = !instance.running;
+  if (instance.running) {
+    // 暂停：把真实剩余时间冻结回 remainingSec，时间戳随之作废。
+    instance.remainingSec = pomodoroRemainingSec(instance, now);
+    instance.running = false;
+    instance.phaseEndAt = null;
+  } else {
+    instance.running = true;
+    instance.phaseEndAt = now + Math.max(1, instance.remainingSec ?? instance.totalSec ?? 1) * 1000;
+  }
+  flushPomodoroState(instance);
   renderInstance(instance);
-  schedulePomodoroTick(instance);
+  schedulePomodoroTick(instance, now);
+}
+
+function skipPomodoroPhase(instance) {
+  initializePomodoroInstance(instance);
+  if (instance.phase === 'idle') {
+    return;
+  }
+  if (instance.phase === 'done') {
+    resetPomodoroInstance(instance);
+    renderInstance(instance);
+    return;
+  }
+  // 跳过视同该阶段自然完成（专注照常计入轮次），但不放提示音——这是用户主动叫停的。
+  advancePomodoroPhase(instance, { playSound: false });
 }
 
 function renderPomodoroIcon(instance) {
   initializePomodoroInstance(instance);
   const theme = themeFor(instance.settings);
-  const background = renderLatencyBackground(theme, pomodoroColor(instance.settings, instance.phase), instance.settings.backgroundStyle);
+  const frame = frameFor(instance.settings);
+  const background = renderThemeBackdrop(theme, pomodoroColor(instance.settings, instance.phase), frame);
   const phaseColor = pomodoroColor(instance.settings, instance.phase === 'idle' ? 'focus' : instance.phase);
   const totalSec = Math.max(1, instance.totalSec || pomodoroDurationSecFromSettings(instance.settings, 'focus'));
-  const remainingSec = Math.max(0, instance.remainingSec ?? totalSec);
+  const remainingSec = pomodoroRemainingSec(instance);
   const progress = instance.phase === 'done' ? 1 : remainingSec / totalSec;
   const circumference = 2 * Math.PI * 72;
   const dashOffset = (circumference * (1 - progress)).toFixed(1);
@@ -1027,9 +1438,11 @@ function renderPomodoroIcon(instance) {
   const displayText = instance.phase === 'done' ? '✓' : formatPomodoroTime(remainingSec);
   const displaySize = instance.phase === 'done' ? 88 : 40;
   const label = pomodoroPhaseLabel(instance);
-  const footer = instance.phase === 'idle'
-    ? 'tap to start'
-    : instance.running ? 'tap to pause' : 'tap to resume';
+  const footer = instance.phase === 'done'
+    ? 'tap to restart'
+    : instance.phase === 'idle'
+      ? 'tap to start'
+      : instance.running ? 'tap to pause' : 'tap to resume';
   const roundsGoal = pomodoroRoundsGoal(instance.settings);
   const completedInCycle = instance.phase === 'longBreak' || instance.phase === 'done'
     ? roundsGoal
@@ -1043,6 +1456,8 @@ function renderPomodoroIcon(instance) {
   return toDataUrl(`
     <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
       ${background.outer}
+      ${alertPulse ? frameHighlight(frame, accent) : ''}
+      ${frameContent(frame, `
       <circle cx="128" cy="114" r="72" fill="none" stroke="${background.low}" stroke-width="12" opacity="0.42"/>
       <circle
         cx="128"
@@ -1063,92 +1478,70 @@ function renderPomodoroIcon(instance) {
       <text x="128" y="180" text-anchor="middle" fill="${background.muted}" font-size="14" font-family="Arial, Helvetica, sans-serif">${escapeXml(footer)}</text>
       <text x="128" y="198" text-anchor="middle" fill="${background.low}" font-size="12" font-family="Arial, Helvetica, sans-serif">${escapeXml(`${instance.settings.focusMin}/${instance.settings.shortBreakMin}/${instance.settings.longBreakMin} min`)}</text>
       ${dots}
+      `)}
     </svg>
   `);
 }
 
-function renderLatencyBackground(theme, accent, backgroundStyle) {
-  const styles = {
-    gradient: {
-      outer: `
-        <defs>
-          <linearGradient id="latencyBg" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="${theme.canvas}"/>
-            <stop offset="55%" stop-color="${theme.shell}"/>
-            <stop offset="100%" stop-color="${theme.panel}"/>
-          </linearGradient>
-        </defs>
-        <rect width="256" height="256" rx="48" fill="url(#latencyBg)"/>
-        <circle cx="206" cy="54" r="44" fill="${accent}" opacity="0.08"/>
-        <circle cx="52" cy="212" r="58" fill="${theme.low}" opacity="0.10"/>
-      `,
-    },
-    stars: {
-      outer: `
-        <rect width="256" height="256" rx="48" fill="${theme.canvas}"/>
-        <circle cx="58" cy="52" r="1.8" fill="#ffffff" opacity="0.65"/>
-        <circle cx="92" cy="82" r="1.2" fill="#ffffff" opacity="0.48"/>
-        <circle cx="188" cy="58" r="1.6" fill="#ffffff" opacity="0.7"/>
-        <circle cx="214" cy="98" r="1.4" fill="#ffffff" opacity="0.42"/>
-        <circle cx="166" cy="34" r="1" fill="${accent}" opacity="0.65"/>
-        <circle cx="38" cy="118" r="1" fill="${accent}" opacity="0.35"/>
-        <circle cx="228" cy="148" r="1.3" fill="#ffffff" opacity="0.36"/>
-        <circle cx="72" cy="180" r="1.1" fill="#ffffff" opacity="0.34"/>
-      `,
-    },
-    mist: {
-      outer: `
-        <defs>
-          <linearGradient id="latencyBg" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#f7fbff"/>
-            <stop offset="100%" stop-color="#d6e4fb"/>
-          </linearGradient>
-        </defs>
-        <rect width="256" height="256" rx="48" fill="url(#latencyBg)"/>
-        <circle cx="72" cy="58" r="56" fill="#ffffff" opacity="0.62"/>
-        <circle cx="194" cy="210" r="64" fill="#bfd3f8" opacity="0.5"/>
-      `,
-    },
-    paper: {
-      outer: `
-        <defs>
-          <linearGradient id="latencyBgPaper" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#fffaf2"/>
-            <stop offset="100%" stop-color="#eedfc8"/>
-          </linearGradient>
-        </defs>
-        <rect width="256" height="256" rx="48" fill="url(#latencyBgPaper)"/>
-        <circle cx="198" cy="62" r="54" fill="#fde7cf" opacity="0.62"/>
-        <circle cx="46" cy="196" r="50" fill="#e8d6bf" opacity="0.56"/>
-      `,
-    },
-  };
-
-  const background = styles[backgroundStyle] || styles.gradient;
-  const shellFill = backgroundStyle === 'mist' ? '#d7e4f8' : backgroundStyle === 'paper' ? '#ead7bd' : theme.shell;
-  const panelFill = backgroundStyle === 'mist' ? '#fdfefe' : backgroundStyle === 'paper' ? '#fffdf8' : theme.panel;
-  const shellStroke = backgroundStyle === 'mist' ? '#8eadd7' : backgroundStyle === 'paper' ? '#c6a47c' : accent;
-  const shellStrokeOpacity = backgroundStyle === 'mist' || backgroundStyle === 'paper' ? 0.7 : 1;
-  const panelText = backgroundStyle === 'mist' || backgroundStyle === 'paper' ? '#17212f' : theme.text;
-  const panelMuted = backgroundStyle === 'mist' ? '#5f7594' : backgroundStyle === 'paper' ? '#7d6548' : theme.muted;
-  const panelLow = backgroundStyle === 'mist' ? '#9eb6d6' : backgroundStyle === 'paper' ? '#cbb390' : theme.low;
-
+// 背景一律由 theme token 派生：颜色只有主题这一个轴。
+// 曾经的 mist / paper 把 shell、panel、描边、文字全部改成写死的浅色 hex，实际上是
+// 第二套暗中生效的主题系统，与 theme 互相打架（规则 §6 明令颜色围绕 theme token）。
+// 想要浅色请选 sand 主题，那才是主题系统里的正确入口。
+function renderThemeBackdrop(theme, accent, frame = frameFor()) {
+  // 纯渐变背景，无装饰图形：曾经的低透明度装饰圆在无边框模式下会浮出成
+  // 可见的浅圈（浅色主题上尤其明显），信息量为零还抢注意力。
+  const outer = `
+    <defs>
+      <linearGradient id="latencyBg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="${theme.canvas}"/>
+        <stop offset="55%" stop-color="${theme.shell}"/>
+        <stop offset="100%" stop-color="${theme.panel}"/>
+      </linearGradient>
+    </defs>
+    <rect width="256" height="256" rx="42" fill="url(#latencyBg)"/>
+  `;
+  // 面板只留填充不描边：三层嵌套边框（外环/壳/面板线）里最内那条只添噪。
+  const chrome = frame.show
+    ? `
+      ${frameRect(frame.ring, frame.ringRadius, `fill="none" stroke="${accent}" stroke-width="2.2" opacity="0.34"`)}
+      ${frameRect(frame.shell, frame.shellRadius, `fill="${theme.shell}" stroke="${accent}" stroke-width="4.5"`)}
+      ${frameRect(frame.panel, frame.panelRadius, `fill="${theme.panel}" opacity="0.985"`)}
+    `
+    : '';
+  // 装饰背景整体等比缩进背景界内，不永远铺满整键。
+  // 不用 clipPath 实现：宿主 SVG 渲染器对 clipPath 支持不可靠（会静默失效）。
+  const artScale = (256 - frame.bleed * 2) / 256;
+  const art = frame.bleed === 0
+    ? outer
+    : `<g transform="translate(${frame.bleed} ${frame.bleed}) scale(${artScale.toFixed(4)})">${outer}</g>`;
   return {
     outer: `
-      ${background.outer}
-      <rect x="16" y="16" width="224" height="224" rx="40" fill="none" stroke="${shellStroke}" stroke-width="2.2" opacity="0.34"/>
-      <rect x="28" y="28" width="200" height="200" rx="30" fill="${shellFill}" stroke="${shellStroke}" stroke-width="4.5" stroke-opacity="${shellStrokeOpacity}"/>
-      <rect x="40" y="40" width="176" height="176" rx="24" fill="${panelFill}" stroke="${shellStroke}" stroke-width="1.4" opacity="0.985"/>
-      <rect x="46" y="46" width="164" height="164" rx="20" fill="#ffffff" opacity="${backgroundStyle === 'mist' ? '0.18' : backgroundStyle === 'paper' ? '0.14' : '0'}"/>
+      ${art}
+      ${chrome}
     `,
-    text: panelText,
-    muted: panelMuted,
-    low: panelLow,
+    text: theme.text,
+    muted: theme.muted,
+    low: theme.low,
   };
 }
 
+// 双色线性插值：图表用它把「延迟高低」映射成「颜色冷热」。
+function mixHex(from, to, t) {
+  const a = Number.parseInt(String(from).slice(1), 16);
+  const b = Number.parseInt(String(to).slice(1), 16);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return from;
+  }
+  const lerp = (shift) => {
+    const x = (a >> shift) & 0xff;
+    const y = (b >> shift) & 0xff;
+    return Math.round(x + (y - x) * t);
+  };
+  return `#${((lerp(16) << 16) | (lerp(8) << 8) | lerp(0)).toString(16).padStart(6, '0')}`;
+}
+
 function buildLatencySeries(instance, warnMs, accent) {
-  const history = instance.history || [];
+  const history = instance.recent || [];
   // 纵向刻度锚定在告警阈值附近并固定下来：单个尖峰/超时只会被钳到柱顶，
   // 不会反过来把整条基线上的正常柱子重新压扁（这正是之前“显示不正常”的根因）。
   const maxMs = Math.max(warnMs * 1.5, 150);
@@ -1157,8 +1550,8 @@ function buildLatencySeries(instance, warnMs, accent) {
   // 这样柱宽稳定、从左往右增长，满历史时也不会越过右边缘。
   const startX = 42;
   const endX = 214;
-  const chartBottom = 192;
-  const chartHeight = 42;
+  const chartBottom = 190;
+  const chartHeight = 36;
   const slotCount = LATENCY_HISTORY_LIMIT;
   const step = (endX - startX) / slotCount;
   const gap = step * 0.22;
@@ -1173,7 +1566,13 @@ function buildLatencySeries(instance, warnMs, accent) {
     const ratio = Math.sqrt(Math.min(1, value / maxMs));
     const height = Math.max(4, ratio * chartHeight);
     const y = chartBottom - height;
-    const fill = !entry.ok ? '#ef4444' : entry.ms > warnMs ? '#f59e0b' : accent;
+    // 颜色随每根柱自己的延迟连续变热（accent→琥珀），而不是只在越过阈值时
+    // 二值跳变——高度差在 36px 图表里不够醒目，颜色补上这个信息。失败恒为红。
+    const fill = !entry.ok
+      ? '#ef4444'
+      : entry.ms > warnMs
+        ? '#f59e0b'
+        : mixHex(accent, '#f59e0b', Math.min(1, entry.ms / warnMs));
     return { x, y, height, fill };
   };
 
@@ -1195,56 +1594,245 @@ function buildLatencySeries(instance, warnMs, accent) {
   };
 }
 
+// 观测时长自报家门：标签写的是实际观测到多久，而不是名义上的 24h 窗口。
+// 宿主常关意味着窗口大概率只被填满一部分，硬写「24h」就是在撒谎。
+function formatObservedSpan(observedMs) {
+  if (!observedMs) {
+    return '';
+  }
+  const minutes = Math.round(observedMs / 60_000);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  return `${Math.round(observedMs / 3_600_000)}h`;
+}
+
+function formatUptimeLabel(stats) {
+  if (stats.uptime == null) {
+    return '--';
+  }
+  const span = formatObservedSpan(stats.observedMs);
+  // 99.95 不应该显示成 100%——那会把一次真实的宕机抹掉。只有真正无失败才是 100。
+  const value = stats.uptime === 100
+    ? '100'
+    : Math.min(99.9, Math.floor(stats.uptime * 10) / 10).toFixed(1);
+  return span ? `${span} ${value}%` : `${value}%`;
+}
+
+function sslDaysLeft(certExpiresAt, now = Date.now()) {
+  if (!Number.isFinite(certExpiresAt)) {
+    return null;
+  }
+  return Math.floor((certExpiresAt - now) / 86_400_000);
+}
+
+// SSL 徽标：正常时 `SSL` + 绿点（光秃秃一个绿点说不清自己是什么），进入提醒
+// 阈值（settings.sslWarnDays，默认 30 天）换成 `SSL xxd` 并变黄/红；非 https 不出现。
+function renderSslBadge(certExpiresAt, theme, warnDays = LATENCY_SSL_WARN_DAYS, now = Date.now()) {
+  const days = sslDaysLeft(certExpiresAt, now);
+  if (days == null) {
+    return '';
+  }
+  // 字号与圆点尺寸对齐左侧「延迟」标题（20px / r7），两端视觉重量一致。
+  if (days > warnDays) {
+    return `
+      <text x="196" y="69" text-anchor="end" fill="#22c55e" font-size="20" font-weight="800" font-family="Arial, Helvetica, sans-serif">SSL</text>
+      <circle cx="207" cy="62" r="7" fill="#22c55e"/>`;
+  }
+  const color = days <= 7 ? '#ef4444' : '#f59e0b';
+  const label = days <= 0 ? 'SSL !' : `SSL ${days}d`;
+  return `<text x="214" y="69" text-anchor="end" fill="${color}" font-size="20" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(label)}</text>`;
+}
+
 function renderLatencyIcon(instance) {
   const theme = themeFor(instance.settings);
-  const background = renderLatencyBackground(theme, normalizeColor(instance.settings.color, theme.accent), instance.settings.backgroundStyle);
+  const frame = frameFor(instance.settings);
+  const background = renderThemeBackdrop(theme, theme.accent, frame);
   const host = hostFromUrl(instance.settings.url);
   const warnMs = Number.parseInt(instance.settings.warnMs, 10) || 400;
-  const status = instance.status || 'checking';
+  const status = instance.paused ? 'paused' : instance.status || 'checking';
   const accent =
     status === 'down' ? '#ef4444'
     : status === 'slow' ? '#f59e0b'
-    : status === 'up' ? normalizeColor(instance.settings.color, theme.accent)
+    : status === 'up' ? theme.accent
     : theme.muted;
   const bigText =
-    status === 'down' ? 'DOWN'
-    : status === 'checking' ? 'Chk...'
+    status === 'paused' ? 'Pause'
+    : status === 'down' ? 'DOWN'
+    : status === 'checking' ? '...'
     : instance.lastMs == null ? '...'
     : String(instance.lastMs);
-  const uptime = instance.history.length
-    ? Math.round((instance.history.filter((entry) => entry.ok).length / instance.history.length) * 100)
-    : null;
   const headerText =
-    status === 'down' ? '离线'
+    status === 'paused' ? '暂停'
+    : status === 'down' ? '离线'
     : status === 'slow' ? '偏高'
     : status === 'up' ? '延迟'
     : '检查';
-  const hostLabel = clipText(host, 18);
-  const chart = buildLatencySeries(instance, warnMs, accent);
+  const stats = latencyStats(instance);
+  const hostLabel = clipHostMiddle(host, 19);
+  // 图表基色固定用主题 accent：历史柱描述的是各自当时的延迟，不随「当前状态」整体染色
+  // ——否则一次 down 会把整段正常历史都涂成红的。
+  const chart = buildLatencySeries(instance, warnMs, theme.accent);
   const graphSvg = instance.settings.graphMode === 'line'
     ? `${chart.line}${chart.dots}`
     : chart.bars;
-  const uptimeLabel = uptime == null ? '--' : `UP ${uptime}%`;
+  const uptimeLabel = formatUptimeLabel(stats);
+  const p95Label = stats.p95 == null ? '' : `p95 ${stats.p95}`;
+  // Pause / DOWN 是词不是数值，跟 ms 单位并排没有意义，居中独占主区。
+  const numeric = status !== 'paused' && status !== 'down';
   const valueFontSize = bigText.length >= 4 ? 42 : 50;
 
   return toDataUrl(`
     <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
       ${background.outer}
+      ${status === 'down' ? frameHighlight(frame, '#ef4444') : ''}
       ${
-        `
+        frameContent(frame, `
           <circle cx="58" cy="62" r="7" fill="${accent}"/>
-          <text x="72" y="68" fill="${accent}" font-size="18" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(headerText)}</text>
-          <text x="128" y="88" text-anchor="middle" fill="${background.low}" font-size="13" font-family="Arial, Helvetica, sans-serif">${escapeXml(hostLabel)}</text>
-          <text x="122" y="136" text-anchor="middle" fill="${status === 'down' ? '#ef4444' : background.text}" font-size="${status === 'down' ? 38 : valueFontSize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(bigText)}</text>
-          <text x="${bigText.length >= 4 ? 183 : 176}" y="136" fill="${background.muted}" font-size="22" font-weight="700" font-family="Arial, Helvetica, sans-serif">ms</text>
-          <line x1="42" y1="192" x2="214" y2="192" stroke="${background.low}" stroke-width="1.5" opacity="0.55"/>
+          <text x="72" y="69" fill="${accent}" font-size="20" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(headerText)}</text>
+          ${renderSslBadge(instance.certExpiresAt, theme, Number.parseInt(instance.settings.sslWarnDays, 10) || LATENCY_SSL_WARN_DAYS)}
+          <text x="128" y="90" text-anchor="middle" fill="${background.muted}" font-size="16" font-family="Arial, Helvetica, sans-serif">${escapeXml(hostLabel)}</text>
+          ${
+            numeric
+              ? `<text x="122" y="136" text-anchor="middle" fill="${background.text}" font-size="${valueFontSize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(bigText)}</text>
+                 <text x="${bigText.length >= 4 ? 183 : 176}" y="136" fill="${background.muted}" font-size="25" font-weight="800" font-family="Arial, Helvetica, sans-serif">ms</text>`
+              : `<text x="128" y="136" text-anchor="middle" fill="${status === 'down' ? '#ef4444' : background.muted}" font-size="38" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(bigText)}</text>`
+          }
+          <line x1="42" y1="190" x2="214" y2="190" stroke="${background.low}" stroke-width="1.5" opacity="0.55"/>
           ${graphSvg}
-          <text x="44" y="212" fill="${background.low}" font-size="12" font-family="Arial, Helvetica, sans-serif">${instance.settings.graphMode === 'line' ? '折线图' : '柱状图'}</text>
-          <text x="214" y="212" text-anchor="end" fill="${accent}" font-size="15" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(uptimeLabel)}</text>
-        `
+          <text x="44" y="212" fill="${accent}" font-size="17" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(uptimeLabel)}</text>
+          <text x="214" y="212" text-anchor="end" fill="${background.low}" font-size="17" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(p95Label)}</text>
+        `)
       }
     </svg>
   `);
+}
+
+function latencyBinIndex(ms) {
+  for (let i = 0; i < LATENCY_BINS.length; i += 1) {
+    if (ms <= LATENCY_BINS[i]) {
+      return i;
+    }
+  }
+  return LATENCY_BINS.length - 1;
+}
+
+function bucketStartAt(timestamp) {
+  return Math.floor(timestamp / LATENCY_BUCKET_MS) * LATENCY_BUCKET_MS;
+}
+
+function emptyBucket(t) {
+  return { t, ok: 0, fail: 0, bins: new Array(LATENCY_BINS.length).fill(0) };
+}
+
+// 只保留窗口内的桶。桶按 t 升序，且仅在有探测时才存在——这正是「实际观测时长」的来源。
+function pruneLatencyBuckets(buckets, now) {
+  const cutoff = bucketStartAt(now) - LATENCY_WINDOW_MS + LATENCY_BUCKET_MS;
+  return buckets.filter((bucket) => bucket.t >= cutoff).slice(-LATENCY_BUCKET_LIMIT);
+}
+
+function pruneLatencyRecent(recent, now) {
+  const cutoff = now - LATENCY_WINDOW_MS;
+  return recent.filter((entry) => entry.t >= cutoff).slice(-LATENCY_HISTORY_LIMIT);
+}
+
+// 返回是否发生了桶滚动——滚动是运行态落盘的语义边界，避免逐次探测就写盘。
+function recordLatencySample(instance, result, now = Date.now()) {
+  const t = bucketStartAt(now);
+  const buckets = pruneLatencyBuckets(instance.buckets || [], now);
+  const last = buckets[buckets.length - 1];
+  const rolled = !last || last.t !== t;
+  const bucket = rolled ? emptyBucket(t) : last;
+  if (rolled) {
+    buckets.push(bucket);
+  }
+
+  if (result.ok) {
+    bucket.ok += 1;
+    bucket.bins[latencyBinIndex(result.ms)] += 1;
+  } else {
+    bucket.fail += 1;
+  }
+
+  instance.buckets = pruneLatencyBuckets(buckets, now);
+  instance.recent = pruneLatencyRecent(
+    [...(instance.recent || []), { t: now, ok: Boolean(result.ok), ms: result.ms }],
+    now,
+  );
+  return rolled;
+}
+
+// uptime 的分母只有实际观测到的探测数：宿主关着的时段既不算正常也不算宕机，
+// 而是根本没被观测到。observedMs 让按钮把这个事实说出来，而不是用「24h」撒谎。
+function latencyStats(instance, now = Date.now()) {
+  const buckets = pruneLatencyBuckets(instance.buckets || [], now);
+  let ok = 0;
+  let fail = 0;
+  const bins = new Array(LATENCY_BINS.length).fill(0);
+  for (const bucket of buckets) {
+    ok += bucket.ok || 0;
+    fail += bucket.fail || 0;
+    for (let i = 0; i < bins.length; i += 1) {
+      bins[i] += bucket.bins?.[i] || 0;
+    }
+  }
+  const checks = ok + fail;
+  return {
+    checks,
+    uptime: checks ? (ok / checks) * 100 : null,
+    observedMs: buckets.length * LATENCY_BUCKET_MS,
+    p95: percentileFromBins(bins, 0.95),
+  };
+}
+
+// 取分箱上沿作为 p95：宁可略微高报延迟，也不要让一个监控指标显得比实际乐观。
+function percentileFromBins(bins, percentile) {
+  const total = bins.reduce((sum, count) => sum + count, 0);
+  if (!total) {
+    return null;
+  }
+  const target = Math.ceil(percentile * total);
+  let seen = 0;
+  for (let i = 0; i < bins.length; i += 1) {
+    seen += bins[i];
+    if (seen >= target) {
+      const edge = LATENCY_BINS[i];
+      return Number.isFinite(edge) ? edge : LATENCY_BINS[i - 1];
+    }
+  }
+  return null;
+}
+
+function serializeLatencyState(instance) {
+  return {
+    v: LATENCY_STATE_VERSION,
+    paused: Boolean(instance.paused),
+    buckets: instance.buckets || [],
+    recent: instance.recent || [],
+    certExpiresAt: instance.certExpiresAt ?? null,
+  };
+}
+
+// 历史读不到就当没有——它是增益不是前置条件，绝不能因为存储损坏让按钮报错。
+function hydrateLatencyState(raw, now = Date.now()) {
+  const valid = raw && typeof raw === 'object' && raw.v === LATENCY_STATE_VERSION;
+  const buckets = valid && Array.isArray(raw.buckets)
+    ? raw.buckets.filter((bucket) => bucket && Number.isFinite(bucket.t) && Array.isArray(bucket.bins))
+    : [];
+  const recent = valid && Array.isArray(raw.recent)
+    ? raw.recent.filter((entry) => entry && Number.isFinite(entry.t) && Number.isFinite(entry.ms))
+    : [];
+  return {
+    paused: valid ? Boolean(raw.paused) : false,
+    buckets: pruneLatencyBuckets(buckets, now),
+    recent: pruneLatencyRecent(recent, now),
+    certExpiresAt: valid && Number.isFinite(raw.certExpiresAt) ? raw.certExpiresAt : null,
+  };
+}
+
+function flushLatencyState(instance, options = {}) {
+  const write = options.write ?? writePersistedState;
+  return write(instance.context, serializeLatencyState(instance));
 }
 
 function clearLatencyTimer(instance) {
@@ -1272,13 +1860,63 @@ function commitLatencyResult(instance, result, options = {}) {
   if (!feedbackCompleted || !isInstanceCurrent(instance, requestId, instances)) {
     return false;
   }
+  const now = options.now ?? Date.now();
+  const flush = options.flush ?? flushLatencyState;
   instance.checking = false;
   instance.lastMs = result.ok ? result.ms : null;
-  instance.history = [...instance.history, result].slice(-LATENCY_HISTORY_LIMIT);
+  if (Number.isFinite(result.cert)) {
+    instance.certExpiresAt = result.cert;
+  }
   instance.status = !result.ok ? 'down' : result.ms > warnMs ? 'slow' : 'up';
+  // 桶滚动才落盘：每 5 分钟一次，而不是每次探测一次。进行中的桶靠 onDispose 补 flush。
+  const rolled = recordLatencySample(instance, result, now);
+  if (rolled) {
+    flush(instance);
+  }
   render(instance);
   schedule(instance);
   return true;
+}
+
+// 宿主协议只有单一 `run` 事件，没有按下/抬起分离，因此长按无法实现（见 constants.js）。
+// 双击代之：单击不等待窗口关闭就立刻刷新——刷新是幂等且无副作用的，先发出去；
+// 若 400ms 内第二次按键到达，再把它作废并转成 Pause。这样单击零延迟，代价只是
+// 进入 Pause 时浪费一次探测请求。
+function handleLatencyTap(instance, options = {}) {
+  const now = options.now ?? Date.now();
+  const run = options.run ?? runLatencyCheck;
+  const render = options.render ?? renderInstance;
+  const flush = options.flush ?? flushLatencyState;
+  const doubleTapMs = options.doubleTapMs ?? LATENCY_DOUBLE_TAP_MS;
+
+  const previousTapAt = instance.lastTapAt ?? 0;
+  instance.lastTapAt = now;
+
+  if (now - previousTapAt < doubleTapMs) {
+    // 第二击：作废刚发出的那次刷新（提升 requestId 让它的结果被 isInstanceCurrent 丢弃）。
+    instance.lastTapAt = 0;
+    instance.requestId += 1;
+    instance.checking = false;
+    clearLatencyTimer(instance);
+    clearInstanceTimeout(instance, 'latencyFeedback');
+    instance.paused = !instance.paused;
+    if (instance.paused) {
+      instance.status = 'paused';
+      instance.lastMs = null;
+      flush(instance);
+      render(instance);
+      return undefined;
+    }
+    // 从 Pause 退出走的是与单击相同的路径：立即刷新并恢复轮询。
+    flush(instance);
+    return run(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true });
+  }
+
+  if (instance.paused) {
+    instance.paused = false;
+    flush(instance);
+  }
+  return run(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true });
 }
 
 async function runLatencyCheck(instance, options = {}) {
@@ -1440,10 +2078,28 @@ function createSettingsEventProcessor(options = {}) {
       return instance;
     },
     pluginSubmit(context, incomingSettings = {}) {
+      if (isResetDefaultsRequest(incomingSettings)) {
+        return this.resetDefaults(context);
+      }
       const instance = ensureInstance(context, incomingSettings, 'pluginSubmit', runtime);
       const config = configFromUuid(instance.actionUuid);
       guardAction(instance, 'paramFromPlugin', () => dispatchActionParam(config, instance, incomingSettings));
       runtime.render(instance);
+      return instance;
+    },
+    // 恢复默认：以 defaults 归一化结果为权威，持久化后回推 PI 刷新表单。
+    resetDefaults(context) {
+      const instance = ensureInstance(context, {}, 'runtime', runtime);
+      const config = configFromUuid(instance.actionUuid);
+      const previousSettings = { ...instance.settings };
+      instance.settings = normalizeSettings(instance.actionUuid, {});
+      const persistedSettings = runtime.readPersisted(context, config);
+      if (!persistedSettingsEqual(instance.actionUuid, config, instance.settings, persistedSettings)) {
+        runtime.writePersisted(context, config, instance.settings);
+      }
+      guardAction(instance, 'settingsChanged', () => config.onSettingsChanged?.(instance, previousSettings));
+      runtime.render(instance);
+      guardAction(instance, 'syncInspector', () => syncInspectorSettings(instance, {}, ud));
       return instance;
     },
   };
@@ -1506,6 +2162,26 @@ $UD.onClear(safeHandler('clear', (message) => {
   });
 }));
 
+// 宿主退出是最常见的下线路径（用户直接关 Studio），不接这里 action 就没有 flush 机会。
+// 'exit' 只允许同步操作，disposeInstance 与 onDispose 的落盘都是 writeFileSync，符合约束。
+let disposedAll = false;
+const disposeAllInstances = () => {
+  if (disposedAll) {
+    return;
+  }
+  disposedAll = true;
+  for (const instance of INSTANCES.values()) {
+    disposeInstance(instance);
+  }
+};
+process.on('exit', disposeAllInstances);
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    disposeAllInstances();
+    process.exit(0);
+  });
+}
+
 process.on('unhandledRejection', (reason) => {
   log('unhandledRejection (isolated)', reason?.stack || reason);
 });
@@ -1521,15 +2197,36 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
 export const __testing = Object.freeze({
   ACTION_CONFIGS,
+  THEMES,
+  POMODORO_PALETTES,
+  frameFor,
+  frameHighlight,
+  checkUrl,
   clearInstanceTimeout,
   commitLatencyResult,
+  formatUptimeLabel,
+  handleLatencyTap,
+  hydrateLatencyState,
+  hydratePomodoroState,
+  serializePomodoroState,
+  flushPomodoroState,
+  pomodoroRemainingSec,
+  tickPomodoro,
+  togglePomodoro,
+  skipPomodoroPhase,
+  latencyStats,
+  recordLatencySample,
+  sslDaysLeft,
   createSettingsEventProcessor,
   createSettingsStorage,
   delayInstance,
   dispatchActionParam,
   disposeInstance,
+  dropPersistedState,
   initializeInstanceState,
+  readPersistedState,
   resolveSettingsForEvent,
   setInstanceTimeout,
   writePersistedSettings,
+  writePersistedState,
 });

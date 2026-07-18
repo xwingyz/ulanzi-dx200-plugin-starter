@@ -1,1 +1,1 @@
-initInspector('__PLUGIN_UUID__.swatch', ['title', 'subtitle', 'theme']);
+initInspector('__PLUGIN_UUID__.swatch', ['title', 'subtitle', 'theme', 'frameSize', 'showFrame']);

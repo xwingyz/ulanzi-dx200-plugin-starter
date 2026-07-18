@@ -64,7 +64,7 @@
 规则：
 
 - `defaults` 只放可序列化设置，不放运行态临时值。
-- `createState` 只初始化实例态，例如计数、开关、轮播步进。
+- `createState(instance)` 只初始化实例态，例如计数、开关、轮播步进；调用时 `instance` 的 `context` 与归一化后的 `settings` 已就绪，可据此水合持久化运行态（见「运行态持久化」），但不得在此发起探测、定时器或任何 I/O 以外的副作用。
 - `onRun` 只处理按键行为，不直接写死 SVG 字符串。
 - `render` 必须是纯渲染函数输入，依赖 `settings + state` 产出图标。
 - 所有设置都先经 `normalizeSettings` 归一化，再进入 `render`。
@@ -77,7 +77,18 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 - `onReady(instance)`：实例完成本轮设置合并与渲染后的准备工作。
 - `onSettingsChanged(instance, previousSettings)`：响应归一化后的设置变化。
 - `onParamFromPlugin(instance, param)`：处理 Property Inspector 来件中的 action 私有语义。
+- `onDispose(instance)`：实例被宿主移除（`onClear`）或进程退出前的最后一次回调，用于把攒在内存里的运行态 flush 落盘。框架在此之后统一回收定时器，因此 `onDispose` 内不得再登记定时器或发起异步续作——只做同步落盘。
 - `persist`：默认保存归一化后的完整设置；设为 `false` 关闭该 action 的持久化，或提供筛选函数只返回需要保存的字段。
+
+### 运行态持久化（与设置持久化分离）
+
+settings 与运行态是两套东西，不得混用同一个存储：
+
+- 设置写 `data/action-settings.json`，由框架在设置合并后自动落盘，action 不经手。
+- 运行态（如 latency 的 uptime 聚合桶）写 `data/action-state.json`，同样按 `actionid::key` 归档，但**由 action 自己决定何时读写**，框架只提供 `readPersistedState(context)` / `writePersistedState(context, data)` 两个通用入口。框架事件处理器不得自动读写运行态，也不得感知任何 action 的运行态结构。
+- 运行态必须能在缺失或损坏时降级为空，action 不得因为读不到历史而报错——历史是增益，不是前置条件。
+- 运行态落盘频率由 action 控制，但不得逐次探测就写盘；按语义边界（如聚合桶滚动）批量写，并在 `onDispose` 补一次 flush。
+- 两个存储共用 `createSettingsStorage` 工厂：传 `storePath` 指定文件，传 `legacyPath: null` 关闭 legacy 迁移（legacy 迁移只对设置存储有意义）。
 
 框架事件处理器只负责通用的实例管理、设置合并、持久化、回推和钩子分发，不得出现任何具体业务 action key，也不得为某个 action 新增专属分支。action 特有行为必须下放到 `ACTION_CONFIGS` 的钩子或 action 实现中。
 
@@ -90,6 +101,7 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 - 文件更新必须在目标文件同目录写临时文件，再用 rename 替换正式文件，避免半写入状态。
 - 若新的 `action-settings.json` 存在但无法读取或解析，本次进程将存储置为只读并保留原文件，不得用空对象、默认值或 legacy 数据覆盖它。
 - legacy 存储只允许在新的 `action-settings.json` 明确返回 `ENOENT` 时迁移；其他读取错误一律不得触发迁移。
+- “恢复默认配置”走框架保留控制参数 `__resetDefaults: 'true'`（PI 发送、框架在 `pluginSubmit` 入口拦截）：框架把设置重置为 `defaults` 的归一化结果，按持久化语义变化决定是否写盘，随后触发 `onSettingsChanged`、渲染并把权威设置回推 PI 刷新表单。控制参数不进入设置合并、不落盘，也不透传给 action 的 `onParamFromPlugin`。
 
 ### 进程内隔离（单进程约束下的强制规则）
 
@@ -110,6 +122,12 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 统一要求：
 
 - 所有运行态按钮按 256 x 256 画布设计。
+- **安全边框**：内容一律画在 40..216 的设计箱内（所有坐标按此设计），不得越界；框架的 `frameFor` / `frameContent` 会按 `frameSize` 把内容等比缩放到目标安全区。两档范围：`optimal` 最佳显示（内容区内缩 30，等比放大约 1.11；壳→面板留白 12，与 max 一致——曾经内缩 40 的 1:1 映射会让内容挤在中央、离外框过远）、`max` 最大化（内容区内缩 18，等比放大 1.25）。
+- **背景随安全框**：背景填充按预设的背景界（`bleed`）绘制，不永远铺满整键——`optimal` 背景内缩 12（键面留出真实边距），`max` 铺满（bleed 0）；装饰性背景（latency/pomowave 的主题渐变）必须整体等比缩放进同一背景界（transform 组）。**禁止用 `clipPath` 实现**：宿主 SVG 渲染器对 clipPath 支持不可靠，会静默失效导致背景不随框变化。
+- **圆角规则**：嵌套方式参考 Apple 图标的同心圆角（内层圆角 = 外层圆角 − 层间距，下限 2），四角间隙均匀；但比例按 DX200 实体键角取 42/256 ≈ 16.41%（`FRAME_RADIUS_RATIO`，256 全幅时圆角 42）——Apple 的 22.37% 对本硬件偏大。半径一律由 `frameFor` 的 `radiusAt` 推导，不得在预设或 action 里硬编码圆角；连续曲率（squircle）按圆弧近似，不做模拟。
+- **内框线（高亮区域）**：框架在面板内缘（`panel + 4`）预留一条默认不绘制的内框线；action 需要强调运行态（如 latency 掉线、pomowave 尾段脉冲）时用 `frameHighlight(frame, color)` 把它画出来，画在 `frameContent` 之外的真实坐标层。圆角同样由 `radiusAt` 同心推导，且不受 `showFrame` 影响；action 不得自绘几何不一致的高亮框。
+- `showFrame` 只控制边框（外环/壳/面板描边）是否绘制，不改变内容布局几何——开关边框内容不跳动。`frameSize` / `showFrame` 是框架级共享设置，由 `normalizeSettings` 归一化，action 不得自行解析。
+- 新 action 的 `render` 内容必须整体经 `renderScreenFrame(..., frame)` 或 `frameContent(frame, inner)` 输出，不允许绕过安全边框直接铺画布。
 - 外框、屏幕、内面板优先复用 `renderScreenFrame` 这一层级，不为单 action 造完全不同的骨架。
 - 文本、颜色、图形布局必须围绕 theme token，而不是在各 action 里散落硬编码。
 - 默认保留“标题 1 行 + 次标题 1 行 + 主要信息区”的结构，除非功能本身不适合文本。
@@ -132,10 +150,13 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 规则：
 
 - 不在某个 action 内新增私有主题结构；若需要新 token，先扩 `THEMES` 的公共字段。
-- theme 名称必须短且稳定，当前使用 `mint`、`ember`、`mono`、`signal`。
-- `settings.color` 是用户覆盖色，只覆盖强调色，不改整套 theme。
-- 新 action 默认先复用已有 4 套主题，不先新增第 5 套。
+- theme 名称必须短且稳定，当前 9 套：`mint`（青绿）、`ember`（暖橙）、`mono`（灰阶）、`signal`（信号蓝）、`neon`（科幻霓虹）、`ice`（冷调冰蓝）、`sunset`（暖调落日）、`forest`（自然森林）、`sand`（浅色暖沙）。
+- 强调色一律取当前 theme 的 `accent`，不提供按 action 的颜色覆盖设置（原 `settings.color` 已移除；action 运行态自有的颜色轮换如 swatch 属业务状态，不受此限）。
+- **颜色只有 theme 这一个轴**：不得再引入与 theme 并列的第二个外观设置。原 `settings.backgroundStyle` 已移除——它的 `mist` / `paper` 把 shell、panel、描边、文字全部改写成硬编码浅色 hex，实质是一套与 `THEMES` 抢控制权的影子主题，9 套主题 × 4 种背景里大部分组合都因此失效。需要浅色外观就选 `sand` 主题；需要新外观就扩 `THEMES`，不要在 action 侧另开设置项。
+- 新 action 默认先复用已有主题，不先新增新套。
 - Property Inspector 的 theme 选项要和运行态 theme key 一一对应。
+- PI 主题色卡由共享层按 `inspector-shared.js` 的 `THEME_SWATCHES` 动态渲染，五段按角色依次为：背景（`canvas`）、填充（`panel`）、边框（`low`）、强调（`accent`）、文字（`text`）；页面只保留空的 `.theme-row` 容器，不再逐页写色卡 CSS。
+- 新增主题的完整动作：扩 `THEMES`（业务插件与 template 两份）→ 扩 `THEME_SWATCHES` → 若插件含 pomowave 再补 `POMODORO_PALETTES`。三者一致性由 `npm test` 校验锁定，漏改会直接红。
 
 ## 7. Property Inspector 共享规范
 
@@ -148,11 +169,15 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 
 规则：
 
-- 共享字段名固定使用 `title`、`subtitle`、`color`、`theme`；新增字段时保持同样命名风格。
+- 共享字段名固定使用 `title`、`subtitle`、`theme`、`frameSize`、`showFrame`；新增字段时保持同样命名风格。
+- 每个 PI 页面必须提供安全边框控件：`#frameSize`（checkbox：选中=最佳范围 optimal、未选中=最大范围 max）与 `#showFrame`（checkbox），走 `data-localize` 文案。
+- checkbox 默认映射 `'true'/'false'`；需要自定义值对时用 `data-on` / `data-off` 声明（如 `#frameSize` 的 `data-on="optimal" data-off="max"`），由共享层 `collectSettings` / `applySettings` 统一处理，不做字段名特判。
 - action 私有 inspector 入口文件只做 `initInspector(...)` 调用，不写重复连接代码。
 - HTML 表单结构保持 `#property-inspector` 和 `.uspi-wrapper`，不要每个 action 自定义 wrapper 约定。
 - Inspector 里主题按钮的 `data-theme-value` 必须直接对应 `THEMES` key。
 - 文本等连续输入统一使用 `400ms` 去抖自动提交，减少连续写盘；表单提交、主题等按钮操作必须 flush 待提交值并立即发送。
+- 每个 PI 页面必须提供“保存”与“恢复默认”（`#resetDefaults`）按钮，以及内联反馈条（`#inspector-feedback` 容器 + `#feedback-saved` / `#feedback-reset` 文案）；两个按钮按下后由共享层 `flashInspectorFeedback` 显示反馈并自动隐藏。
+- 恢复默认按钮只发送 `__resetDefaults` 控制参数并取消未提交的去抖尾值；默认值的唯一权威是插件侧 `ACTION_CONFIGS.defaults`，PI 页面不得自带默认值副本。
 
 ## 8. 新增 Action 的标准步骤
 
@@ -177,6 +202,7 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 - 共享层指：`libs/`、`property-inspector/inspector-shared.js`、`plugin/app.js` 的框架段（THEMES、normalize、INSTANCES、事件分发、隔离层）。
 - 在业务插件里对共享层做出的**通用**修复或增强，验证通过后必须同步回流 `template/`，同一次任务内完成，不留"以后再补"。
 - 例行核对命令：`diff -rq template/com.example.hello.ulanziPlugin/libs plugins/<plugin>/libs`；`libs/node/utils.js` 里的 `__PLUGIN_NAME__` 是脚手架占位符，属预期差异，不算漂移。
+- 浏览器桥接层（`libs/js/*`）与 `inspector-shared.js` 的双份一致性、以及 inspector 脚本对 `$UD` 方法的调用面，已由 `tests/inspector-bridge.test.js` 用真实桥接文件锁定；mock 掉 `$UD` 的测试看不见这类断裂，新增 `$UD` 用法时优先补真实桥接测试。
 - 改共享层的任务，完成定义额外包含：模板与业务插件两份副本一致（占位符除外）、双份 `node --check` 通过、`npm test` 全绿。
 
 ## 10. 调试方法
@@ -209,7 +235,8 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 
 ### E. 模式选择
 
-- 只改渲染逻辑、普通 JS、Inspector 页面：`sync`
+- 只改 Inspector 页面、静态资源：`sync`（PI 每次打开都重新加载，拷过去即生效）
+- 改 `plugin/app.js` 任何逻辑（含纯渲染函数）：`restart`。主服务是常驻 Node 进程，`sync` 只拷文件不重载进程，改了也不会生效——不要被"只是改了渲染"骗过
 - 改 UUID、action identity、按钮绑定关系：`rebind`
 - 改 `manifest.json`、主入口、依赖、首次安装：`restart`
 

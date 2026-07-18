@@ -9,6 +9,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 框架层持久化：所有 action 的设置都落到同一份 data/action-settings.json，
 // 按 `${actionid}::${key}` 归档。
 const SETTINGS_STORE_PATH = path.join(__dirname, '..', 'data', 'action-settings.json');
+// 运行态与设置分开存：设置由框架自动落盘，运行态由 action 自己按语义边界批量写。
+const STATE_STORE_PATH = path.join(__dirname, '..', 'data', 'action-state.json');
 
 const THEMES = {
   mint: {
@@ -51,6 +53,56 @@ const THEMES = {
     low: '#1d4ed8',
     contrast: '#082f49',
   },
+  neon: {
+    accent: '#e879f9',
+    canvas: '#0d0221',
+    panel: '#1b0f3b',
+    shell: '#130829',
+    text: '#f3e8ff',
+    muted: '#c084fc',
+    low: '#6d28d9',
+    contrast: '#2e1065',
+  },
+  ice: {
+    accent: '#67e8f9',
+    canvas: '#051820',
+    panel: '#0b2a38',
+    shell: '#07202b',
+    text: '#ecfeff',
+    muted: '#a5f3fc',
+    low: '#0e7490',
+    contrast: '#083344',
+  },
+  sunset: {
+    accent: '#fb7185',
+    canvas: '#1f0910',
+    panel: '#38121f',
+    shell: '#2a0d17',
+    text: '#fff1f2',
+    muted: '#fda4af',
+    low: '#9f1239',
+    contrast: '#4c0519',
+  },
+  forest: {
+    accent: '#4ade80',
+    canvas: '#04150c',
+    panel: '#0d2b1a',
+    shell: '#082012',
+    text: '#ecfdf5',
+    muted: '#86efac',
+    low: '#166534',
+    contrast: '#052e16',
+  },
+  sand: {
+    accent: '#b45309',
+    canvas: '#f6f1e7',
+    panel: '#fffcf5',
+    shell: '#efe6d4',
+    text: '#292524',
+    muted: '#78716c',
+    low: '#d6c7ab',
+    contrast: '#fef3c7',
+  },
 };
 
 const THEME_NAMES = Object.keys(THEMES);
@@ -68,8 +120,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: '__PLUGIN_NAME__',
       subtitle: 'Counter',
-      color: '#14b8a6',
       theme: 'mint',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({ count: 0 }),
     onRun: (instance) => {
@@ -81,8 +134,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: '__PLUGIN_NAME__',
       subtitle: 'Status',
-      color: '#f97316',
       theme: 'ember',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({ activeBadge: true }),
     onRun: (instance) => {
@@ -94,8 +148,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: '__PLUGIN_NAME__',
       subtitle: 'Palette',
-      color: '#8b5cf6',
       theme: 'signal',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({ step: 0, currentColor: SWATCH_COLORS[0] }),
     onRun: (instance) => {
@@ -108,8 +163,9 @@ const ACTION_CONFIGS = {
     defaults: {
       title: '__PLUGIN_NAME__',
       subtitle: 'Font Test',
-      color: '#d4d4d8',
       theme: 'mono',
+      frameSize: 'optimal',
+      showFrame: 'true',
     },
     createState: () => ({}),
     onRun: () => {},
@@ -128,6 +184,8 @@ const $UD = new UlanzideckApi();
 const INSTANCES = new Map();
 const SETTINGS_STORAGE = createSettingsStorage();
 const PERSISTED_SETTINGS = SETTINGS_STORAGE.load();
+const STATE_STORAGE = createSettingsStorage({ storePath: STATE_STORE_PATH });
+const PERSISTED_STATE = STATE_STORAGE.load();
 
 // ---- 框架持久化层：所有 action 设置按 `${actionid}::${key}` 落盘并跨重启回读 ----
 
@@ -231,6 +289,48 @@ function writePersistedSettings(context, config, settings, options = {}) {
   return true;
 }
 
+// 运行态持久化：与设置存储同构（同一个 `${actionid}::${key}`），但框架不自动读写。
+// action 自己决定落盘时机，框架不感知运行态结构。读不到就返回空——历史是增益，不是前置条件。
+function readPersistedState(context, options = {}) {
+  const store = options.store ?? PERSISTED_STATE;
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const value = store[keyFromContext(context)];
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  return value;
+}
+
+function writePersistedState(context, data, options = {}) {
+  const store = options.store ?? PERSISTED_STATE;
+  const storage = options.storage ?? STATE_STORAGE;
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const key = keyFromContext(context);
+  const candidate = { ...store, [key]: data };
+  if (!storage.write(candidate)) {
+    return false;
+  }
+  store[key] = data;
+  return true;
+}
+
+function dropPersistedState(context, options = {}) {
+  const store = options.store ?? PERSISTED_STATE;
+  const storage = options.storage ?? STATE_STORAGE;
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const key = keyFromContext(context);
+  if (!(key in store)) {
+    return false;
+  }
+  const candidate = { ...store };
+  delete candidate[key];
+  if (!storage.write(candidate)) {
+    return false;
+  }
+  delete store[key];
+  return true;
+}
+
 function pickPersistedSettings(config, settings) {
   const source = typeof config.persist === 'function' ? config.persist(settings) : settings;
   const clean = {};
@@ -267,6 +367,14 @@ function dispatchActionParam(config, instance, param) {
   return config.onParamFromPlugin?.(instance, param);
 }
 
+// 框架保留控制参数：PI 的“恢复默认配置”按钮通过它触发重置。
+// 控制参数不进入设置合并，也不透传给 action 的 onParamFromPlugin。
+const RESET_DEFAULTS_PARAM = '__resetDefaults';
+
+function isResetDefaultsRequest(param) {
+  return String(param?.[RESET_DEFAULTS_PARAM] ?? '') === 'true';
+}
+
 // ---- 框架隔离层：单进程内按实例隔离异常与定时器（见 docs/development-rules.md §4）----
 
 function reportActionError(instance, phase, error, options = {}) {
@@ -297,7 +405,8 @@ function guardAction(instance, phase, fn, onError = reportActionError) {
 
 function initializeInstanceState(instance, config, options = {}) {
   const onError = (failedInstance, phase, error) => reportActionError(failedInstance, phase, error, options);
-  const state = guardAction(instance, 'createState', () => config.createState() || {}, onError);
+  // createState 收到的 instance 已带 context 与归一化 settings，据此可水合持久化运行态。
+  const state = guardAction(instance, 'createState', () => config.createState(instance) || {}, onError);
   if (state) {
     Object.assign(instance, state);
   }
@@ -345,7 +454,16 @@ function clearInstanceTimeout(instance, slot) {
 }
 
 function disposeInstance(instance) {
-  if (!instance?.timers) {
+  if (!instance) {
+    return;
+  }
+  // 先给 action 最后一次同步 flush 的机会，再回收定时器——顺序反了 onDispose 就拿不到
+  // 还在等定时器里落盘的运行态。onDispose 抛错不得阻断定时器回收。
+  const config = ACTION_KEY_BY_UUID[instance.actionUuid] ? configFromUuid(instance.actionUuid) : null;
+  if (config?.onDispose) {
+    guardAction(instance, 'dispose', () => config.onDispose(instance));
+  }
+  if (!instance.timers) {
     return;
   }
   for (const slot of [...instance.timers.keys()]) {
@@ -372,7 +490,7 @@ function renderErrorState(instance) {
           <text x="128" y="116" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="700" font-family="Arial, Helvetica, sans-serif">ERR</text>
           <text x="128" y="150" text-anchor="middle" fill="${theme.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${escapeXml(actionKey)}</text>
           <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">see plugin log</text>
-        `)}
+        `, frameFor(instance.settings || {}))}
       </svg>
     `));
   } catch {}
@@ -416,8 +534,74 @@ function normalizeTheme(value, fallback) {
   return THEME_NAMES.includes(value) ? value : fallback;
 }
 
+function normalizeChoice(value, fallback, choices) {
+  return choices.includes(value) ? value : fallback;
+}
+
+function normalizeBooleanString(value, fallback) {
+  return String(value) === 'true' || String(value) === 'false'
+    ? String(value)
+    : String(fallback) === 'true' ? 'true' : 'false';
+}
+
 function themeFor(settings) {
   return THEMES[normalizeTheme(settings.theme, 'mint')];
+}
+
+// ---- 安全边框：所有内容画在 40..216 的设计箱内，框架按 frameSize 等比
+// 缩放到目标安全区；showFrame 只控制边框绘制，不改变内容布局几何。----
+const FRAME_DESIGN_INSET = 40;
+const FRAME_DESIGN_BOX = 256 - FRAME_DESIGN_INSET * 2;
+const FRAME_PRESETS = {
+  // 最佳显示范围：边框紧贴背景边缘（背景→壳留白 6）；面板/内容箱收到 30，
+  // 壳→面板留白 12（与 max 一致）。曾经的 40（设计箱 1:1）会让内容挤在中央、
+  // 离外框过远，等比放大 ~1.11 后字号也随之变大。
+  optimal: { bleed: 12, ring: 14, shell: 18, panel: 30, content: 30 },
+  // 最大化范围：边框收薄贴边（背景→壳留白 6），内容区扩到 18..238（等比放大 1.25）。
+  max: { bleed: 0, ring: 2, shell: 6, panel: 18, content: 18 },
+};
+const FRAME_SIZE_NAMES = Object.keys(FRAME_PRESETS);
+// 圆角规则参考 Apple 图标的同心嵌套（内层圆角 = 外层圆角 − 层间距，下限 2），
+// 但比例按 DX200 实体键角实测收小为 42/256 ≈ 16.41%（256 全幅时圆角 42）——
+// Apple 的 22.37% 对本硬件偏大。squircle 在键面尺寸下差异可忽略，用圆弧近似。
+const FRAME_RADIUS_RATIO = 42 / 256;
+
+function frameFor(settings = {}) {
+  const preset = FRAME_PRESETS[normalizeChoice(settings.frameSize, 'optimal', FRAME_SIZE_NAMES)];
+  const scale = (256 - preset.content * 2) / FRAME_DESIGN_BOX;
+  const bleedRadius = Math.round((256 - preset.bleed * 2) * FRAME_RADIUS_RATIO);
+  const radiusAt = (inset) => Math.max(2, bleedRadius - (inset - preset.bleed));
+  return {
+    ...preset,
+    bleedRadius,
+    ringRadius: radiusAt(preset.ring),
+    shellRadius: radiusAt(preset.shell),
+    panelRadius: radiusAt(preset.panel),
+    highlight: preset.panel + 4,
+    highlightRadius: radiusAt(preset.panel + 4),
+    radiusAt,
+    show: String(settings.showFrame) !== 'false',
+    scale,
+    offset: preset.content - FRAME_DESIGN_INSET * scale,
+  };
+}
+
+function frameRect(inset, radius, extras) {
+  const size = 256 - inset * 2;
+  return `<rect x="${inset}" y="${inset}" width="${size}" height="${size}" rx="${radius}" ${extras}/>`;
+}
+
+function frameContent(frame, innerSvg) {
+  if (frame.scale === 1) {
+    return innerSvg;
+  }
+  return `<g transform="translate(${frame.offset.toFixed(2)} ${frame.offset.toFixed(2)}) scale(${frame.scale.toFixed(4)})">${innerSvg}</g>`;
+}
+
+// 内框线：默认不绘制；action 需要强调运行态时把它画出来作为高亮区域。
+// 位置贴面板内缘（panel + 4），圆角同样由 radiusAt 同心推导，不受 showFrame 影响。
+function frameHighlight(frame, color, opacity = 1) {
+  return frameRect(frame.highlight, frame.highlightRadius, `fill="none" stroke="${color}" stroke-width="6" opacity="${opacity}"`);
 }
 
 function normalizeSettings(actionUuid, settings = {}) {
@@ -426,24 +610,30 @@ function normalizeSettings(actionUuid, settings = {}) {
   return {
     title: normalizeText(settings.title, defaults.title, 14),
     subtitle: normalizeText(settings.subtitle, defaults.subtitle, 18),
-    color: normalizeColor(settings.color, defaults.color),
     theme: normalizeTheme(settings.theme, defaults.theme),
+    frameSize: typeof defaults.frameSize === 'string' ? normalizeChoice(settings.frameSize, defaults.frameSize, FRAME_SIZE_NAMES) : undefined,
+    showFrame: typeof defaults.showFrame === 'string' ? normalizeBooleanString(settings.showFrame, defaults.showFrame) : undefined,
   };
 }
 
-function renderScreenFrame(theme, accent, innerSvg) {
+function renderScreenFrame(theme, accent, innerSvg, frame = frameFor()) {
+  const chrome = frame.show
+    ? `
+    ${frameRect(frame.ring, frame.ringRadius, `fill="none" stroke="${theme.low}" stroke-width="2" opacity="0.4"`)}
+    ${frameRect(frame.shell, frame.shellRadius, `fill="${theme.shell}" stroke="${accent}" stroke-width="4"`)}
+    ${frameRect(frame.panel, frame.panelRadius, `fill="${theme.panel}" stroke="${accent}" stroke-width="1.5" opacity="0.98"`)}
+  `
+    : '';
   return `
-    <rect width="256" height="256" rx="48" fill="${theme.canvas}"/>
-    <rect x="16" y="16" width="224" height="224" rx="40" fill="none" stroke="${theme.low}" stroke-width="2" opacity="0.4"/>
-    <rect x="28" y="28" width="200" height="200" rx="30" fill="${theme.shell}" stroke="${accent}" stroke-width="4"/>
-    <rect x="40" y="40" width="176" height="176" rx="24" fill="${theme.panel}" stroke="${accent}" stroke-width="1.5" opacity="0.98"/>
-    ${innerSvg}
+    ${frameRect(frame.bleed, frame.bleedRadius, `fill="${theme.canvas}"`)}
+    ${chrome}
+    ${frameContent(frame, innerSvg)}
   `;
 }
 
 function renderCounterIcon(settings, count) {
   const theme = themeFor(settings);
-  const accent = normalizeColor(settings.color, theme.accent);
+  const accent = theme.accent;
 
   return toDataUrl(`
     <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
@@ -457,6 +647,7 @@ function renderCounterIcon(settings, count) {
           <text x="128" y="174" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
           <text x="128" y="204" text-anchor="middle" fill="${theme.low}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to increment</text>
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
@@ -464,7 +655,7 @@ function renderCounterIcon(settings, count) {
 
 function renderBadgeIcon(settings, active) {
   const theme = themeFor(settings);
-  const accent = normalizeColor(settings.color, theme.accent);
+  const accent = theme.accent;
   const pillFill = active ? accent : theme.low;
   const pillText = active ? theme.contrast : theme.text;
 
@@ -480,12 +671,13 @@ function renderBadgeIcon(settings, active) {
           <text x="128" y="170" text-anchor="middle" fill="${theme.muted}" font-size="22" font-family="Arial, Helvetica, sans-serif">${escapeXml(settings.subtitle)}</text>
           <text x="128" y="202" text-anchor="middle" fill="${accent}" font-size="16" font-family="Arial, Helvetica, sans-serif">press to toggle</text>
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
 }
 
-function renderSwatchIcon(settings, step, currentColor = settings.color) {
+function renderSwatchIcon(settings, step, currentColor) {
   const theme = themeFor(settings);
   const accent = normalizeColor(currentColor, theme.accent);
   const dots = SWATCH_COLORS.map((color, index) => {
@@ -506,6 +698,7 @@ function renderSwatchIcon(settings, step, currentColor = settings.color) {
           <text x="128" y="218" text-anchor="middle" fill="${theme.text}" font-size="17" font-family="Arial, Helvetica, sans-serif">${escapeXml(accent.toUpperCase())}</text>
           ${dots}
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
@@ -513,7 +706,7 @@ function renderSwatchIcon(settings, step, currentColor = settings.color) {
 
 function renderFontTestIcon(settings) {
   const theme = themeFor(settings);
-  const accent = normalizeColor(settings.color, theme.accent);
+  const accent = theme.accent;
   const samples = FONT_TEST_LINES.map(({ size, y }, index) => {
     const fill = index === 2 ? accent : theme.text;
     return `
@@ -531,6 +724,7 @@ function renderFontTestIcon(settings) {
           <rect x="40" y="40" width="176" height="176" rx="24" fill="none" stroke="${theme.muted}" stroke-width="1.5" stroke-dasharray="6 6" opacity="0.8"/>
           ${samples}
         `,
+        frameFor(settings),
       )}
     </svg>
   `);
@@ -649,10 +843,28 @@ function createSettingsEventProcessor(options = {}) {
       return instance;
     },
     pluginSubmit(context, incomingSettings = {}) {
+      if (isResetDefaultsRequest(incomingSettings)) {
+        return this.resetDefaults(context);
+      }
       const instance = ensureInstance(context, incomingSettings, 'pluginSubmit', runtime);
       const config = configFromUuid(instance.actionUuid);
       guardAction(instance, 'paramFromPlugin', () => dispatchActionParam(config, instance, incomingSettings));
       runtime.render(instance);
+      return instance;
+    },
+    // 恢复默认：以 defaults 归一化结果为权威，持久化后回推 PI 刷新表单。
+    resetDefaults(context) {
+      const instance = ensureInstance(context, {}, 'runtime', runtime);
+      const config = configFromUuid(instance.actionUuid);
+      const previousSettings = { ...instance.settings };
+      instance.settings = normalizeSettings(instance.actionUuid, {});
+      const persistedSettings = runtime.readPersisted(context, config);
+      if (!persistedSettingsEqual(instance.actionUuid, config, instance.settings, persistedSettings)) {
+        runtime.writePersisted(context, config, instance.settings);
+      }
+      guardAction(instance, 'settingsChanged', () => config.onSettingsChanged?.(instance, previousSettings));
+      runtime.render(instance);
+      guardAction(instance, 'syncInspector', () => syncInspectorSettings(instance, {}, ud));
       return instance;
     },
   };
@@ -714,6 +926,26 @@ $UD.onClear(safeHandler('clear', (message) => {
   });
 }));
 
+// 宿主退出是最常见的下线路径（用户直接关 Studio），不接这里 action 就没有 flush 机会。
+// 'exit' 只允许同步操作，disposeInstance 与 onDispose 的落盘都是 writeFileSync，符合约束。
+let disposedAll = false;
+const disposeAllInstances = () => {
+  if (disposedAll) {
+    return;
+  }
+  disposedAll = true;
+  for (const instance of INSTANCES.values()) {
+    disposeInstance(instance);
+  }
+};
+process.on('exit', disposeAllInstances);
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    disposeAllInstances();
+    process.exit(0);
+  });
+}
+
 process.on('unhandledRejection', (reason) => {
   log('unhandledRejection (isolated)', reason?.stack || reason);
 });
@@ -729,14 +961,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
 export const __testing = Object.freeze({
   ACTION_CONFIGS,
+  THEMES,
+  frameFor,
+  frameHighlight,
   clearInstanceTimeout,
   createSettingsStorage,
   createSettingsEventProcessor,
   delayInstance,
   dispatchActionParam,
   disposeInstance,
+  dropPersistedState,
   initializeInstanceState,
+  readPersistedState,
   resolveSettingsForEvent,
   setInstanceTimeout,
   writePersistedSettings,
+  writePersistedState,
 });

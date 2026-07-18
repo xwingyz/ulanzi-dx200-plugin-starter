@@ -3,24 +3,18 @@ const LATENCY_FIELDS = [
   'intervalSec',
   'warnMs',
   'timeoutMs',
-  'color',
+  'sslWarnDays',
   'theme',
+  'frameSize',
+  'showFrame',
   'graphMode',
-  'backgroundStyle',
 ];
 
 function syncModeButtons() {
   const graphInput = document.getElementById('graphMode');
-  const bgInput = document.getElementById('backgroundStyle');
 
   document.querySelectorAll('[data-graph-mode]').forEach((button) => {
     const active = button.dataset.graphMode === graphInput.value;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', active ? 'true' : 'false');
-  });
-
-  document.querySelectorAll('[data-bg-style]').forEach((button) => {
-    const active = button.dataset.bgStyle === bgInput.value;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
@@ -51,6 +45,7 @@ function initLatencyInspector() {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       commitSettings();
+      flashInspectorFeedback('saved');
     });
 
     form.addEventListener('input', () => {
@@ -67,14 +62,10 @@ function initLatencyInspector() {
       });
     });
 
-    document.querySelectorAll('[data-bg-style]').forEach((button) => {
-      button.addEventListener('click', () => {
-        document.getElementById('backgroundStyle').value = button.dataset.bgStyle || 'gradient';
-        syncModeButtons();
-        commitSettings();
-      });
+    bindResetDefaults(() => {
+      autosave.cancel();
+      $UD.sendParamFromPlugin({ [RESET_DEFAULTS_PARAM]: 'true' }, currentContext);
     });
-
     window.addEventListener('pagehide', () => {
       autosave.flush();
       autosave.cancel();

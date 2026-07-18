@@ -1,1 +1,1 @@
-initInspector('com.ulanzi.ulanzistudio.lexutility.counter', ['title', 'subtitle', 'color', 'theme']);
+initInspector('com.ulanzi.ulanzistudio.lexutility.counter', ['title', 'subtitle', 'theme', 'frameSize', 'showFrame']);

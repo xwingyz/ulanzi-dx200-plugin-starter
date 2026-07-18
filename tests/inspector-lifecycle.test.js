@@ -43,6 +43,8 @@ class FakeElement extends FakeEventTarget {
     this.checked = false;
     this.dataset = dataset;
     this.attributes = new Map();
+    this.style = {};
+    this.children = [];
     this.classList = {
       toggle: () => {},
       remove: () => {},
@@ -51,6 +53,11 @@ class FakeElement extends FakeEventTarget {
 
   setAttribute(name, value) {
     this.attributes.set(name, value);
+  }
+
+  appendChild(child) {
+    this.children.push(child);
+    return child;
   }
 }
 
@@ -62,8 +69,8 @@ function createHarness(entryFile) {
     ['property-inspector', form],
     ['theme', new FakeElement({ id: 'theme', value: 'mint' })],
     ['title', new FakeElement({ id: 'title', value: 'latest' })],
+    ['frameSize', new FakeElement({ id: 'frameSize', type: 'checkbox', dataset: { on: 'optimal', off: 'max' } })],
     ['graphMode', new FakeElement({ id: 'graphMode', value: 'bars' })],
-    ['backgroundStyle', new FakeElement({ id: 'backgroundStyle', value: 'gradient' })],
     ['soundStyle', new FakeElement({ id: 'soundStyle', value: 'glass' })],
     ['resetTimer', new FakeElement({ id: 'resetTimer' })],
   ]);
@@ -73,20 +80,15 @@ function createHarness(entryFile) {
     selectors.set('[data-graph-mode]', [
       new FakeElement({ dataset: { graphMode: 'line' } }),
     ]);
-    selectors.set('[data-bg-style]', [
-      new FakeElement({ dataset: { bgStyle: 'solid' } }),
-    ]);
   }
   if (entryFile === 'pomowave.js') {
-    selectors.set('[data-bg-style]', [
-      new FakeElement({ dataset: { bgStyle: 'solid' } }),
-    ]);
     selectors.set('[data-sound-style]', [
       new FakeElement({ dataset: { soundStyle: 'bell' } }),
     ]);
   }
   selectors.set('[data-theme-value]', []);
 
+  const themeRow = new FakeElement();
   const document = {
     getElementById: (id) => {
       if (!elements.has(id)) {
@@ -94,7 +96,9 @@ function createHarness(entryFile) {
       }
       return elements.get(id);
     },
-    querySelector: (selector) => selector === '.uspi-wrapper' ? wrapper : null,
+    createElement: () => new FakeElement({}),
+    querySelector: (selector) =>
+      selector === '.uspi-wrapper' ? wrapper : selector === '.theme-row' ? themeRow : null,
     querySelectorAll: (selector) => selectors.get(selector) || [],
   };
 
@@ -145,7 +149,7 @@ function createHarness(entryFile) {
       { filename: entryFile },
     );
   } else {
-    vm.runInContext("initInspector('test.action', ['title', 'theme'])", context);
+    vm.runInContext("initInspector('test.action', ['title', 'theme', 'frameSize'])", context);
   }
 
   callbacks.add.forEach((callback) => callback({ context: 'ctx-1', param: {} }));
@@ -157,6 +161,7 @@ function createHarness(entryFile) {
     runTimers,
     selectors,
     sends,
+    themeRow,
     timerCount: () => timers.size,
     scheduledTimerCount: () => scheduledTimerCount,
     window,
@@ -203,6 +208,88 @@ test('pagehide without pending input does not send settings', () => {
   assert.equal(harness.timerCount(), 0);
 });
 
+test('theme chips render from shared swatches and clicking one commits the theme', () => {
+  const harness = createHarness();
+  harness.callbacks.connected[0]();
+
+  const chips = harness.themeRow.children;
+  assert.ok(chips.length >= 9, `expected at least 9 theme chips, got ${chips.length}`);
+  const neon = chips.find((chip) => chip.dataset.themeValue === 'neon');
+  assert.ok(neon, 'neon chip should exist');
+  assert.ok(String(neon.children[0].style.background).includes('#e879f9'));
+
+  neon.dispatchEvent({ type: 'click' });
+
+  assert.equal(harness.elements.get('theme').value, 'neon');
+  assert.equal(harness.sends.length, 1);
+  assert.equal(harness.sends[0].settings.theme, 'neon');
+});
+
+test('mapped checkbox collects data-on/off values and applies back from settings', () => {
+  const harness = createHarness();
+  harness.callbacks.connected[0]();
+  const frameSize = harness.elements.get('frameSize');
+
+  frameSize.checked = true;
+  harness.form.dispatchEvent({ type: 'submit' });
+  assert.equal(harness.sends.at(-1).settings.frameSize, 'optimal');
+
+  frameSize.checked = false;
+  harness.form.dispatchEvent({ type: 'submit' });
+  assert.equal(harness.sends.at(-1).settings.frameSize, 'max');
+
+  harness.callbacks.add.forEach((callback) => callback({ context: 'ctx-1', param: { frameSize: 'optimal' } }));
+  assert.equal(frameSize.checked, true);
+  harness.callbacks.add.forEach((callback) => callback({ context: 'ctx-1', param: { frameSize: 'max' } }));
+  assert.equal(frameSize.checked, false);
+});
+
+test('reset defaults button cancels pending autosave and sends only the reset control', () => {
+  const harness = createHarness();
+  harness.callbacks.connected[0]();
+  harness.form.dispatchEvent({ type: 'input' });
+
+  harness.elements.get('resetDefaults').dispatchEvent({ type: 'click' });
+  harness.runTimers();
+
+  assert.deepEqual(
+    harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
+    [{ __resetDefaults: 'true' }],
+  );
+  assert.equal(harness.sends[0].context, 'ctx-1');
+});
+
+test('save and reset defaults flash distinct feedback that auto-hides', () => {
+  const harness = createHarness();
+  harness.callbacks.connected[0]();
+
+  harness.form.dispatchEvent({ type: 'submit' });
+  const container = harness.elements.get('inspector-feedback');
+  assert.equal(container.hidden, false);
+  assert.equal(harness.elements.get('feedback-saved').hidden, false);
+  assert.equal(harness.elements.get('feedback-reset').hidden, true);
+
+  harness.elements.get('resetDefaults').dispatchEvent({ type: 'click' });
+  assert.equal(container.hidden, false);
+  assert.equal(harness.elements.get('feedback-saved').hidden, true);
+  assert.equal(harness.elements.get('feedback-reset').hidden, false);
+
+  harness.runTimers();
+  assert.equal(container.hidden, true);
+});
+
+test('pomowave reset defaults sends the framework control param once', () => {
+  const harness = createHarness('pomowave.js');
+  harness.callbacks.connected[0]();
+
+  harness.elements.get('resetDefaults').dispatchEvent({ type: 'click' });
+
+  assert.deepEqual(
+    harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
+    [{ __resetDefaults: 'true' }],
+  );
+});
+
 test('latency mode button sends once after reconnect', () => {
   const harness = createHarness('latency.js');
   harness.callbacks.connected[0]();
@@ -224,5 +311,17 @@ test('pomowave reset sends once after reconnect without an extra settings send',
   assert.deepEqual(
     harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
     [{ resetTimer: 'true' }],
+  );
+});
+
+test('pomowave skip phase sends the control param once', () => {
+  const harness = createHarness('pomowave.js');
+  harness.callbacks.connected[0]();
+
+  harness.elements.get('skipPhase').dispatchEvent({ type: 'click' });
+
+  assert.deepEqual(
+    harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
+    [{ skipPhase: 'true' }],
   );
 });

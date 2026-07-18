@@ -3,8 +3,13 @@
     "__PLUGIN_NAME__": "__PLUGIN_NAME__",
     "Title": "Title",
     "Subtitle": "Subtitle",
-    "Color": "Color",
     "Save": "Save",
-    "Click the key to increment the counter.": "Click the key to increment the counter."
+    "Click the key to increment the counter.": "Click the key to increment the counter.",
+    "Restore defaults": "Restore defaults",
+    "Saved": "Saved",
+    "Defaults restored": "Defaults restored",
+    "Safe frame": "Safe frame",
+    "Optimal area": "Optimal area",
+    "Show frame": "Show frame"
   }
 }

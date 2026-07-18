@@ -126,6 +126,7 @@ class UlanziDeck {
   }
 
   onConnected(handler) { this.on(Events.CONNECTED, handler); return this; }
+  onAdd(handler) { this.on(Events.ADD, handler); return this; }
   onParamFromApp(handler) { this.on(Events.PARAMFROMAPP, handler); return this; }
   onParamFromPlugin(handler) { this.on(Events.PARAMFROMPLUGIN, handler); return this; }
 }

@@ -1,1 +1,1 @@
-initInspector('__PLUGIN_UUID__.badge', ['title', 'subtitle', 'color', 'theme']);
+initInspector('__PLUGIN_UUID__.badge', ['title', 'subtitle', 'theme', 'frameSize', 'showFrame']);

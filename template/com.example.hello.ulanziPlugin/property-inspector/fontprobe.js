@@ -1,1 +1,1 @@
-initInspector('__PLUGIN_UUID__.fontprobe', ['theme']);
+initInspector('__PLUGIN_UUID__.fontprobe', ['theme', 'frameSize', 'showFrame']);

@@ -3,9 +3,9 @@ const POMOWAVE_FIELDS = [
   'shortBreakMin',
   'longBreakMin',
   'roundsBeforeLongBreak',
-  'color',
   'theme',
-  'backgroundStyle',
+  'frameSize',
+  'showFrame',
   'soundStyle',
   'soundEnabled',
   'autoStartBreaks',
@@ -13,14 +13,7 @@ const POMOWAVE_FIELDS = [
 ];
 
 function syncPomowaveButtons() {
-  const backgroundInput = document.getElementById('backgroundStyle');
   const soundInput = document.getElementById('soundStyle');
-
-  document.querySelectorAll('[data-bg-style]').forEach((button) => {
-    const active = button.dataset.bgStyle === backgroundInput.value;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', active ? 'true' : 'false');
-  });
 
   document.querySelectorAll('[data-sound-style]').forEach((button) => {
     const active = button.dataset.soundStyle === soundInput.value;
@@ -54,6 +47,7 @@ function initPomowaveInspector() {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       commitSettings();
+      flashInspectorFeedback('saved');
     });
 
     form.addEventListener('input', () => {
@@ -61,14 +55,6 @@ function initPomowaveInspector() {
     });
 
     bindThemeButtons(commitSettings);
-
-    document.querySelectorAll('[data-bg-style]').forEach((button) => {
-      button.addEventListener('click', () => {
-        document.getElementById('backgroundStyle').value = button.dataset.bgStyle || 'gradient';
-        syncPomowaveButtons();
-        commitSettings();
-      });
-    });
 
     document.querySelectorAll('[data-sound-style]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -83,6 +69,15 @@ function initPomowaveInspector() {
       $UD.sendParamFromPlugin({ resetTimer: 'true' }, currentContext);
     });
 
+    document.getElementById('skipPhase').addEventListener('click', () => {
+      autosave.flush();
+      $UD.sendParamFromPlugin({ skipPhase: 'true' }, currentContext);
+    });
+
+    bindResetDefaults(() => {
+      autosave.cancel();
+      $UD.sendParamFromPlugin({ [RESET_DEFAULTS_PARAM]: 'true' }, currentContext);
+    });
     window.addEventListener('pagehide', () => {
       autosave.flush();
       autosave.cancel();

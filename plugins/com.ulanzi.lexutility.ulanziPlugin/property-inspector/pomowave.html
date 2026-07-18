@@ -20,27 +20,14 @@
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       .theme-row, .seg-row { display: flex; gap: 8px; flex-wrap: wrap; }
       .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #0b1220; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
-      .theme-chip.active, .seg-btn.active, .bg-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
-      .theme-chip span, .bg-chip span { display: block; width: 100%; height: 100%; }
-      .theme-chip[data-theme-value="mint"] span { background: linear-gradient(90deg, #07111f 0 20%, #08131f 20% 40%, #0f172a 40% 65%, #14b8a6 65% 100%); }
-      .theme-chip[data-theme-value="ember"] span { background: linear-gradient(90deg, #1a0d08 0 20%, #140a06 20% 40%, #2a140c 40% 65%, #f97316 65% 100%); }
-      .theme-chip[data-theme-value="mono"] span { background: linear-gradient(90deg, #09090b 0 20%, #111111 20% 40%, #18181b 40% 65%, #d4d4d8 65% 100%); }
-      .theme-chip[data-theme-value="signal"] span { background: linear-gradient(90deg, #06111f 0 20%, #07101d 20% 40%, #0b1730 40% 65%, #60a5fa 65% 100%); }
+      .theme-chip.active, .seg-btn.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
       .seg-btn { min-width: 72px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: #0b1220; color: var(--text); cursor: pointer; font-size: 12px; font-weight: 700; }
-      .bg-chip { width: 52px; height: 36px; border-radius: 10px; border: 1px solid var(--line); padding: 0; cursor: pointer; overflow: hidden; background: #0b1220; }
-      .bg-chip[data-bg-style="gradient"] span { background: linear-gradient(135deg, #2a130d 0%, #331118 60%, #f97316 100%); }
-      .bg-chip[data-bg-style="stars"] span { background:
-        radial-gradient(circle at 20% 30%, rgba(255,255,255,.85) 0 1px, transparent 2px),
-        radial-gradient(circle at 78% 22%, rgba(255,255,255,.7) 0 1px, transparent 2px),
-        radial-gradient(circle at 68% 70%, rgba(255,255,255,.55) 0 1px, transparent 2px),
-        linear-gradient(135deg, #120913 0%, #20122a 100%); }
-      .bg-chip[data-bg-style="mist"] span { background: linear-gradient(135deg, #fff5ef 0%, #ffd8cf 100%); }
-      .bg-chip[data-bg-style="paper"] span { background: linear-gradient(135deg, #fff8ee 0%, #eadcc8 100%); }
       .toggle-row { display: grid; gap: 8px; }
       .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; }
       .toggle strong { display: block; font-size: 12px; }
       .toggle span { color: var(--muted); font-size: 12px; }
-      .action-row { display: flex; gap: 10px; }
+      .action-row { display: flex; gap: 10px; margin-top: 10px; }
       .action-row button { flex: 1; }
       button[type="submit"], .ghost-btn {
         border: 0;
@@ -52,6 +39,11 @@
       button[type="submit"] { background: var(--accent); color: #3d1306; }
       .ghost-btn { background: rgba(255, 138, 101, 0.12); color: #ffd9cb; border: 1px solid rgba(255, 138, 101, 0.28); }
       .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+      .frame-row { display: flex; gap: 10px; align-items: center; }
+      .frame-toggle { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; cursor: pointer; }
+      .frame-toggle input { width: auto; }
     </style>
   </head>
   <body>
@@ -82,30 +74,11 @@
           </div>
           <div class="grid">
             <div class="field">
-              <label for="color">Accent</label>
-              <input id="color" name="color" type="color" value="#ff7f50">
-            </div>
-            <div class="field">
               <label for="theme">Theme</label>
               <input id="theme" name="theme" type="hidden" value="ember">
               <div class="theme-row" role="group" aria-label="Theme">
-                <button class="theme-chip" type="button" data-theme-value="mint" aria-label="CRT Mint"><span></span></button>
-                <button class="theme-chip" type="button" data-theme-value="ember" aria-label="CRT Ember"><span></span></button>
-                <button class="theme-chip" type="button" data-theme-value="mono" aria-label="CRT Mono"><span></span></button>
-                <button class="theme-chip" type="button" data-theme-value="signal" aria-label="CRT Signal"><span></span></button>
               </div>
             </div>
-          </div>
-          <div class="field">
-            <label for="backgroundStyle">Background</label>
-            <input id="backgroundStyle" name="backgroundStyle" type="hidden" value="gradient">
-            <div class="theme-row" role="group" aria-label="Background">
-              <button class="bg-chip" type="button" data-bg-style="gradient" aria-label="Gradient"><span></span></button>
-              <button class="bg-chip" type="button" data-bg-style="stars" aria-label="Stars"><span></span></button>
-              <button class="bg-chip" type="button" data-bg-style="mist" aria-label="Mist"><span></span></button>
-              <button class="bg-chip" type="button" data-bg-style="paper" aria-label="Paper"><span></span></button>
-            </div>
-            <div class="hint">沿用 Lex Utility 的统一外观模板：theme、background、accent 都保存在当前按键实例里。</div>
           </div>
           <div class="field">
             <label for="soundStyle">Sound</label>
@@ -140,9 +113,26 @@
               <input id="autoStartFocus" name="autoStartFocus" type="checkbox" checked>
             </label>
           </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
           <div class="action-row">
-            <button class="ghost-btn" id="resetTimer" type="button">Reset timer</button>
-            <button type="submit">Save</button>
+            <button class="ghost-btn" id="skipPhase" type="button" data-localize="Skip phase">Skip phase</button>
+            <button class="ghost-btn" id="resetTimer" type="button" data-localize="Reset timer">Reset timer</button>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+          </div>
+          <div class="action-row">
+            <button type="submit" data-localize="Save">Save</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
           </div>
         </form>
       </div>

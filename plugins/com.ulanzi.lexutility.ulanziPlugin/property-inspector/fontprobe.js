@@ -1,1 +1,1 @@
-initInspector('com.ulanzi.ulanzistudio.lexutility.fontprobe', ['theme']);
+initInspector('com.ulanzi.ulanzistudio.lexutility.fontprobe', ['theme', 'frameSize', 'showFrame']);
