@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+import { syncPluginDir } from './lib/plugin-sync.mjs';
 
 function parseArgs(argv) {
   const result = {};
@@ -33,37 +34,10 @@ function desktopPluginRoot() {
   throw new Error(`Unsupported desktop platform: ${process.platform}`);
 }
 
-function removeDir(targetPath) {
-  if (fs.existsSync(targetPath)) {
-    fs.rmSync(targetPath, { recursive: true, force: true });
-  }
-}
-
-function copyDir(sourceDir, targetDir) {
-  fs.mkdirSync(targetDir, { recursive: true });
-  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
-    const sourcePath = path.join(sourceDir, entry.name);
-    const targetPath = path.join(targetDir, entry.name);
-    if (entry.isDirectory()) {
-      copyDir(sourcePath, targetPath);
-    } else {
-      fs.copyFileSync(sourcePath, targetPath);
-    }
-  }
-}
-
-function syncPlugin(rootDir, pluginName) {
+function syncPlugin(rootDir, pluginName, { resetData = false } = {}) {
   const sourceDir = path.join(rootDir, 'plugins', pluginName);
-  if (!fs.existsSync(sourceDir)) {
-    throw new Error(`Plugin not found: ${sourceDir}`);
-  }
-
-  const targetRoot = desktopPluginRoot();
-  const targetDir = path.join(targetRoot, pluginName);
-  fs.mkdirSync(targetRoot, { recursive: true });
-  removeDir(targetDir);
-  copyDir(sourceDir, targetDir);
-  return targetDir;
+  const targetDir = path.join(desktopPluginRoot(), pluginName);
+  return syncPluginDir(sourceDir, targetDir, { resetData });
 }
 
 function sleepSync(ms) {
@@ -140,7 +114,12 @@ function main() {
   }
 
   const rootDir = process.cwd();
-  const targetDir = syncPlugin(rootDir, pluginName);
+  const resetData = args['reset-data'] === 'true';
+  const targetDir = syncPlugin(rootDir, pluginName, { resetData });
+
+  if (resetData) {
+    console.log('--reset-data: cleared deployed runtime state (data/).');
+  }
 
   if (mode === 'restart') {
     restartDesktopApp();

@@ -1,111 +1,177 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const script = path.join(repoRoot, 'scripts', 'sync-plugin.mjs');
-const PLUGIN = 'com.example.sync.ulanziPlugin';
+import {
+  PRESERVED_ENTRIES,
+  clearDirExcept,
+  copyDir,
+  syncPluginDir
+} from '../scripts/lib/plugin-sync.mjs';
 
-// 每个用例一套独立的「仓库 + 模拟器」目录，走 sim target 避免碰到真实桌面插件目录。
-function createWorkspace() {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ulanzi-sync-'));
-  const sourceDir = path.join(workspace, 'repo', 'plugins', PLUGIN);
-  fs.mkdirSync(path.join(sourceDir, 'plugin', 'actions'), { recursive: true });
-  fs.writeFileSync(path.join(sourceDir, 'manifest.json'), '{"v":2}');
-  fs.writeFileSync(path.join(sourceDir, 'plugin', 'actions', 'demo.js'), 'export const v = 2;');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (file) => fs.readFileSync(file, 'utf8');
 
-  const simRoot = path.join(workspace, 'sim');
-  const targetDir = path.join(simRoot, 'plugins', PLUGIN);
-  return { workspace, sourceDir, simRoot, targetDir };
+function makeTempRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'ulanzi-sync-test-'));
 }
 
-function sync({ workspace, simRoot }, extraArgs = []) {
-  const result = spawnSync(process.execPath, [
-    script, '--plugin', PLUGIN, '--target', 'sim', '--sim-root', simRoot, ...extraArgs,
-  ], { cwd: path.join(workspace, 'repo'), encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  return result.stdout;
+// 造一个最小的"仓库插件 + 已部署插件"现场：部署侧带着只存在于那边的运行时状态。
+function scaffold() {
+  const tmp = makeTempRoot();
+  const sourceDir = path.join(tmp, 'repo', 'plugins', 'com.test.ulanziPlugin');
+  const targetDir = path.join(tmp, 'deployed', 'com.test.ulanziPlugin');
+
+  fs.mkdirSync(path.join(sourceDir, 'plugin'), { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'manifest.json'), '{"version":"2"}');
+  fs.writeFileSync(path.join(sourceDir, 'plugin', 'app.js'), 'export const v = 2;');
+
+  fs.mkdirSync(path.join(targetDir, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(targetDir, 'manifest.json'), '{"version":"1"}');
+  fs.writeFileSync(path.join(targetDir, 'data', 'action-settings.json'), '{"key":"user"}');
+  fs.writeFileSync(path.join(targetDir, 'data', 'action-state.json'), '{"history":[1,2,3]}');
+
+  return { tmp, sourceDir, targetDir };
 }
 
-// 部署目录里的 data/ 是用户运行态的唯一副本（键位设置、latency 历史、speedtest 记录）。
-// 这个脚本曾经整目录删除重拷，一次同步就会把它换成仓库里的调试残留。
 test('sync preserves deployed runtime state and never overwrites it from the repo', () => {
-  const ws = createWorkspace();
+  const { sourceDir, targetDir } = scaffold();
 
-  // 首次部署
-  sync(ws);
-  assert.equal(fs.readFileSync(path.join(ws.targetDir, 'manifest.json'), 'utf8'), '{"v":2}');
+  // 仓库里也有一份 data/——通常是本地调试残留，绝不能覆盖部署侧的真实状态。
+  fs.mkdirSync(path.join(sourceDir, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'data', 'action-state.json'), '{"history":[]}');
+  fs.writeFileSync(path.join(sourceDir, 'data', 'debug-leftover.json'), '{"junk":true}');
 
-  // 插件运行后在目标目录累积运行态，同时仓库侧留下无关的测试残留
-  const deployedState = path.join(ws.targetDir, 'data', 'action-state.json');
-  fs.mkdirSync(path.dirname(deployedState), { recursive: true });
-  fs.writeFileSync(deployedState, '{"real::key":{"history":"7-days"}}');
-  fs.mkdirSync(path.join(ws.sourceDir, 'data'), { recursive: true });
-  fs.writeFileSync(path.join(ws.sourceDir, 'data', 'action-state.json'), '{"repro::junk":{}}');
+  syncPluginDir(sourceDir, targetDir);
 
-  // 代码更新后再次同步
-  fs.writeFileSync(path.join(ws.sourceDir, 'plugin', 'actions', 'demo.js'), 'export const v = 3;');
-  const stdout = sync(ws);
+  assert.equal(read(path.join(targetDir, 'data', 'action-state.json')), '{"history":[1,2,3]}');
+  assert.equal(read(path.join(targetDir, 'data', 'action-settings.json')), '{"key":"user"}');
+  assert.equal(fs.existsSync(path.join(targetDir, 'data', 'debug-leftover.json')), false);
 
-  assert.match(stdout, /Runtime state: preserved \(data\)/);
-  assert.equal(
-    fs.readFileSync(deployedState, 'utf8'),
-    '{"real::key":{"history":"7-days"}}',
-    '用户运行态必须原样保留',
-  );
-  assert.equal(
-    fs.readFileSync(path.join(ws.targetDir, 'plugin', 'actions', 'demo.js'), 'utf8'),
-    'export const v = 3;',
-    '代码仍要被更新',
-  );
-
-  fs.rmSync(ws.workspace, { recursive: true, force: true });
+  // 代码本身照常更新。
+  assert.equal(read(path.join(targetDir, 'manifest.json')), '{"version":"2"}');
+  assert.equal(read(path.join(targetDir, 'plugin', 'app.js')), 'export const v = 2;');
 });
 
 test('sync removes deployed files that no longer exist in the repo', () => {
-  const ws = createWorkspace();
-  sync(ws);
+  const { sourceDir, targetDir } = scaffold();
 
-  // 上一版遗留的文件不能留在目标目录里变成幽灵代码
-  const stale = path.join(ws.targetDir, 'plugin', 'actions', 'removed.js');
-  fs.writeFileSync(stale, 'export const gone = true;');
-  sync(ws);
+  fs.writeFileSync(path.join(targetDir, 'stale-root.js'), 'old');
+  fs.mkdirSync(path.join(targetDir, 'stale-dir'), { recursive: true });
+  fs.writeFileSync(path.join(targetDir, 'stale-dir', 'gone.js'), 'old');
+  fs.mkdirSync(path.join(targetDir, 'plugin'), { recursive: true });
+  fs.writeFileSync(path.join(targetDir, 'plugin', 'removed-action.js'), 'old');
 
-  assert.equal(fs.existsSync(stale), false);
-  fs.rmSync(ws.workspace, { recursive: true, force: true });
+  syncPluginDir(sourceDir, targetDir);
+
+  assert.equal(fs.existsSync(path.join(targetDir, 'stale-root.js')), false);
+  assert.equal(fs.existsSync(path.join(targetDir, 'stale-dir')), false);
+  assert.equal(fs.existsSync(path.join(targetDir, 'plugin', 'removed-action.js')), false);
+  assert.equal(fs.existsSync(path.join(targetDir, 'data', 'action-state.json')), true);
 });
 
 test('--reset-data explicitly clears runtime state', () => {
-  const ws = createWorkspace();
-  sync(ws);
+  const { sourceDir, targetDir } = scaffold();
 
-  const deployedState = path.join(ws.targetDir, 'data', 'action-state.json');
-  fs.mkdirSync(path.dirname(deployedState), { recursive: true });
-  fs.writeFileSync(deployedState, '{"real::key":{}}');
+  fs.mkdirSync(path.join(sourceDir, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'data', 'debug-leftover.json'), '{"junk":true}');
 
-  const stdout = sync(ws, ['--reset-data']);
-  assert.match(stdout, /Runtime state: reset/);
-  assert.equal(fs.existsSync(deployedState), false);
+  syncPluginDir(sourceDir, targetDir, { resetData: true });
 
-  fs.rmSync(ws.workspace, { recursive: true, force: true });
+  // 部署侧的运行时状态被清掉了……
+  assert.equal(fs.existsSync(path.join(targetDir, 'data', 'action-state.json')), false);
+  assert.equal(fs.existsSync(path.join(targetDir, 'data', 'action-settings.json')), false);
+  // ……但仓库那份 data/ 依然不是合法来源，不会被顺手播种进去。
+  assert.equal(fs.existsSync(path.join(targetDir, 'data', 'debug-leftover.json')), false);
+
+  assert.equal(read(path.join(targetDir, 'manifest.json')), '{"version":"2"}');
 });
 
 test('nested directories named data are treated as code, not runtime state', () => {
-  const ws = createWorkspace();
-  // 只有插件根下的 data/ 是运行态；libs/data/ 这类嵌套同名目录属于代码资产
-  const nested = path.join(ws.sourceDir, 'libs', 'data');
+  const { sourceDir, targetDir } = scaffold();
+
+  // 插件根下的 data/ 是运行时状态；更深层叫 data 的目录是代码资产，必须照常拷贝。
+  const nested = path.join(sourceDir, 'plugin', 'assets', 'data');
   fs.mkdirSync(nested, { recursive: true });
-  fs.writeFileSync(path.join(nested, 'table.json'), '{"lookup":1}');
+  fs.writeFileSync(path.join(nested, 'icons.json'), '{"icon":"svg"}');
 
-  sync(ws);
-  assert.equal(
-    fs.readFileSync(path.join(ws.targetDir, 'libs', 'data', 'table.json'), 'utf8'),
-    '{"lookup":1}',
-  );
+  syncPluginDir(sourceDir, targetDir);
 
-  fs.rmSync(ws.workspace, { recursive: true, force: true });
+  const nestedTarget = path.join(targetDir, 'plugin', 'assets', 'data', 'icons.json');
+  assert.equal(fs.existsSync(nestedTarget), true);
+  assert.equal(read(nestedTarget), '{"icon":"svg"}');
+  assert.equal(read(path.join(targetDir, 'data', 'action-state.json')), '{"history":[1,2,3]}');
+});
+
+test('sync works when the deployed plugin does not exist yet', () => {
+  const { sourceDir, targetDir } = scaffold();
+  fs.rmSync(targetDir, { recursive: true, force: true });
+
+  syncPluginDir(sourceDir, targetDir);
+
+  assert.equal(read(path.join(targetDir, 'manifest.json')), '{"version":"2"}');
+  assert.equal(fs.existsSync(path.join(targetDir, 'data')), false);
+});
+
+test('syncPluginDir refuses to touch the target when the source plugin is missing', () => {
+  const { sourceDir, targetDir } = scaffold();
+  fs.rmSync(sourceDir, { recursive: true, force: true });
+
+  assert.throws(() => syncPluginDir(sourceDir, targetDir), /Plugin not found/);
+  // 抛错前不能已经把部署目录清掉了。
+  assert.equal(read(path.join(targetDir, 'data', 'action-state.json')), '{"history":[1,2,3]}');
+});
+
+test('clearDirExcept keeps preserved entries and is a no-op on a missing dir', () => {
+  const tmp = makeTempRoot();
+  const dir = path.join(tmp, 'target');
+  fs.mkdirSync(path.join(dir, 'data'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'plugin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'data', 'state.json'), 'keep');
+  fs.writeFileSync(path.join(dir, 'plugin', 'app.js'), 'drop');
+  fs.writeFileSync(path.join(dir, 'root.js'), 'drop');
+
+  clearDirExcept(dir, PRESERVED_ENTRIES);
+
+  assert.deepEqual(fs.readdirSync(dir), ['data']);
+  assert.equal(read(path.join(dir, 'data', 'state.json')), 'keep');
+
+  assert.doesNotThrow(() => clearDirExcept(path.join(tmp, 'nope'), PRESERVED_ENTRIES));
+});
+
+test('copyDir skip applies only at the top level', () => {
+  const tmp = makeTempRoot();
+  const source = path.join(tmp, 'src');
+  const target = path.join(tmp, 'dst');
+  fs.mkdirSync(path.join(source, 'data'), { recursive: true });
+  fs.mkdirSync(path.join(source, 'nested', 'data'), { recursive: true });
+  fs.writeFileSync(path.join(source, 'data', 'top.json'), 'top');
+  fs.writeFileSync(path.join(source, 'nested', 'data', 'deep.json'), 'deep');
+
+  copyDir(source, target, new Set(['data']));
+
+  assert.equal(fs.existsSync(path.join(target, 'data')), false);
+  assert.equal(read(path.join(target, 'nested', 'data', 'deep.json')), 'deep');
+});
+
+// 这条规则有两个调用点，重复实现一定会漂移，而失败模式是静默丢数据。
+// 锁住"两个脚本都走同一个模块"，别让任何一边偷偷长回自己的删除逻辑。
+test('both sync scripts route through the shared preserve-aware module', () => {
+  for (const script of ['dev-desktop.mjs', 'sync-plugin.mjs']) {
+    const source = read(path.join(root, 'scripts', script));
+    assert.match(source, /from '\.\/lib\/plugin-sync\.mjs'/, `${script} must import the shared module`);
+    assert.doesNotMatch(
+      source,
+      /rmSync\(/,
+      `${script} must not delete the deployed tree itself`
+    );
+    assert.doesNotMatch(
+      source,
+      /function copyDir\b/,
+      `${script} must not reimplement copyDir`
+    );
+  }
 });
