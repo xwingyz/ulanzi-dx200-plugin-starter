@@ -325,3 +325,18 @@ test('pomowave skip phase sends the control param once', () => {
     [{ skipPhase: 'true' }],
   );
 });
+
+test('pomowave sound button commits the style then auditions it', () => {
+  const harness = createHarness('pomowave.js');
+  harness.callbacks.connected[0]();
+
+  harness.selectors.get('[data-sound-style]')[0].dispatchEvent({ type: 'click' });
+
+  // 点选样式先落到隐藏输入，再作为设置提交，最后追发一条试听控制参数。
+  assert.equal(harness.elements.get('soundStyle').value, 'bell');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(harness.sends.at(-1).settings)),
+    { previewSound: 'bell' },
+  );
+  assert.equal(harness.sends.at(-2).settings.soundStyle, 'bell');
+});

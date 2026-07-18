@@ -753,23 +753,207 @@ test('lex utility: pomowave skip advances silently and counts the focus round', 
   lexTesting.dropPersistedState(context);
 });
 
-test('lex utility: pomowave idle skip is a no-op and done footer says restart', () => {
-  const config = lexActionConfigs.pomowave;
+test('lex utility: pomowave idle skip is a no-op', () => {
   const idle = createPomodoroInstance('com.ulanzi.ulanzistudio.lexutility.pomowave___skip___t2');
   lexTesting.skipPomodoroPhase(idle);
   assert.equal(idle.phase, 'idle');
   lexTesting.dropPersistedState(idle.context);
+});
 
+test('lex utility: pomowave key art drops the title and shows a tomato only off "done"', () => {
+  const config = lexActionConfigs.pomowave;
   const decode = (icon) => Buffer.from(icon.split(',')[1], 'base64').toString('utf8');
-  const done = {
+  const render = (phase) => decode(config.render({
     settings: { ...config.defaults },
     ...config.createState(),
-    phase: 'done',
+    phase,
+    running: phase !== 'idle',
+    remainingSec: 300,
+    totalSec: 1500,
+  }));
+
+  const focus = render('focus');
+  // 标题与被遮挡的底部文字已移除。
+  assert.ok(!focus.includes('POMOWAVE'), 'title text must be gone');
+  assert.ok(!focus.includes('tap to'), 'footer hint must be gone');
+  assert.ok(!focus.includes(' min'), 'settings summary line must be gone');
+  // 单色番茄图标出现在运行态键面上。
+  assert.ok(focus.includes('translate(128 78)'), 'tomato icon should render on active phases');
+
+  // done 显示大对勾，不画番茄（避免与 ✓ 重叠）。
+  const done = render('done');
+  assert.ok(done.includes('✓'), 'done shows the check mark');
+  assert.ok(!done.includes('translate(128 78)'), 'done must not draw the tomato');
+});
+
+test('lex utility: pomowave single tap toggles, double tap restarts the focus', () => {
+  const t0 = Date.now();
+  const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___tap___t1';
+  const instance = createPomodoroInstance(context, {
+    phase: 'focus',
     running: true,
-    remainingSec: 3,
-    totalSec: 4,
-  };
-  assert.ok(decode(config.render(done)).includes('tap to restart'));
+    totalSec: 1500,
+    remainingSec: 300,
+    completedFocusRounds: 2,
+    phaseEndAt: t0 + 300_000,
+  });
+
+  // 单击（与上次点按间隔够大）：暂停。
+  lexTesting.handlePomodoroTap(instance, { now: t0 });
+  assert.equal(instance.running, false);
+  assert.equal(instance.remainingSec, 300);
+
+  // 200ms 内第二击构成双击：重启当前专注为满时长并继续运行，轮次数保留。
+  const t1 = t0 + 200;
+  lexTesting.handlePomodoroTap(instance, { now: t1 });
+  assert.equal(instance.phase, 'focus');
+  assert.equal(instance.running, true);
+  assert.equal(instance.remainingSec, 1500);
+  assert.equal(instance.totalSec, 1500);
+  assert.equal(instance.completedFocusRounds, 2);
+  assert.equal(instance.phaseEndAt, t1 + 1500 * 1000);
+
+  // 双击后 lastTapAt 归零，下一次单击不会被误判为三击。
+  lexTesting.handlePomodoroTap(instance, { now: t1 + 10 });
+  assert.equal(instance.running, false);
+
+  lexTesting.clearInstanceTimeout(instance, 'pomodoro');
+  lexTesting.dropPersistedState(context);
+});
+
+function manualStartInstance(context, overrides = {}) {
+  const config = lexActionConfigs.pomowave;
+  return createPomodoroInstance(context, {
+    settings: { ...config.defaults, soundEnabled: 'false', autoStartBreaks: 'false', autoStartFocus: 'false' },
+    ...overrides,
+  });
+}
+
+test('lex utility: pomowave focus end enters an awaiting break when auto-break is off', () => {
+  const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t1';
+  const instance = manualStartInstance(context, {
+    phase: 'focus',
+    running: true,
+    totalSec: 1500,
+    remainingSec: 1,
+    completedFocusRounds: 0,
+    phaseEndAt: Date.now() - 2000,
+  });
+  const instances = new Map([[context, instance]]);
+
+  lexTesting.tickPomodoro(instance, { instances, now: Date.now() });
+  assert.equal(instance.phase, 'shortBreak');
+  assert.equal(instance.awaiting, true, 'awaiting break, not auto-started');
+  assert.equal(instance.running, false);
+  assert.equal(instance.completedFocusRounds, 1, 'the finished focus still counts');
+
+  lexTesting.clearInstanceTimeout(instance, 'pomodoro');
+  lexTesting.dropPersistedState(context);
+});
+
+test('lex utility: pomowave short break end awaits the next focus when auto-focus is off', () => {
+  const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t2';
+  const instance = manualStartInstance(context, {
+    phase: 'shortBreak',
+    running: true,
+    totalSec: 300,
+    remainingSec: 1,
+    phaseEndAt: Date.now() - 2000,
+  });
+  const instances = new Map([[context, instance]]);
+
+  lexTesting.tickPomodoro(instance, { instances, now: Date.now() });
+  assert.equal(instance.phase, 'focus');
+  assert.equal(instance.awaiting, true);
+  assert.equal(instance.running, false);
+
+  lexTesting.clearInstanceTimeout(instance, 'pomodoro');
+  lexTesting.dropPersistedState(context);
+});
+
+test('lex utility: pomowave awaiting single tap confirms and starts the phase', () => {
+  const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t3';
+  const now = Date.now();
+  const instance = manualStartInstance(context, {
+    phase: 'shortBreak',
+    awaiting: true,
+    running: false,
+    totalSec: 300,
+    remainingSec: 300,
+  });
+
+  lexTesting.handlePomodoroTap(instance, { now });
+  assert.equal(instance.awaiting, false);
+  assert.equal(instance.running, true);
+  assert.equal(instance.phase, 'shortBreak');
+  assert.equal(instance.phaseEndAt, now + 300_000);
+
+  lexTesting.clearInstanceTimeout(instance, 'pomodoro');
+  lexTesting.dropPersistedState(context);
+});
+
+test('lex utility: pomowave double tap while awaiting a break skips to a fresh focus', () => {
+  const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t4';
+  const t0 = Date.now();
+  const instance = manualStartInstance(context, {
+    phase: 'shortBreak',
+    awaiting: true,
+    running: false,
+    totalSec: 300,
+    remainingSec: 300,
+    completedFocusRounds: 2,
+  });
+
+  // 第一击确认进入休息，紧接的第二击（<400ms）把它重启为一段全新专注。
+  lexTesting.handlePomodoroTap(instance, { now: t0 });
+  lexTesting.handlePomodoroTap(instance, { now: t0 + 150 });
+  assert.equal(instance.phase, 'focus');
+  assert.equal(instance.running, true);
+  assert.equal(instance.awaiting, false);
+  assert.equal(instance.completedFocusRounds, 2, 'rounds preserved through the skip');
+
+  lexTesting.clearInstanceTimeout(instance, 'pomodoro');
+  lexTesting.dropPersistedState(context);
+});
+
+test('lex utility: pomowave ring fills clockwise with elapsed time and blinks while awaiting', () => {
+  const config = lexActionConfigs.pomowave;
+  const decode = (icon) => Buffer.from(icon.split(',')[1], 'base64').toString('utf8');
+  const circ = 2 * Math.PI * 79;
+
+  const mk = (over) => ({ settings: { ...config.defaults }, ...config.createState(), ...over });
+
+  // 已用一半：填充弧 dasharray 的可见段约为周长的一半，且带 rotate(-90) 顺时针铺开。
+  const half = decode(config.render(mk({ phase: 'focus', running: true, totalSec: 1000, remainingSec: 500 })));
+  assert.ok(half.includes('rotate(-90 128 128)'), 'progress ring keeps the clockwise transform');
+  const m = half.match(/stroke-dasharray="([\d.]+) /);
+  assert.ok(m, 'fill arc uses a two-value dasharray');
+  assert.ok(Math.abs(Number(m[1]) - circ / 2) < 2, `visible arc ~ half circumference, got ${m[1]}`);
+
+  // 刚开始（elapsed≈0）几乎不可见——填充从空环起步。
+  const start = decode(config.render(mk({ phase: 'focus', running: true, totalSec: 1000, remainingSec: 1000 })));
+  const ms = start.match(/stroke-dasharray="([\d.]+) /);
+  assert.ok(Number(ms[1]) < 1, 'empty ring at the start of a phase');
+
+  // 待命闪烁：亮帧不透明、灭帧低透明，且不画填充弧（无 rotate transform）。
+  const blinkOn = decode(config.render(mk({ phase: 'shortBreak', awaiting: true, blinkOn: true, totalSec: 300, remainingSec: 300 })));
+  const blinkOff = decode(config.render(mk({ phase: 'shortBreak', awaiting: true, blinkOn: false, totalSec: 300, remainingSec: 300 })));
+  assert.ok(blinkOn.includes('opacity="1"'), 'bright blink frame');
+  assert.ok(blinkOff.includes('opacity="0.16"'), 'dim blink frame');
+  assert.ok(!blinkOn.includes('rotate(-90 128 128)'), 'awaiting draws a full ring, not a fill arc');
+});
+
+test('lex utility: pomowave cue plan honours preview override and enabled toggle', () => {
+  const plan = lexTesting.pomodoroCuePlan;
+
+  // 试听：ignoreEnabled 无视关闭开关，且用点选样式而非已存样式。
+  assert.equal(plan({ soundEnabled: 'false', soundStyle: 'glass' }, { style: 'hero', ignoreEnabled: true }), 'hero');
+  // 非法样式回退到 glass，绝不把脏值塞给播放器。
+  assert.equal(plan({ soundEnabled: 'true', soundStyle: 'glass' }, { style: 'bogus', ignoreEnabled: true }), 'glass');
+  // 阶段提示音（无 ignoreEnabled）：开关关闭时返回 null，不发声。
+  assert.equal(plan({ soundEnabled: 'false', soundStyle: 'purr' }), null);
+  // 开关开启时按 settings.soundStyle 发声。
+  assert.equal(plan({ soundEnabled: 'true', soundStyle: 'purr' }), 'purr');
 });
 
 test('lex utility: cancelled latency feedback cannot commit stale result', async () => {

@@ -246,6 +246,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - **桌面工作流下宿主会自动拉起插件的 Node 主服务进程**（从 `~/Library/Application Support/.../Plugins/` 的同步副本）。不要再手动跑 `run-plugin` 连 3906——同一插件 UUID 双连接行为不可预期。`run-plugin` 只用于 Simulator 工作流（默认连 39069）。
 - 桥接层（`libs/node/ulanzideckApi.js`）具备连接自愈：连不上宿主时打印中文提示并每 5 秒自动重连，进程不退出。如果看到进程因连接失败直接崩溃，说明桥接层被改坏或没回流，先查桥接层，不要在业务层加 try/catch 绕过。
 - `restart` 模式会先清理宿主拉起的插件 Node 子进程再重启 Studio（孤儿进程会导致 Studio 重启失败或继续跑旧代码）。重启后验证顺序：主进程新 PID → `lsof -iTCP:3906` 有监听 → 插件子进程新 PID → 同步副本内容为新代码。
+- **实机行为与新代码不符（改了没生效、无声音、按钮无反应）时，先证伪"旧进程 / 未同步"，再怀疑逻辑**。诊断命令：`grep -c '<新加的符号>' "$HOME/Library/Application Support/Ulanzi/UlanziDeck/Plugins/<plugin>/plugin/app.js"` 与仓库源对比——部署副本计数为 0，说明新代码根本没进 Studio 加载的那份副本，是常驻旧进程在跑，`restart` 即可，不是逻辑 bug。别在源码里反复找错。改 `app.js` 后必须 `restart`（§10.E），Node 不热重载；纯 PI 页面改动 `sync` 后重开 PI 面板即可。
 
 ## 11. 多智能体协作规范
 

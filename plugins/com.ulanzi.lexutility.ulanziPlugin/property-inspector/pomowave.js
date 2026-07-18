@@ -58,9 +58,12 @@ function initPomowaveInspector() {
 
     document.querySelectorAll('[data-sound-style]').forEach((button) => {
       button.addEventListener('click', () => {
-        document.getElementById('soundStyle').value = button.dataset.soundStyle || 'glass';
+        const style = button.dataset.soundStyle || 'glass';
+        document.getElementById('soundStyle').value = style;
         syncPomowaveButtons();
         commitSettings();
+        // 点按即试听：让插件进程播放点选样式的系统提示音。
+        $UD.sendParamFromPlugin({ previewSound: style }, currentContext);
       });
     });
 

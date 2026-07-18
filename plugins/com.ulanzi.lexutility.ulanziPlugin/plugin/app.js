@@ -130,6 +130,8 @@ const POMODORO_ALERT_WINDOW_SEC = 5;
 const POMODORO_CYCLE_COMPLETE_SEC = 4;
 const POMODORO_STATE_VERSION = 1;
 const POMODORO_PHASES = ['idle', 'focus', 'shortBreak', 'longBreak', 'done'];
+const POMODORO_DOUBLE_TAP_MS = 400;
+const POMODORO_BLINK_MS = 550;
 const POMODORO_PALETTES = {
   mint: { focus: '#14b8a6', shortBreak: '#22c55e', longBreak: '#38bdf8', done: '#84cc16' },
   ember: { focus: '#ff7f50', shortBreak: '#7ddf64', longBreak: '#74a9ff', done: '#facc15' },
@@ -238,11 +240,14 @@ const ACTION_CONFIGS = {
       completedFocusRounds: 0,
       running: false,
       phaseEndAt: null,
+      // awaiting：阶段自然结束但下一阶段非自动开始，圆环闪烁等用户按键确认。属瞬时转场态，不持久化。
+      awaiting: false,
+      blinkOn: false,
       // 进行中的番茄靠 phaseEndAt 跨重启恢复真实剩余时间，重建实例不能把它吞掉。
       ...(instance?.context ? hydratePomodoroState(readPersistedState(instance.context)) : {}),
     }),
     onRun: (instance) => {
-      togglePomodoro(instance);
+      handlePomodoroTap(instance);
     },
     onReady: (instance) => {
       initializePomodoroInstance(instance);
@@ -256,6 +261,11 @@ const ACTION_CONFIGS = {
       reconcilePomodoroSettings(instance, previousSettings);
     },
     onParamFromPlugin: (instance, param) => {
+      if (param?.previewSound) {
+        // PI 试听：播放点选样式，无视 soundEnabled，不改动计时状态。
+        playPomodoroCue(instance.settings, { style: param.previewSound, ignoreEnabled: true });
+        return;
+      }
       if (param?.resetTimer === 'true') {
         resetPomodoroInstance(instance);
         return;
@@ -1125,14 +1135,16 @@ function pomodoroPhaseLabel(instance) {
   if (instance.phase === 'idle') {
     return 'READY';
   }
+  // 待命（awaiting）与运行态一样显示阶段名，只有真正暂停才显示 PAUSED。
+  const active = instance.running || instance.awaiting;
   if (instance.phase === 'focus') {
-    return instance.running ? 'FOCUS' : 'PAUSED';
+    return active ? 'FOCUS' : 'PAUSED';
   }
   if (instance.phase === 'shortBreak') {
-    return instance.running ? 'SHORT' : 'PAUSED';
+    return active ? 'SHORT' : 'PAUSED';
   }
   if (instance.phase === 'longBreak') {
-    return instance.running ? 'LONG' : 'PAUSED';
+    return active ? 'LONG' : 'PAUSED';
   }
   return 'DONE';
 }
@@ -1148,12 +1160,22 @@ function clearPomodoroTimer(instance) {
   clearInstanceTimeout(instance, 'pomodoro');
 }
 
-function playPomodoroCue(settings) {
-  if (!isEnabled(settings.soundEnabled)) {
+// 决定该不该响、响哪种：与实际发声副作用分离，便于无声测试。
+// options.style 覆盖 settings.soundStyle（PI 试听用），options.ignoreEnabled 让试听
+// 无视 soundEnabled 开关——用户主动点按试听时，就是要听到声音。
+function pomodoroCuePlan(settings, options = {}) {
+  if (!options.ignoreEnabled && !isEnabled(settings.soundEnabled)) {
+    return null;
+  }
+  return normalizeChoice(options.style ?? settings.soundStyle, 'glass', POMODORO_SOUND_STYLES);
+}
+
+function playPomodoroCue(settings, options = {}) {
+  const style = pomodoroCuePlan(settings, options);
+  if (!style) {
     return;
   }
 
-  const style = normalizeChoice(settings.soundStyle, 'glass', POMODORO_SOUND_STYLES);
   if (os.platform() === 'darwin') {
     const soundName = POMODORO_MAC_SOUND_MAP[style] || POMODORO_MAC_SOUND_MAP.glass;
     execFile('afplay', [`/System/Library/Sounds/${soundName}.aiff`], () => {});
@@ -1235,6 +1257,8 @@ function resetPomodoroInstance(instance, { preserveRounds = false } = {}) {
   clearPomodoroTimer(instance);
   instance.phase = 'idle';
   instance.running = false;
+  instance.awaiting = false;
+  instance.blinkOn = false;
   instance.phaseEndAt = null;
   instance.totalSec = pomodoroDurationSecFromSettings(instance.settings, 'focus');
   instance.remainingSec = instance.totalSec;
@@ -1255,6 +1279,49 @@ function schedulePomodoroTick(instance, now = Date.now()) {
   setInstanceTimeout(instance, 'pomodoro', () => tickPomodoro(instance), delay);
 }
 
+// 待命闪烁：阶段结束但下一阶段不自动开始时，圆环在 blinkOn 明灭之间循环闪烁，直到用户按键。
+// 复用 'pomodoro' 定时器槽——待命时没有 tick，blink 独占它；用户确认后 schedulePomodoroTick 覆盖回 tick。
+function scheduleBlink(instance) {
+  if (!instance.awaiting) {
+    clearPomodoroTimer(instance);
+    return;
+  }
+  setInstanceTimeout(instance, 'pomodoro', () => {
+    instance.blinkOn = !instance.blinkOn;
+    renderInstance(instance);
+    scheduleBlink(instance);
+  }, POMODORO_BLINK_MS);
+}
+
+// 进入待命：切到下一阶段但不启动计时，圆环闪烁提示按下。播放阶段结束提示音。
+function enterAwaitingPhase(instance, phase, options = {}) {
+  const { playSound = true } = options;
+  clearPomodoroTimer(instance);
+  instance.phase = phase;
+  instance.totalSec = pomodoroDurationSecFromSettings(instance.settings, phase);
+  instance.remainingSec = instance.totalSec;
+  instance.running = false;
+  instance.phaseEndAt = null;
+  instance.awaiting = true;
+  instance.blinkOn = true;
+  if (playSound) {
+    playPomodoroCue(instance.settings);
+  }
+  flushPomodoroState(instance);
+  renderInstance(instance);
+  scheduleBlink(instance);
+}
+
+// 确认待命阶段：从满时长起点开始计时。
+function beginAwaitedPhase(instance, now = Date.now()) {
+  instance.awaiting = false;
+  instance.running = true;
+  instance.phaseEndAt = now + Math.max(1, instance.remainingSec ?? instance.totalSec ?? 1) * 1000;
+  flushPomodoroState(instance);
+  renderInstance(instance);
+  schedulePomodoroTick(instance, now);
+}
+
 function startPomodoroPhase(instance, phase, options = {}) {
   const {
     autoStart = true,
@@ -1268,6 +1335,7 @@ function startPomodoroPhase(instance, phase, options = {}) {
   instance.remainingSec = instance.totalSec;
   instance.running = autoStart;
   instance.phaseEndAt = autoStart ? now + instance.totalSec * 1000 : null;
+  instance.awaiting = false;
 
   if (phase === 'done') {
     instance.completedFocusRounds = 0;
@@ -1289,18 +1357,23 @@ function advancePomodoroPhase(instance, options = {}) {
   if (instance.phase === 'focus') {
     instance.completedFocusRounds += 1;
     const hitLongBreak = instance.completedFocusRounds % roundsGoal === 0;
-    startPomodoroPhase(instance, hitLongBreak ? 'longBreak' : 'shortBreak', {
-      autoStart: isEnabled(instance.settings.autoStartBreaks),
-      playSound,
-    });
+    const nextBreak = hitLongBreak ? 'longBreak' : 'shortBreak';
+    // 专注结束：自动则直接开始休息，否则进入待命（圆环闪烁，等按键 / 双击跳过休息）。
+    if (isEnabled(instance.settings.autoStartBreaks)) {
+      startPomodoroPhase(instance, nextBreak, { autoStart: true, playSound });
+    } else {
+      enterAwaitingPhase(instance, nextBreak, { playSound });
+    }
     return;
   }
 
   if (instance.phase === 'shortBreak') {
-    startPomodoroPhase(instance, 'focus', {
-      autoStart: isEnabled(instance.settings.autoStartFocus),
-      playSound,
-    });
+    // 短休息结束：自动则直接开始专注，否则进入待命（圆环闪烁，等按键进专注）。
+    if (isEnabled(instance.settings.autoStartFocus)) {
+      startPomodoroPhase(instance, 'focus', { autoStart: true, playSound });
+    } else {
+      enterAwaitingPhase(instance, 'focus', { playSound });
+    }
     return;
   }
 
@@ -1422,6 +1495,41 @@ function skipPomodoroPhase(instance) {
   advancePomodoroPhase(instance, { playSound: false });
 }
 
+// 工作被打断：把当前番茄重启为一段全新的满时长专注并继续运行。
+// 只作废当前这颗番茄，保留已完成轮次数（startPomodoroPhase 只在 done 阶段清零轮次）。
+function resetPomodoroWork(instance, now = Date.now()) {
+  initializePomodoroInstance(instance);
+  startPomodoroPhase(instance, 'focus', { autoStart: true, playSound: false, now });
+}
+
+// 单击开始/暂停，双击重启当前工作时间。沿用 latency 的"先动作、被第二击覆盖"策略：
+// 单击零延迟即时生效，双击时第一击的瞬时切换会在 400ms 内被重启覆盖，不需要预置延迟。
+// 待命态（awaiting）另有语义：单击确认进入该阶段；等待进休息时双击=跳过休息直接开始下一个专注。
+function handlePomodoroTap(instance, options = {}) {
+  const now = options.now ?? Date.now();
+  const doubleTapMs = options.doubleTapMs ?? POMODORO_DOUBLE_TAP_MS;
+  const previousTapAt = instance.lastTapAt ?? 0;
+  instance.lastTapAt = now;
+  const isDouble = now - previousTapAt < doubleTapMs;
+  if (isDouble) {
+    instance.lastTapAt = 0;
+  }
+
+  // 待命态第一击即确认进入该阶段开始计时（第一击必然清掉 awaiting）。
+  // 若紧接第二击构成双击，会落到下方 resetPomodoroWork——把刚开始的休息重启为一段全新专注，
+  // 即"专注结束等待进休息时双击=跳过休息、直接进入下一个专注"。
+  if (instance.awaiting) {
+    beginAwaitedPhase(instance, now);
+    return;
+  }
+
+  if (isDouble) {
+    resetPomodoroWork(instance, now);
+    return;
+  }
+  togglePomodoro(instance, now);
+}
+
 function renderPomodoroIcon(instance) {
   initializePomodoroInstance(instance);
   const theme = themeFor(instance.settings);
@@ -1430,19 +1538,16 @@ function renderPomodoroIcon(instance) {
   const phaseColor = pomodoroColor(instance.settings, instance.phase === 'idle' ? 'focus' : instance.phase);
   const totalSec = Math.max(1, instance.totalSec || pomodoroDurationSecFromSettings(instance.settings, 'focus'));
   const remainingSec = pomodoroRemainingSec(instance);
-  const progress = instance.phase === 'done' ? 1 : remainingSec / totalSec;
-  const circumference = 2 * Math.PI * 72;
-  const dashOffset = (circumference * (1 - progress)).toFixed(1);
+  // 顺时针逐步填充：已用时间比例（elapsed）从 0 增到 1，可见弧从 12 点顺时针铺开。
+  const elapsed = instance.phase === 'done' ? 1 : Math.max(0, Math.min(1, 1 - remainingSec / totalSec));
+  const circumference = 2 * Math.PI * 79;
+  const fillLength = (elapsed * circumference).toFixed(1);
+  const isAwaiting = instance.awaiting === true;
   const alertPulse = instance.running && instance.phase !== 'done' && remainingSec <= POMODORO_ALERT_WINDOW_SEC && remainingSec % 2 === 0;
   const accent = alertPulse ? background.text : phaseColor;
   const displayText = instance.phase === 'done' ? '✓' : formatPomodoroTime(remainingSec);
   const displaySize = instance.phase === 'done' ? 88 : 40;
   const label = pomodoroPhaseLabel(instance);
-  const footer = instance.phase === 'done'
-    ? 'tap to restart'
-    : instance.phase === 'idle'
-      ? 'tap to start'
-      : instance.running ? 'tap to pause' : 'tap to resume';
   const roundsGoal = pomodoroRoundsGoal(instance.settings);
   const completedInCycle = instance.phase === 'longBreak' || instance.phase === 'done'
     ? roundsGoal
@@ -1450,7 +1555,7 @@ function renderPomodoroIcon(instance) {
   const dots = Array.from({ length: roundsGoal }, (_, index) => {
     const cx = 128 - ((roundsGoal - 1) * 18) / 2 + index * 18;
     const filled = index < completedInCycle;
-    return `<circle cx="${cx}" cy="214" r="5.5" fill="${filled ? accent : background.low}" opacity="${filled ? '1' : '0.45'}"/>`;
+    return `<circle cx="${cx}" cy="174" r="5.5" fill="${filled ? accent : background.low}" opacity="${filled ? '1' : '0.45'}"/>`;
   }).join('');
 
   return toDataUrl(`
@@ -1458,26 +1563,26 @@ function renderPomodoroIcon(instance) {
       ${background.outer}
       ${alertPulse ? frameHighlight(frame, accent) : ''}
       ${frameContent(frame, `
-      <circle cx="128" cy="114" r="72" fill="none" stroke="${background.low}" stroke-width="12" opacity="0.42"/>
-      <circle
+      <circle cx="128" cy="128" r="79" fill="none" stroke="${background.low}" stroke-width="12" opacity="0.42"/>
+      ${isAwaiting
+        ? `<circle cx="128" cy="128" r="79" fill="none" stroke="${accent}" stroke-width="12" opacity="${instance.blinkOn ? 1 : 0.16}"/>`
+        : `<circle
         cx="128"
-        cy="114"
-        r="72"
+        cy="128"
+        r="79"
         fill="none"
         stroke="${accent}"
         stroke-width="12"
         stroke-linecap="round"
-        stroke-dasharray="${circumference.toFixed(1)}"
-        stroke-dashoffset="${dashOffset}"
-        transform="rotate(-90 128 114)"
-      />
-      <rect x="74" y="48" width="108" height="26" rx="13" fill="${accent}" fill-opacity="0.14"/>
-      <text x="128" y="66" text-anchor="middle" fill="${accent}" font-size="16" font-weight="800" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">POMOWAVE</text>
-      <text x="128" y="123" text-anchor="middle" fill="${instance.phase === 'done' ? accent : background.text}" font-size="${displaySize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(displayText)}</text>
-      <text x="128" y="156" text-anchor="middle" fill="${accent}" font-size="19" font-weight="800" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">${escapeXml(label)}</text>
-      <text x="128" y="180" text-anchor="middle" fill="${background.muted}" font-size="14" font-family="Arial, Helvetica, sans-serif">${escapeXml(footer)}</text>
-      <text x="128" y="198" text-anchor="middle" fill="${background.low}" font-size="12" font-family="Arial, Helvetica, sans-serif">${escapeXml(`${instance.settings.focusMin}/${instance.settings.shortBreakMin}/${instance.settings.longBreakMin} min`)}</text>
-      ${dots}
+        stroke-dasharray="${fillLength} ${circumference.toFixed(1)}"
+        transform="rotate(-90 128 128)"
+      />`}
+      ${instance.phase === 'done' ? '' : `<g transform="translate(128 78)" fill="${accent}">
+        <circle cx="0" cy="2" r="12"/>
+        <path d="M0,-14 L1.88,-9.09 L7.13,-8.82 L3.04,-5.51 L4.41,-0.43 L0,-3.3 L-4.41,-0.43 L-3.04,-5.51 L-7.13,-8.82 L-1.88,-9.09 Z"/>
+      </g>`}
+      <text x="128" y="${instance.phase === 'done' ? 160 : 126}" text-anchor="middle" fill="${instance.phase === 'done' ? accent : background.text}" font-size="${displaySize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(displayText)}</text>
+      ${instance.phase === 'done' ? '' : `<text x="128" y="152" text-anchor="middle" fill="${accent}" font-size="19" font-weight="800" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">${escapeXml(label)}</text>${dots}`}
       `)}
     </svg>
   `);
@@ -1488,17 +1593,23 @@ function renderPomodoroIcon(instance) {
 // 第二套暗中生效的主题系统，与 theme 互相打架（规则 §6 明令颜色围绕 theme token）。
 // 想要浅色请选 sand 主题，那才是主题系统里的正确入口。
 function renderThemeBackdrop(theme, accent, frame = frameFor()) {
+  // 渐变 id 按背景 token 稳定派生：latency 与 pomodoro 的多个键若被宿主内联到同一 DOM，
+  // 不同主题不会因同名 id 串色；相同 token 共用定义时视觉本就一致。保持 render 纯函数，
+  // 不使用模块级递增计数器引入跨实例可变状态。
+  const gradientId = `themeBg-${[theme.canvas, theme.shell, theme.panel]
+    .join('')
+    .replace(/[^a-z0-9]/gi, '')}`;
   // 纯渐变背景，无装饰图形：曾经的低透明度装饰圆在无边框模式下会浮出成
   // 可见的浅圈（浅色主题上尤其明显），信息量为零还抢注意力。
   const outer = `
     <defs>
-      <linearGradient id="latencyBg" x1="0" y1="0" x2="1" y2="1">
+      <linearGradient id="${gradientId}" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0%" stop-color="${theme.canvas}"/>
         <stop offset="55%" stop-color="${theme.shell}"/>
         <stop offset="100%" stop-color="${theme.panel}"/>
       </linearGradient>
     </defs>
-    <rect width="256" height="256" rx="42" fill="url(#latencyBg)"/>
+    <rect width="256" height="256" rx="42" fill="url(#${gradientId})"/>
   `;
   // 面板只留填充不描边：三层嵌套边框（外环/壳/面板线）里最内那条只添噪。
   const chrome = frame.show
@@ -2214,6 +2325,9 @@ export const __testing = Object.freeze({
   tickPomodoro,
   togglePomodoro,
   skipPomodoroPhase,
+  handlePomodoroTap,
+  resetPomodoroWork,
+  pomodoroCuePlan,
   latencyStats,
   recordLatencySample,
   sslDaysLeft,
