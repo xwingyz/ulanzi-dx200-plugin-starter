@@ -954,7 +954,7 @@ function renderMeterRow(geometry, theme, options = {}) {
   return `
       ${track}${fill}
       <text x="${x + 6}" y="${textY}" fill="${color}" font-size="${(fontSize * 0.82).toFixed(1)}" font-weight="800" font-family="${font}">${escapeXml(label)}</text>
-      <text x="${x + width * 0.56}" y="${textY}" text-anchor="end" fill="${theme.text}" font-weight="800" font-family="${font}">${numeric(value, fontSize * 1.26, UNIT_FONT_SIZE)}</text>
+      <text x="${x + width * 0.56 + 4}" y="${textY}" text-anchor="end" fill="${theme.text}" font-weight="800" font-family="${font}">${numeric(value, fontSize * 1.26, UNIT_FONT_SIZE)}</text>
       <text x="${x + width - 5}" y="${textY}" text-anchor="end" fill="${tailColor}" font-weight="700" font-family="${font}">${numeric(tail, fontSize * 1.0, UNIT_FONT_SIZE)}</text>`;
 }
 
