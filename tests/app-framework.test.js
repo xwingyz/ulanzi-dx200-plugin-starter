@@ -91,10 +91,10 @@ test('Lex Utility only exposes production actions', () => {
   );
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-  assert.deepEqual(Object.keys(lexActionConfigs).sort(), ['latency', 'pomowave', 'speedtest']);
+  assert.deepEqual(Object.keys(lexActionConfigs).sort(), ['bambustatus', 'chatgptusage', 'claudeusage', 'latency', 'pomowave', 'speedtest']);
   assert.deepEqual(
     manifest.Actions.map((action) => action.UUID.split('.').at(-1)).sort(),
-    ['latency', 'pomowave', 'speedtest'],
+    ['bambustatus', 'chatgptusage', 'claudeusage', 'latency', 'pomowave', 'speedtest'],
   );
 });
 
@@ -403,9 +403,92 @@ for (const framework of frameworks) {
 
     assert.equal(instance.settings.theme, 'mono');
     assert.equal(sent.length, 1);
+    assert.equal(sent[0].settings.__settingsSync, 'true');
     assert.equal(sent[0].settings.theme, 'mono');
     assert.equal(sent[0].context, framework.context);
     assert.equal(writes.length, 0);
+  });
+
+  test(`${framework.name}: host restore always echoes authoritative settings to a newly opened inspector`, () => {
+    const persisted = {
+      ...framework.actionConfigs[framework.configKey].defaults,
+      theme: 'mono',
+    };
+    const sent = [];
+    const controller = framework.createSettingsEventProcessor({
+      ud: {
+        sendParamFromPlugin: (settings, context) => sent.push({ settings, context }),
+      },
+      instances: new Map(),
+      readPersisted: () => ({ ...persisted }),
+      writePersisted: () => {},
+      render: () => {},
+      ready: () => {},
+    });
+
+    controller.hostRestore(framework.context, { ...persisted });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].settings.__settingsSync, 'true');
+    assert.equal(sent[0].settings.theme, 'mono');
+    assert.equal(sent[0].context, framework.context);
+  });
+
+  test(`${framework.name}: a late inspector can request authoritative settings without writing`, () => {
+    const persisted = {
+      ...framework.actionConfigs[framework.configKey].defaults,
+      theme: 'mono',
+      frameSize: 'max',
+      showFrame: 'false',
+    };
+    const sent = [];
+    const writes = [];
+    const controller = framework.createSettingsEventProcessor({
+      ud: { sendParamFromPlugin: (settings, context) => sent.push({ settings, context }) },
+      instances: new Map(),
+      readPersisted: () => ({ ...persisted }),
+      writePersisted: (...args) => writes.push(args),
+      render: () => {},
+      ready: () => {},
+    });
+
+    controller.pluginSubmit(framework.context, { __requestSettings: 'true' });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].settings.__settingsSync, 'true');
+    assert.equal(sent[0].settings.theme, 'mono');
+    assert.equal(sent[0].settings.frameSize, 'max');
+    assert.equal(sent[0].settings.showFrame, 'false');
+    assert.equal(writes.length, 0);
+  });
+
+  test(`${framework.name}: current and legacy inspector sync echoes cannot overwrite persisted settings`, () => {
+    const persisted = {
+      ...framework.actionConfigs[framework.configKey].defaults,
+      theme: 'mono',
+    };
+    const writes = [];
+    let renders = 0;
+    const controller = framework.createSettingsEventProcessor({
+      ud: { sendParamFromPlugin: () => {} },
+      instances: new Map(),
+      readPersisted: () => ({ ...persisted }),
+      writePersisted: (...args) => writes.push(args),
+      render: () => { renders += 1; },
+      ready: () => {},
+    });
+
+    const instance = controller.hostRestore(framework.context, { ...persisted });
+    const rendersBeforeEcho = renders;
+    controller.pluginSubmit(framework.context, {
+      __settingsSync: 'true',
+      theme: 'mint',
+    });
+    controller.pluginSubmit(framework.context, { theme: 'signal' });
+
+    assert.equal(instance.settings.theme, 'mono');
+    assert.equal(writes.length, 0);
+    assert.equal(renders, rendersBeforeEcho);
   });
 
   test(`${framework.name}: production event processor persists incoming PI submission`, () => {
@@ -422,7 +505,7 @@ for (const framework of frameworks) {
       ready: () => {},
     });
 
-    const instance = controller.pluginSubmit(framework.context, { theme: 'signal' });
+    const instance = controller.pluginSubmit(framework.context, { __settingsSubmit: 'true', theme: 'signal' });
 
     assert.equal(instance.settings.theme, 'signal');
     assert.equal(writes.length, 1);
@@ -467,10 +550,10 @@ for (const framework of frameworks) {
 
     controller.hostRestore(framework.context, { theme: 'mint' });
     controller.hostRestore(framework.context, { theme: 'mint' });
-    controller.pluginSubmit(framework.context, { theme: 'mono' });
+    controller.pluginSubmit(framework.context, { __settingsSubmit: 'true', theme: 'mono' });
     assert.equal(writes.length, 0);
 
-    controller.pluginSubmit(framework.context, { theme: 'signal' });
+    controller.pluginSubmit(framework.context, { __settingsSubmit: 'true', theme: 'signal' });
     assert.equal(writes.length, 1);
     assert.equal(writes[0].settings.theme, 'signal');
   });
@@ -555,7 +638,11 @@ for (const framework of frameworks) {
       ready: () => {},
     });
 
-    const instance = controller.pluginSubmit(framework.context, { frameSize: 'huge', showFrame: 'nope' });
+    const instance = controller.pluginSubmit(framework.context, {
+      __settingsSubmit: 'true',
+      frameSize: 'huge',
+      showFrame: 'nope',
+    });
 
     assert.equal(instance.settings.frameSize, 'optimal');
     assert.equal(instance.settings.showFrame, 'true');
@@ -727,11 +814,11 @@ for (const framework of frameworks) {
       ? 'mono'
       : 'signal';
 
-    controller.pluginSubmit(framework.context, { theme: retryTheme });
+    controller.pluginSubmit(framework.context, { __settingsSubmit: 'true', theme: retryTheme });
     assert.equal(attempts, 1);
     assert.deepEqual(mirror, {});
 
-    controller.pluginSubmit(framework.context, { theme: retryTheme });
+    controller.pluginSubmit(framework.context, { __settingsSubmit: 'true', theme: retryTheme });
     assert.equal(attempts, 2);
     assert.equal(mirror.slot.theme, retryTheme);
     assert.deepEqual(disk, mirror);

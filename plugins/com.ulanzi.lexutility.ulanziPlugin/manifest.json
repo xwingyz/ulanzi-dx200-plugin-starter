@@ -59,6 +59,54 @@
       "Devices": [],
       "Controllers": ["Keypad"],
       "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Claude Usage",
+      "Tooltip": "Show Claude subscription usage: weekly and 5-hour limits with reset countdowns. macOS only.",
+      "Icon": "assets/icons/actionClaudeusage.svg",
+      "PropertyInspectorPath": "property-inspector/claudeusage.html",
+      "UUID": "com.ulanzi.ulanzistudio.lexutility.claudeusage",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionClaudeusage.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "ChatGPT Usage",
+      "Tooltip": "Show Codex usage limits and reset countdowns from the Codex CLI.",
+      "Icon": "assets/icons/actionChatgptusage.svg",
+      "PropertyInspectorPath": "property-inspector/chatgptusage.html",
+      "UUID": "com.ulanzi.ulanzistudio.lexutility.chatgptusage",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionChatgptusage.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Bambu P2S Status",
+      "Tooltip": "Show live status, progress, elapsed time and remaining time for one Bambu Lab P2S.",
+      "Icon": "assets/icons/actionBambustatus.svg",
+      "PropertyInspectorPath": "property-inspector/bambustatus.html",
+      "UUID": "com.ulanzi.ulanzistudio.lexutility.bambustatus",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionBambustatus.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
     }
   ],
   "OS": [

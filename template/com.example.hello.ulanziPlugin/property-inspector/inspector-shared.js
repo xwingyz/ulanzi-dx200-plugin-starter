@@ -3,6 +3,9 @@ const AUTOSAVE_DEBOUNCE_MS = 400;
 // 框架保留控制参数：与 plugin/app.js 的 RESET_DEFAULTS_PARAM 一致，
 // “恢复默认配置”按钮只发这个控制键，重置与回推由插件框架完成。
 const RESET_DEFAULTS_PARAM = '__resetDefaults';
+// PI 可能晚于宿主 add/paramFromApp 事件完成加载；连接后主动请求插件侧权威设置，
+// 避免表单停留在 HTML 默认值并在后续 autosave/pagehide 时污染持久化。
+const REQUEST_SETTINGS_PARAM = '__requestSettings';
 // 保存/恢复默认的内联反馈展示时长。
 const FEEDBACK_VISIBLE_MS = 1600;
 
@@ -233,6 +236,7 @@ function initInspector(actionUuid, fields) {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
 
   function apply(message) {

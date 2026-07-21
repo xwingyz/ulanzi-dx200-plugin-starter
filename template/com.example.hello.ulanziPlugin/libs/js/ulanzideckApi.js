@@ -112,11 +112,13 @@ class UlanziDeck {
 
   sendParamFromPlugin(settings, context) {
     const scoped = context ? this.decodeContext(context) : {};
+    const isPlainSettings = settings && typeof settings === 'object' && !Array.isArray(settings)
+      && !Object.keys(settings).some((key) => key.startsWith('__'));
     this.send(Events.PARAMFROMPLUGIN, {
       uuid: scoped.uuid || this.uuid,
       key: scoped.key || this.key,
       actionid: scoped.actionid || this.actionid,
-      param: settings,
+      param: isPlainSettings ? { __settingsSubmit: 'true', ...settings } : settings,
     });
   }
 

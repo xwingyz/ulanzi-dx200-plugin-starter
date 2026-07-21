@@ -27,6 +27,10 @@ const LONG_PRESS_MS = 600;
 const RUN_AFTER_KEY_EVENT_MS = 1500;
 const LONG_PRESS_TIMER_SLOT = 'baseLongPress';
 
+// ok / warn / crit 是语义告警色，供需要分级预警的 action 使用（例如 claudeusage
+// 的额度 severity）。它们不进 THEME_SWATCHES —— 色卡只展示
+// canvas / panel / low / accent / text 五个角色。取值原则：与该主题色调调和，
+// 且在各自 canvas 上有足够对比度；sand 是浅色主题，三色必须取深色档。
 const THEMES = {
   mint: {
     accent: '#14b8a6',
@@ -37,6 +41,9 @@ const THEMES = {
     muted: '#94a3b8',
     low: '#64748b',
     contrast: '#042f2e',
+    ok: '#34d399',
+    warn: '#fbbf24',
+    crit: '#f87171',
   },
   ember: {
     accent: '#f97316',
@@ -47,6 +54,9 @@ const THEMES = {
     muted: '#fdba74',
     low: '#9a3412',
     contrast: '#431407',
+    ok: '#4ade80',
+    warn: '#facc15',
+    crit: '#ef4444',
   },
   mono: {
     accent: '#d4d4d8',
@@ -57,6 +67,9 @@ const THEMES = {
     muted: '#a1a1aa',
     low: '#52525b',
     contrast: '#18181b',
+    ok: '#22c55e',
+    warn: '#eab308',
+    crit: '#ef4444',
   },
   signal: {
     accent: '#60a5fa',
@@ -67,6 +80,9 @@ const THEMES = {
     muted: '#93c5fd',
     low: '#1d4ed8',
     contrast: '#082f49',
+    ok: '#34d399',
+    warn: '#fbbf24',
+    crit: '#f87171',
   },
   neon: {
     accent: '#e879f9',
@@ -77,6 +93,9 @@ const THEMES = {
     muted: '#c084fc',
     low: '#6d28d9',
     contrast: '#2e1065',
+    ok: '#4ade80',
+    warn: '#fde047',
+    crit: '#f43f5e',
   },
   ice: {
     accent: '#67e8f9',
@@ -87,6 +106,9 @@ const THEMES = {
     muted: '#a5f3fc',
     low: '#0e7490',
     contrast: '#083344',
+    ok: '#34d399',
+    warn: '#fcd34d',
+    crit: '#f87171',
   },
   sunset: {
     accent: '#fb7185',
@@ -97,6 +119,11 @@ const THEMES = {
     muted: '#fda4af',
     low: '#9f1239',
     contrast: '#4c0519',
+    ok: '#4ade80',
+    warn: '#fbbf24',
+    // sunset 的 accent 本身是玫红，crit 只能靠更饱和的正红拉开距离；
+    // 该主题下的危险级别应同时依赖非颜色信号（例如宠物姿态）。
+    crit: '#ef4444',
   },
   forest: {
     accent: '#4ade80',
@@ -107,6 +134,10 @@ const THEMES = {
     muted: '#86efac',
     low: '#166534',
     contrast: '#052e16',
+    // forest 的 accent 就是绿色，ok 取更浅一档以免与 accent 完全同值。
+    ok: '#86efac',
+    warn: '#fbbf24',
+    crit: '#f87171',
   },
   sand: {
     accent: '#b45309',
@@ -117,6 +148,9 @@ const THEMES = {
     muted: '#78716c',
     low: '#d6c7ab',
     contrast: '#fef3c7',
+    ok: '#15803d',
+    warn: '#a16207',
+    crit: '#b91c1c',
   },
 };
 
@@ -140,6 +174,7 @@ const ACTION_MODULES = createActionModules({
   dropPersistedState,
   escapeXml,
   exclusiveTasks: EXCLUSIVE_TASKS,
+  formatCountdown,
   frameContent,
   frameFor,
   frameHighlight,
@@ -159,6 +194,7 @@ const ACTION_MODULES = createActionModules({
   ),
   readPersistedState,
   renderInstance,
+  renderMeterRow,
   renderScreenFrame,
   renderThemeBackdrop,
   sanitizeServerList,
@@ -635,7 +671,7 @@ function resolveSettingsForEvent(eventType, {
   incoming = {},
   persisted = {},
 } = {}) {
-  if (eventType === 'hostRestore') {
+  if (eventType === 'hostRestore' || eventType === 'inspectorRequest') {
     return { ...current, ...incoming, ...persisted };
   }
   if (eventType === 'pluginSubmit') {
@@ -651,9 +687,30 @@ function dispatchActionParam(config, instance, param) {
 // 框架保留控制参数：PI 的“恢复默认配置”按钮通过它触发重置。
 // 控制参数不进入设置合并，也不透传给 action 的 onParamFromPlugin。
 const RESET_DEFAULTS_PARAM = '__resetDefaults';
+const REQUEST_SETTINGS_PARAM = '__requestSettings';
+const SETTINGS_SYNC_PARAM = '__settingsSync';
+const SETTINGS_SUBMIT_PARAM = '__settingsSubmit';
 
 function isResetDefaultsRequest(param) {
   return String(param?.[RESET_DEFAULTS_PARAM] ?? '') === 'true';
+}
+
+function isRequestSettingsRequest(param) {
+  return String(param?.[REQUEST_SETTINGS_PARAM] ?? '') === 'true';
+}
+
+function isSettingsSyncResponse(param) {
+  return String(param?.[SETTINGS_SYNC_PARAM] ?? '') === 'true';
+}
+
+function isSettingsSubmit(param) {
+  return String(param?.[SETTINGS_SUBMIT_PARAM] ?? '') === 'true';
+}
+
+function withoutSettingsSubmit(param) {
+  const settings = { ...param };
+  delete settings[SETTINGS_SUBMIT_PARAM];
+  return settings;
 }
 
 function escapeXml(value) {
@@ -820,6 +877,87 @@ function frameHighlight(frame, color, opacity = 1) {
   return frameRect(frame.highlight, frame.highlightRadius, `fill="none" stroke="${color}" stroke-width="6" opacity="${opacity}"`);
 }
 
+// 重置倒计时格式化。用量类 action 共用：两个键并排时，同样的剩余时长必须写成
+// 同样的字样。
+//
+// 只保留最大的那一个单位（`3d` / `5h` / `45m`），不写 `3d02h` 这种复合形式——
+// 键面上这一栏是最次要的信息，粗粒度足够，省下的宽度留给百分比。
+// 传入绝对时间戳（毫秒）。已过期返回 'now'，无效值返回空串。
+function formatCountdown(resetsAt, now = Date.now()) {
+  if (!Number.isFinite(resetsAt)) {
+    return '';
+  }
+  const diff = resetsAt - now;
+  if (diff <= 0) {
+    return 'now';
+  }
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  return `${Math.floor(hours / 24)}d`;
+}
+
+// 计量行：整行背景按百分比横向填充，三段文字叠在其上（左标签 / 中数值 / 右附注）。
+// 用量类 action（claudeusage、chatgptusage）共用，保证并排摆放时行高、字号与填充
+// 观感必然一致——同一个函数比"两边照着写"可靠。
+//
+// 填充一律用矩形宽度实现，**不用 clipPath**：宿主 SVG 渲染器对 clipPath 支持不可靠，
+// 会静默失效导致进度完全不显示。
+//
+// 只负责几何与排版；阈值、颜色含义这类领域语义由调用方传入 color 决定。
+const UNIT_FONT_SIZE = 15;
+
+function renderMeterRow(geometry, theme, options = {}) {
+  const { x, y, width, height } = geometry;
+  const {
+    percent = null,
+    color = theme.accent,
+    label = '',
+    value = '',
+    tail = '',
+    tailColor = theme.muted,
+    showBar = true,
+  } = options;
+
+  const fontSize = Math.min(24, Math.max(15, height * 0.62));
+  const textY = (y + height * 0.5 + fontSize * 0.35).toFixed(1);
+  const font = 'Arial, Helvetica, sans-serif';
+
+  const track = showBar
+    ? `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="3" fill="${theme.panel}" opacity="0.55"/>`
+    : '';
+  const fill = showBar && percent != null
+    ? `<rect x="${x}" y="${y}" width="${(width * Math.max(0, Math.min(100, percent)) / 100).toFixed(1)}" height="${height}" rx="3" fill="${color}" opacity="0.30"/>`
+    : '';
+
+  // 数字与单位分开排版：读者真正要看的是数量，`%` 和 `d/h/m` 只是量纲。
+  // 同一个 <text> 内用 <tspan> 换字号，基线自动对齐，不需要手工算偏移。
+  //
+  // 单位固定 15px 而不按 fontSize 缩放：它是恒定的量纲标注，行数变化时不该跟着
+  // 抖动；数字才随行高自适应。
+  const numeric = (text, numSize, unitSize) => {
+    const match = /^(-?[\d.]+)(.*)$/.exec(String(text ?? ''));
+    if (!match) {
+      // 没有数字的整串（例如 `now`）按小字号原样输出。
+      return `<tspan font-size="${unitSize.toFixed(1)}">${escapeXml(text ?? '')}</tspan>`;
+    }
+    const [, num, unit] = match;
+    return `<tspan font-size="${numSize.toFixed(1)}">${escapeXml(num)}</tspan>`
+      + (unit ? `<tspan font-size="${unitSize.toFixed(1)}">${escapeXml(unit)}</tspan>` : '');
+  };
+
+  return `
+      ${track}${fill}
+      <text x="${x + 6}" y="${textY}" fill="${color}" font-size="${(fontSize * 0.82).toFixed(1)}" font-weight="800" font-family="${font}">${escapeXml(label)}</text>
+      <text x="${x + width * 0.56}" y="${textY}" text-anchor="end" fill="${theme.text}" font-weight="800" font-family="${font}">${numeric(value, fontSize * 1.26, UNIT_FONT_SIZE)}</text>
+      <text x="${x + width - 5}" y="${textY}" text-anchor="end" fill="${tailColor}" font-weight="700" font-family="${font}">${numeric(tail, fontSize * 1.0, UNIT_FONT_SIZE)}</text>`;
+}
+
 function normalizeSettings(actionUuid, settings = {}) {
   const config = configFromUuid(actionUuid);
   const defaults = config.defaults;
@@ -912,21 +1050,17 @@ function onInstanceReady(instance) {
   return config.onReady?.(instance);
 }
 
-// 回填加固：把插件侧权威（含持久化）的归一化设置回推给 PI，纠正宿主
-// 可能过期/缺字段的 ActionParam。仅在与来件不一致时发送，避免多余流量与回环。
-function syncInspectorSettings(instance, incomingSettings = {}, ud = $UD) {
-  const authoritative = {};
+// 每次宿主恢复都把插件侧权威（含持久化）的归一化设置回推给 PI。
+// 新 PI 可能在宿主原始 add/paramFromApp 之后才完成加载；即使来件内容一致也必须回推，
+// 否则表单会停留在 HTML 默认值，并在后续输入或 pagehide 时反向污染持久化。
+function syncInspectorSettings(instance, _incomingSettings = {}, ud = $UD) {
+  const authoritative = { [SETTINGS_SYNC_PARAM]: 'true' };
   for (const [name, value] of Object.entries(instance.settings)) {
     if (value !== undefined) {
       authoritative[name] = value;
     }
   }
-  const differs = Object.keys(authoritative).some(
-    (name) => String(incomingSettings?.[name] ?? '') !== String(authoritative[name]),
-  );
-  if (differs) {
-    ud.sendParamFromPlugin(authoritative, instance.context);
-  }
+  ud.sendParamFromPlugin(authoritative, instance.context);
 }
 
 function renderInstance(instance) {
@@ -1055,7 +1189,7 @@ function ensureInstance(context, incomingSettings = {}, eventType = 'hostRestore
       renderError: runtime.renderError,
     });
     if (
-      eventType !== 'runtime' &&
+      !['runtime', 'inspectorRequest'].includes(eventType) &&
       !persistedSettingsEqual(actionUuid, config, instance.settings, persistedSettings)
     ) {
       writePersisted(context, config, instance.settings);
@@ -1068,7 +1202,7 @@ function ensureInstance(context, incomingSettings = {}, eventType = 'hostRestore
       persisted: persistedSettings,
     }));
     if (
-      eventType !== 'runtime' &&
+      !['runtime', 'inspectorRequest'].includes(eventType) &&
       !persistedSettingsEqual(actionUuid, config, instance.settings, persistedSettings)
     ) {
       writePersisted(context, config, instance.settings);
@@ -1104,12 +1238,41 @@ function createSettingsEventProcessor(options = {}) {
       return instance;
     },
     pluginSubmit(context, incomingSettings = {}) {
+      // 主进程回推给 Inspector 的 PARAMFROMPLUGIN 会被宿主广播回主进程。
+      // 带标记的回声只用于填充表单，绝不能再次当作用户提交写入设置。
+      if (isSettingsSyncResponse(incomingSettings)) {
+        return runtime.instances.get(context) ?? ensureInstance(context, {}, 'inspectorRequest', {
+          ...runtime,
+          render: () => {},
+          ready: () => {},
+        });
+      }
+      if (isRequestSettingsRequest(incomingSettings)) {
+        const instance = runtime.instances.get(context) ?? ensureInstance(context, {}, 'inspectorRequest', {
+          ...runtime,
+          render: () => {},
+          ready: () => {},
+        });
+        guardAction(instance, 'syncInspector', () => syncInspectorSettings(instance, {}, ud));
+        return instance;
+      }
       if (isResetDefaultsRequest(incomingSettings)) {
         return this.resetDefaults(context);
       }
-      const instance = ensureInstance(context, incomingSettings, 'pluginSubmit', runtime);
+      const hasControlParam = Object.keys(incomingSettings).some((key) => key.startsWith('__'));
+      if (!isSettingsSubmit(incomingSettings) && !hasControlParam) {
+        return runtime.instances.get(context) ?? ensureInstance(context, {}, 'inspectorRequest', {
+          ...runtime,
+          render: () => {},
+          ready: () => {},
+        });
+      }
+      const submittedSettings = isSettingsSubmit(incomingSettings)
+        ? withoutSettingsSubmit(incomingSettings)
+        : incomingSettings;
+      const instance = ensureInstance(context, submittedSettings, 'pluginSubmit', runtime);
       const config = configFromUuid(instance.actionUuid);
-      guardAction(instance, 'paramFromPlugin', () => dispatchActionParam(config, instance, incomingSettings));
+      guardAction(instance, 'paramFromPlugin', () => dispatchActionParam(config, instance, submittedSettings));
       runtime.render(instance);
       return instance;
     },
@@ -1237,6 +1400,7 @@ export const __testing = Object.freeze({
   ACTION_CONFIGS,
   THEMES,
   ...ACTION_TESTING,
+  formatCountdown,
   frameFor,
   frameHighlight,
   beginPress,

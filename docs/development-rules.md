@@ -105,13 +105,16 @@ settings 与运行态是两套东西，不得混用同一个存储：
 ### 共享框架持久化
 
 - 所有 action 的设置统一写入插件目录下的 `data/action-settings.json`，记录键固定为宿主 context 解码后的 `actionid::key`，不同 action、键位和实例不得共用可变记录。
-- 宿主恢复事件（`onAdd` / `onParamFromApp`）以本地 persisted 设置为权威；合并并归一化后，如宿主来件缺字段或已过期，框架必须把权威设置回推给 Property Inspector。
+- 宿主恢复事件（`onAdd` / `onParamFromApp`）以本地 persisted 设置为权威；合并并归一化后，框架必须无条件把完整权威设置回推给 Property Inspector。不能因宿主来件内容相同而省略回推：新 Inspector 可能在原始事件之后才完成加载，否则会停留在 HTML 默认值并在后续提交时污染持久化。
 - Property Inspector 提交事件（`onParamFromPlugin`）以 incoming 设置为权威，使用户刚提交的值覆盖旧 persisted 值；随后再归一化、持久化并渲染。
 - 写盘前必须比较**归一化后的持久化语义**；语义未变化时不重复写盘，不能只按原始来件或对象引用判断。
 - 文件更新必须在目标文件同目录写临时文件，再用 rename 替换正式文件，避免半写入状态。
 - 若新的 `action-settings.json` 存在但无法读取或解析，本次进程将存储置为只读并保留原文件，不得用空对象、默认值或 legacy 数据覆盖它。
 - legacy 存储只允许在新的 `action-settings.json` 明确返回 `ENOENT` 时迁移；其他读取错误一律不得触发迁移。
 - “恢复默认配置”走框架保留控制参数 `__resetDefaults: 'true'`（PI 发送、框架在 `pluginSubmit` 入口拦截）：框架把设置重置为 `defaults` 的归一化结果，按持久化语义变化决定是否写盘，随后触发 `onSettingsChanged`、渲染并把权威设置回推 PI 刷新表单。控制参数不进入设置合并、不落盘，也不透传给 action 的 `onParamFromPlugin`。
+- Inspector WebSocket 连接成功后必须发送 `__requestSettings: 'true'`。框架用 persisted 语义创建或读取实例并回推完整权威设置，但不得写盘、渲染、调用 `onReady` 或转发业务钩子；该握手用于覆盖 PI 晚于宿主恢复事件加载的竞态。
+- 框架回推完整设置时必须附带 `__settingsSync: 'true'`。宿主会把主进程发出的 `PARAMFROMPLUGIN` 广播回主进程；带此标记的消息只用于填充 Inspector，框架不得把广播回声合并、持久化、渲染或转发给 action 钩子。
+- Inspector 通过浏览器桥提交完整设置时必须附带 `__settingsSubmit: 'true'`，框架在合并前移除该标记。没有控制参数、也没有此提交标记的 `PARAMFROMPLUGIN` 视为宿主缓存的旧同步快照，只读忽略；这保证升级后首次切换 action 也不会用旧表单值覆盖磁盘。
 
 ### 进程内隔离（单进程约束下的强制规则）
 
@@ -169,7 +172,8 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 新 action 默认先复用已有主题，不先新增新套。
 - Property Inspector 的 theme 选项要和运行态 theme key 一一对应。
 - PI 主题色卡由共享层按 `inspector-shared.js` 的 `THEME_SWATCHES` 动态渲染，五段按角色依次为：背景（`canvas`）、填充（`panel`）、边框（`low`）、强调（`accent`）、文字（`text`）；页面只保留空的 `.theme-row` 容器，不再逐页写色卡 CSS。
-- 新增主题的完整动作：扩 `THEMES`（业务插件与 template 两份）→ 扩 `THEME_SWATCHES`。Pomowave 的阶段色必须从当前 theme token 派生，不再维护独立静态色板；两份主题与 Inspector 色卡的一致性由 `npm test` 校验锁定，漏改会直接红。
+- 每套主题除五段色卡角色外，还必须提供语义告警色 `ok` / `warn` / `crit`，供需要分级预警的 action 使用（例如 claudeusage 的额度 severity）。它们**不进** `THEME_SWATCHES`——色卡只展示五个角色。取值要与该主题色调调和且在其 `canvas` 上有足够对比度；`sand` 是浅色主题，三色必须取深色档。注意 `sunset` 的 `accent` 本身是玫红、`forest` 的 `accent` 本身是绿，这两套下 `crit` / `ok` 与 `accent` 同色系，分级预警不能只靠颜色，需要配合非颜色信号（图形姿态、图标）。
+- 新增主题的完整动作：扩 `THEMES`（业务插件与 template 两份，含 `ok` / `warn` / `crit`）→ 扩 `THEME_SWATCHES`。Pomowave 的阶段色必须从当前 theme token 派生，不再维护独立静态色板；两份主题与 Inspector 色卡的一致性、语义色的合法性与三色互异、以及 `THEMES` 在两份之间的完全一致，均由 `npm test` 校验锁定，漏改会直接红。
 
 ## 7. Property Inspector 共享规范
 
@@ -191,6 +195,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 文本等连续输入统一使用 `400ms` 去抖自动提交，减少连续写盘；表单提交、主题等按钮操作必须 flush 待提交值并立即发送。
 - 每个 PI 页面必须提供“保存”与“恢复默认”（`#resetDefaults`）按钮，以及内联反馈条（`#inspector-feedback` 容器 + `#feedback-saved` / `#feedback-reset` 文案）；两个按钮按下后由共享层 `flashInspectorFeedback` 显示反馈并自动隐藏。
 - 恢复默认按钮只发送 `__resetDefaults` 控制参数并取消未提交的去抖尾值；默认值的唯一权威是插件侧 `ACTION_CONFIGS.defaults`，PI 页面不得自带默认值副本。
+- PI 每次连接成功都发送一次 `__requestSettings` 控制请求；在收到权威回推前不得主动提交 HTML 初始值。
 
 ## 8. 新增 Action 的标准步骤
 

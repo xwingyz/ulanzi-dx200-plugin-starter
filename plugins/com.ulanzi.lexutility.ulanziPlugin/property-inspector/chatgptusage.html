@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ChatGPT Usage</title>
+    <style>
+      :root { color-scheme: dark; --bg: #09090b; --panel: #18181b; --text: #fafafa; --muted: #a1a1aa; --line: #303034; --accent: #d4d4d8; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #09090b 0%, #18181b 100%); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(24, 24, 27, 0.92); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 16px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      label { color: var(--muted); }
+      input { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #111113; color: var(--text); padding: 10px 12px; }
+      input[type="hidden"] { display: none; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #111113; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .action-row { display: flex; gap: 10px; margin-top: 4px; }
+      .action-row button { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 700; cursor: pointer; }
+      .save-btn { background: var(--accent); color: #18181b; }
+      .ghost-btn { background: rgba(161, 161, 170, 0.14); color: var(--text); border: 1px solid var(--line); }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .frame-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .frame-toggle { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; cursor: pointer; }
+      .frame-toggle input { width: auto; }
+      .diag { background: #111113; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--muted); }
+      .diag dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+      .diag dt { color: var(--muted); opacity: 0.75; }
+      .diag dd { margin: 0; color: var(--text); font-weight: 700; word-break: break-all; }
+      .diag .bad { color: #ef4444; }
+      .diag .good { color: #22c55e; }
+      .probe-btn { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: rgba(161, 161, 170, 0.14); color: var(--text); font-weight: 700; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1>ChatGPT Usage</h1>
+        <p>通过 Codex CLI 读取限额用量与重置倒计时。需要先安装 Codex CLI 并运行 <code>codex login</code>。显示的是 Codex 限额，不是整个 ChatGPT 账户的用量。</p>
+        <form id="property-inspector">
+          <div class="field">
+            <label for="codexCommand">Codex 命令</label>
+            <input id="codexCommand" name="codexCommand" maxlength="200" value="codex">
+            <div class="hint">默认按 PATH 查找。插件由 Ulanzi Studio 拉起，PATH 可能不含 homebrew 等前缀；找不到时请填绝对路径。</div>
+          </div>
+          <div class="grid-3">
+            <div class="field">
+              <label for="pollSec">Poll (s)</label>
+              <input id="pollSec" name="pollSec" type="number" min="60" max="3600" value="300">
+            </div>
+            <div class="field">
+              <label for="redrawSec">Redraw (s)</label>
+              <input id="redrawSec" name="redrawSec" type="number" min="10" max="300" value="30">
+            </div>
+            <div class="field">
+              <label for="timeoutSec">Timeout (s)</label>
+              <input id="timeoutSec" name="timeoutSec" type="number" min="3" max="60" value="12">
+            </div>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="limitId">Limit ID</label>
+              <input id="limitId" name="limitId" maxlength="60" value="codex">
+            </div>
+            <div class="field">
+              <label for="usageUrl">长按打开</label>
+              <input id="usageUrl" name="usageUrl" maxlength="160" value="https://chatgpt.com/#settings/Usage">
+            </div>
+          </div>
+          <div class="field">
+            <label data-localize="Rows">Rows</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="showSecondary" name="showSecondary" type="checkbox" checked><span>次要窗口</span></label>
+              <label class="frame-toggle"><input id="showResetCredits" name="showResetCredits" type="checkbox" checked><span>重置券</span></label>
+            </div>
+            <div class="hint">次要窗口只在接口返回该条目时才占一行。</div>
+          </div>
+          <div class="field">
+            <label data-localize="Appearance">Appearance</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="showBarBackground" name="showBarBackground" type="checkbox" checked><span>进度条背景</span></label>
+              <label class="frame-toggle"><input id="severityColors" name="severityColors" type="checkbox" checked><span>分级配色</span></label>
+            </div>
+            <div class="hint">分级阈值：已用 ≥75% 转黄、≥90% 转红，与 Claude Usage 一致。</div>
+          </div>
+          <div class="field">
+            <label for="theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="mono">
+            <div class="theme-row" role="group" aria-label="Theme">
+            </div>
+          </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label data-localize="Diagnostics">Diagnostics</label>
+            <div class="diag">
+              <dl>
+                <dt>平台</dt><dd id="diag-platform">—</dd>
+                <dt>Codex 路径</dt><dd id="diag-path">—</dd>
+                <dt>登录状态</dt><dd id="diag-login">—</dd>
+                <dt>套餐</dt><dd id="diag-plan">—</dd>
+                <dt>当前状态</dt><dd id="diag-state">—</dd>
+                <dt>上次拉取</dt><dd id="diag-fetched">—</dd>
+                <dt>上次错误</dt><dd id="diag-error">—</dd>
+              </dl>
+              <button class="probe-btn" id="probe" type="button">立即测试</button>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+            <button class="save-btn" type="submit" data-localize="Save">Save</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./chatgptusage.js"></script>
+  </body>
+</html>

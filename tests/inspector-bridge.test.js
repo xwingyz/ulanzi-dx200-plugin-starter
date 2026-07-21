@@ -159,6 +159,7 @@ for (const copy of COPIES) {
     const [socket] = harness.sockets;
     assert.ok(socket, 'initInspector should open a websocket');
     socket.onopen();
+    assert.equal(socket.sent.at(-1).param.__requestSettings, 'true');
 
     // 宿主在 PI 打开时下发 add：带着（与磁盘持久化对齐的）设置来件。
     hostMessage(socket, {
@@ -187,6 +188,7 @@ for (const copy of COPIES) {
     assert.equal(submitted.cmd, 'paramfromplugin');
     assert.equal(submitted.key, 'key-1');
     assert.equal(submitted.actionid, 'action-1');
+    assert.equal(submitted.param.__settingsSubmit, 'true');
     assert.equal(submitted.param.title, 'Normalized Title');
     assert.equal(harness.elements.get('feedback-saved').hidden, false, 'save should flash feedback');
 
@@ -226,6 +228,7 @@ for (const copy of COPIES) {
     const sand = chips.find((chip) => chip.dataset.themeValue === 'sand');
     assert.ok(sand, 'sand chip should exist');
     sand.dispatchEvent({ type: 'click' });
+    assert.equal(socket.sent.at(-1).param.__settingsSubmit, 'true');
     assert.equal(socket.sent.at(-1).param.theme, 'sand');
   });
 
@@ -244,6 +247,22 @@ for (const copy of COPIES) {
         swatches[name],
         [theme.canvas, theme.panel, theme.low, theme.accent, theme.text],
         `swatch colors drifted from THEMES for "${name}"`,
+      );
+    }
+  });
+
+  // ok / warn / crit 不进色卡，所以上面那条一致性校验兜不住它们；漏配会让
+  // 依赖分级预警的 action 在该主题下静默失去颜色信号。
+  test(`[${copy.name}] every theme ships the semantic alert tokens`, () => {
+    const HEX = /^#[0-9a-f]{6}$/;
+    for (const [name, theme] of Object.entries(copy.testing.THEMES)) {
+      for (const token of ['ok', 'warn', 'crit']) {
+        assert.match(theme[token] ?? '', HEX, `theme "${name}" lacks a valid ${token} token`);
+      }
+      assert.equal(
+        new Set([theme.ok, theme.warn, theme.crit]).size,
+        3,
+        `theme "${name}" reuses one colour across alert levels`,
       );
     }
   });
@@ -324,4 +343,10 @@ test('browser bridge and inspector shared layer stay identical between plugin an
       `shared file drifted between plugin and template: ${file}`,
     );
   }
+});
+
+// 两份 app.js 因 action 注册不同而无法整文件比对，但 THEMES 是共享层，
+// 规则要求业务插件的通用改动必须同回流 template —— 这里把它钉死。
+test('THEMES stay identical between plugin and template', () => {
+  assert.deepEqual(pluginTesting.THEMES, templateTesting.THEMES);
 });

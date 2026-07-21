@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Claude Usage</title>
+    <style>
+      :root { color-scheme: dark; --bg: #1a0d08; --panel: #2a140c; --text: #fff7ed; --muted: #fdba74; --line: #4a2412; --accent: #f97316; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #140a06 0%, #2a140c 100%); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(42, 20, 12, 0.92); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 16px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      label { color: var(--muted); }
+      input { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #140a06; color: var(--text); padding: 10px 12px; }
+      input[type="hidden"] { display: none; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #140a06; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .action-row { display: flex; gap: 10px; margin-top: 4px; }
+      .action-row button { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 700; cursor: pointer; }
+      .save-btn { background: var(--accent); color: #431407; }
+      .ghost-btn { background: rgba(253, 186, 116, 0.14); color: var(--text); border: 1px solid var(--line); }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .frame-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .frame-toggle { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; cursor: pointer; }
+      .frame-toggle input { width: auto; }
+      .diag { background: #140a06; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--muted); }
+      .diag dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+      .diag dt { color: var(--muted); opacity: 0.75; }
+      .diag dd { margin: 0; color: var(--text); font-weight: 700; }
+      .diag .bad { color: #ef4444; }
+      .diag .good { color: #4ade80; }
+      .probe-btn { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: rgba(253, 186, 116, 0.14); color: var(--text); font-weight: 700; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1>Claude Usage</h1>
+        <p>显示 Claude 订阅的每周与 5 小时额度及重置倒计时。凭据从 macOS 钥匙串只读读取，不消耗任何额度。仅支持 macOS。</p>
+        <form id="property-inspector">
+          <div class="grid">
+            <div class="field">
+              <label for="pollSec">Poll (s)</label>
+              <input id="pollSec" name="pollSec" type="number" min="60" max="3600" value="300">
+            </div>
+            <div class="field">
+              <label for="redrawSec">Redraw (s)</label>
+              <input id="redrawSec" name="redrawSec" type="number" min="10" max="300" value="30">
+            </div>
+          </div>
+          <div class="field">
+            <label for="usageUrl">长按打开</label>
+            <input id="usageUrl" name="usageUrl" maxlength="160" value="https://claude.ai/settings/usage">
+            <div class="hint">拉取间隔下限 60 秒：该接口对请求频率敏感，过密会被限流。</div>
+          </div>
+          <div class="field">
+            <label data-localize="Rows">Rows</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="showWeekly" name="showWeekly" type="checkbox" checked><span>每周</span></label>
+              <label class="frame-toggle"><input id="showFiveHour" name="showFiveHour" type="checkbox" checked><span>5 小时</span></label>
+              <label class="frame-toggle"><input id="showScoped" name="showScoped" type="checkbox" checked><span>模型周限</span></label>
+            </div>
+            <div class="hint">模型周限额只在接口返回该条目时才占一行。</div>
+          </div>
+          <div class="field">
+            <label data-localize="Appearance">Appearance</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="showBarBackground" name="showBarBackground" type="checkbox" checked><span>进度条背景</span></label>
+              <label class="frame-toggle"><input id="severityColors" name="severityColors" type="checkbox" checked><span>分级配色</span></label>
+              <label class="frame-toggle"><input id="animate" name="animate" type="checkbox" checked><span>键面动效</span></label>
+            </div>
+            <div class="hint">动效开启后键面会以约 8fps 持续重绘推图（光晕/波纹/流光），关闭可省功耗。</div>
+          </div>
+          <div class="field">
+            <label for="theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="ember">
+            <div class="theme-row" role="group" aria-label="Theme">
+            </div>
+          </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label data-localize="Diagnostics">Diagnostics</label>
+            <div class="diag">
+              <dl>
+                <dt>平台</dt><dd id="diag-platform">—</dd>
+                <dt>钥匙串凭据</dt><dd id="diag-token">—</dd>
+                <dt>当前状态</dt><dd id="diag-state">—</dd>
+                <dt>上次拉取</dt><dd id="diag-fetched">—</dd>
+                <dt>上次错误</dt><dd id="diag-error">—</dd>
+              </dl>
+              <button class="probe-btn" id="probe" type="button">立即测试</button>
+            </div>
+            <div class="hint">accessToken 约 1 小时过期，由 Claude Code 自身刷新维持；过期时键面显示上次数值并标记陈旧。</div>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+            <button class="save-btn" type="submit" data-localize="Save">Save</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./claudeusage.js"></script>
+  </body>
+</html>

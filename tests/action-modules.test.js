@@ -18,16 +18,16 @@ test('business actions live outside the Lex Utility framework entry', () => {
   for (const symbol of ['renderLatencyIcon', 'renderPomodoroIcon', 'renderSpeedtestIcon']) {
     assert.doesNotMatch(app, new RegExp(`function ${symbol}\\b`));
   }
-  for (const key of ['latency', 'pomowave', 'speedtest']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus']) {
     assert.equal(fs.existsSync(path.join(pluginRoot, 'actions', `${key}.js`)), true);
   }
 });
 
 test('individual action modules do not import app.js or sibling actions', () => {
-  for (const key of ['latency', 'pomowave', 'speedtest']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus']) {
     const source = read(path.join(pluginRoot, 'actions', `${key}.js`));
     assert.doesNotMatch(source, /from\s+['"][^'"]*app\.js['"]/);
-    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest)\.js['"]/);
+    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus)\.js['"]/);
   }
 });
 
@@ -68,6 +68,18 @@ const RENDER_STATES = {
         uploadMbps: 20 + index,
       })),
     },
+  ],
+  bambustatus: [
+    { connectionState: 'CONFIG_REQUIRED' },
+    { connectionState: 'CONNECTING' },
+    { connectionState: 'OFFLINE', lastSeenAt: Date.now() - 70_000 },
+    { connectionState: 'INCOMPATIBLE' },
+    { connectionState: 'ONLINE', liveStatus: 'IDLE', model: 'P2S' },
+    { connectionState: 'ONLINE', liveStatus: 'PREPARING', model: 'P2S', stage: '自动调平', progress: 0, elapsedSec: 60, remainingSec: 1800 },
+    { connectionState: 'ONLINE', liveStatus: 'RUNNING', model: 'P2S', progress: 42, elapsedSec: 3600, remainingSec: 1200 },
+    { connectionState: 'ONLINE', liveStatus: 'PAUSED', model: 'P2S', progress: 43, elapsedSec: 3700, remainingSec: 1100 },
+    { connectionState: 'ONLINE', liveStatus: 'FAILED', model: 'P2S', stage: '喷嘴温度异常' },
+    { connectionState: 'ONLINE', liveStatus: 'FINISHED', model: 'P2S', progress: 100, elapsedSec: 5000, remainingSec: 0 },
   ],
 };
 

@@ -79,6 +79,7 @@ function createHarness(entryFile) {
     ['theme', new FakeElement({ id: 'theme', value: 'mint' })],
     ['title', new FakeElement({ id: 'title', value: 'latest' })],
     ['frameSize', new FakeElement({ id: 'frameSize', type: 'checkbox', dataset: { on: 'optimal', off: 'max' } })],
+    ['showFrame', new FakeElement({ id: 'showFrame', type: 'checkbox' })],
     ['graphMode', new FakeElement({ id: 'graphMode', value: 'bars' })],
     ['soundStyle', new FakeElement({ id: 'soundStyle', value: 'glass' })],
     ['resetTimer', new FakeElement({ id: 'resetTimer' })],
@@ -193,7 +194,7 @@ test('shared inspector binds input and exit lifecycle only once across reconnect
   assert.equal(harness.form.listenerCount('input'), 1);
   assert.equal(harness.window.listenerCount('pagehide'), 1);
   assert.equal(harness.scheduledTimerCount(), 1);
-  assert.equal(harness.sends.length, 1);
+  assert.equal(harness.sends.filter(({ settings }) => !settings.__requestSettings).length, 1);
 });
 
 test('pagehide flushes the latest pending input once and clears its timer', () => {
@@ -204,12 +205,12 @@ test('pagehide flushes the latest pending input once and clears its timer', () =
   harness.elements.get('title').value = 'tail value';
   harness.window.dispatchEvent({ type: 'pagehide' });
 
-  assert.equal(harness.sends.length, 1);
-  assert.equal(harness.sends[0].settings.title, 'tail value');
+  assert.equal(harness.sends.length, 2);
+  assert.equal(harness.sends.at(-1).settings.title, 'tail value');
   assert.equal(harness.timerCount(), 0);
 
   harness.runTimers();
-  assert.equal(harness.sends.length, 1);
+  assert.equal(harness.sends.length, 2);
 });
 
 test('pagehide without pending input does not send settings', () => {
@@ -218,7 +219,8 @@ test('pagehide without pending input does not send settings', () => {
 
   harness.window.dispatchEvent({ type: 'pagehide' });
 
-  assert.equal(harness.sends.length, 0);
+  assert.equal(harness.sends.length, 1);
+  assert.equal(harness.sends[0].settings.__requestSettings, 'true');
   assert.equal(harness.timerCount(), 0);
 });
 
@@ -235,8 +237,8 @@ test('theme chips render from shared swatches and clicking one commits the theme
   neon.dispatchEvent({ type: 'click' });
 
   assert.equal(harness.elements.get('theme').value, 'neon');
-  assert.equal(harness.sends.length, 1);
-  assert.equal(harness.sends[0].settings.theme, 'neon');
+  assert.equal(harness.sends.length, 2);
+  assert.equal(harness.sends.at(-1).settings.theme, 'neon');
 });
 
 test('mapped checkbox collects data-on/off values and applies back from settings', () => {
@@ -268,9 +270,9 @@ test('reset defaults button cancels pending autosave and sends only the reset co
 
   assert.deepEqual(
     harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
-    [{ __resetDefaults: 'true' }],
+    [{ __requestSettings: 'true' }, { __resetDefaults: 'true' }],
   );
-  assert.equal(harness.sends[0].context, 'ctx-1');
+  assert.equal(harness.sends.at(-1).context, 'ctx-1');
 });
 
 test('save and reset defaults flash distinct feedback that auto-hides', () => {
@@ -364,6 +366,36 @@ test('pomowave inspector submits the manual-stage continuous cue setting', () =>
   harness.form.dispatchEvent({ type: 'submit' });
 
   assert.equal(harness.sends.at(-1).settings.repeatManualCue, 'true');
+});
+
+test('bambustatus applies discovery without resubmitting a cached result', () => {
+  const harness = createHarness('bambustatus.js');
+  harness.callbacks.connected[0]();
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(harness.sends.at(-1).settings)),
+    { __requestSettings: 'true' },
+  );
+
+  harness.callbacks.plugin.forEach((callback) => callback({
+    context: 'ctx-1',
+    param: {
+      __bambustatusDiscovery: {
+        status: 'found',
+        model: 'P2S',
+        settings: {
+          printerName: '书房打印机',
+          printerIp: '192.168.1.180',
+          serialNumber: 'TEST-SERIAL',
+          accessCode: 'TEST-CODE',
+        },
+      },
+    },
+  }));
+
+  assert.equal(harness.elements.get('printerName').value, '书房打印机');
+  assert.equal(harness.elements.get('printerIp').value, '192.168.1.180');
+  assert.equal(harness.sends.length, 1, 'discovery replay must not become a settings submit');
 });
 
 test('speedtest inspector persists scope, schedule, checked nodes and chart type', () => {
