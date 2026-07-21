@@ -119,7 +119,7 @@ Inspector 不遮蔽 Access Code。所有设置由共享设置存储写入 `data/
 - 下方用 25px 字号左右分列 `T <已用时间>` 和 `R <剩余时间>`，不显示“用时 / 余时”汉字。
 - `PREPARING` 主区域显示细分阶段；`PAUSED`、`FAILED`、`OFFLINE`、`INCOMPATIBLE` 显示明确中文状态。
 - 离线隐藏旧进度，底部显示最后成功更新时间。
-- 完成锁存显示 `已完成`、100% 进度、已用时间与完成时快照；不显示会误导的剩余时间。
+- 完成锁存显示 `已完成`、100% 进度、已用时间与完成时快照；不显示会误导的剩余时间。快照保留 3 分钟，到期后自动清除并主动请求一次当前状态；用户也可随时单击立即清除并刷新。
 - 全部内容经公共安全框与主题渲染能力输出；状态语义色取当前 theme 的 `ok` / `warn` / `crit`。
 - 品牌标记是固定身份元素，可使用 Bambu Lab 官方标记的本地矢量版本；商标仅用于指代设备，不代表官方授权。
 
@@ -129,8 +129,7 @@ Inspector 不遮蔽 Access Code。所有设置由共享设置存储写入 `data/
 | --- | --- |
 | `createState` | 水合版本化完成快照，初始化连接与状态镜像 |
 | `onReady` | 配置不完整时自动扫描；配置完整且尚无客户端时连接 MQTT，重复恢复现有实例不得重连 |
-| `onRun` | 短按立即断开并重连 |
-| `onLongPress` | 清除完成锁存并显示当前实时镜像 |
+| `onRun` | 单击清除完成锁存并立即请求当前状态；连接不可用时重新连接 |
 | `onSettingsChanged` | 连接字段变化时断开旧连接并连接新目标 |
 | `onParamFromPlugin` | 处理重新扫描控制命令并回推扫描结果/诊断 |
 | `onDispose` | 关闭 MQTT/UDP socket、清理实例定时器并落盘完成快照 |
@@ -154,7 +153,7 @@ completedSnapshot: {
 suppressFinishedUntilNextTask: boolean
 ```
 
-只在打印完成、下一任务解除锁存、长按清除或 dispose 时按语义变化写盘；不得逐条 MQTT 消息写盘。长按后用 `suppressFinishedUntilNextTask` 记住不再锁存同一次已完成任务，直到收到下一次 `PREPARING` / `RUNNING`。版本不符或内容损坏降级为无快照，不阻止 action 启动。
+只在打印完成、下一任务解除锁存、3 分钟到期、单击清除或 dispose 时按语义变化写盘；不得逐条 MQTT 消息写盘。到期或单击后用 `suppressFinishedUntilNextTask` 记住不再锁存同一次已完成任务，直到收到下一次 `PREPARING` / `RUNNING`。完成时间缺失、快照已超过 3 分钟、版本不符或内容损坏时降级为无快照，不阻止 action 启动。
 
 ## 9. 错误与兼容性语义
 
@@ -167,7 +166,7 @@ suppressFinishedUntilNextTask: boolean
 ## 10. 完成与验收
 
 - manifest、action 模块、Inspector、图标四层齐全并完成注册。
-- 专项测试覆盖配置发现、SSDP 解析、增量合并、状态映射、时间计算、完成锁存、长短按与全显示态渲染。
+- 专项测试覆盖配置发现、SSDP 解析、增量合并、状态映射、时间计算、完成锁存、3 分钟自动过期、单击刷新与全显示态渲染。
 - 根目录 `npm test` 全绿。
 - 使用 `restart` 同步到 Ulanzi Studio，删除旧实例后重新拖入验证 UUID。
 - Inspector 扫描、保存、手动覆盖和重新扫描符合契约。

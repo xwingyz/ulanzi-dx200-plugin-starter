@@ -102,8 +102,8 @@ test('bambustatus host restore echoes the saved printer name and connection sett
 });
 
 test('bambustatus completion snapshot hydration is versioned', () => {
-  const snapshot = { status: 'FINISHED', progress: 100, elapsedSec: 4800 };
-  assert.deepEqual(testing.hydrateSnapshot({ v: 1, completedSnapshot: snapshot }), {
+  const snapshot = { status: 'FINISHED', progress: 100, elapsedSec: 4800, completedAt: 10_000 };
+  assert.deepEqual(testing.hydrateSnapshot({ v: 1, completedSnapshot: snapshot }, 100_000), {
     completedSnapshot: snapshot,
     completionLatched: true,
     suppressFinishedUntilNextTask: false,
@@ -118,7 +118,18 @@ test('bambustatus completion snapshot hydration is versioned', () => {
   assert.deepEqual(testing.hydrateSnapshot({ v: 2, completedSnapshot: snapshot }), {});
 });
 
-test('bambustatus keeps a manual completion reset clear until the next task starts', () => {
+test('bambustatus expires a completion snapshot after three minutes', () => {
+  const snapshot = { status: 'FINISHED', progress: 100, completedAt: 10_000 };
+  assert.equal(testing.completionExpiryDelay(snapshot, 189_999), 1);
+  assert.equal(testing.completionExpiryDelay(snapshot, 190_000), 0);
+  assert.deepEqual(testing.hydrateSnapshot({ v: 1, completedSnapshot: snapshot }, 190_000), {
+    completedSnapshot: null,
+    completionLatched: false,
+    suppressFinishedUntilNextTask: true,
+  });
+});
+
+test('bambustatus keeps an expired completion clear until the next task starts', () => {
   const instance = {
     print: {}, model: 'P2S', taskName: '', stage: '', progress: null, elapsedSec: null,
     remainingSec: null, lastSeenAt: null, connectionState: 'ONLINE', liveStatus: 'FINISHED',
@@ -131,6 +142,12 @@ test('bambustatus keeps a manual completion reset clear until the next task star
   testing.applyPrintReport(instance, { gcode_state: 'RUNNING', mc_percent: 1 }, 11_000);
   assert.equal(instance.liveStatus, 'RUNNING');
   assert.equal(instance.suppressFinishedUntilNextTask, false);
+});
+
+test('bambustatus uses a single click refresh and has no long-press action', () => {
+  const config = testing.ACTION_CONFIGS.bambustatus;
+  assert.equal(typeof config.onRun, 'function');
+  assert.equal(config.onLongPress, undefined);
 });
 
 test('bambustatus header renders only the configured printer name', () => {

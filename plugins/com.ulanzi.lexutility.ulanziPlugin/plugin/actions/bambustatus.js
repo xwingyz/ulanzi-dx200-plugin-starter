@@ -10,6 +10,7 @@ const SSDP_PORT = 1990;
 const MQTT_PORT = 8883;
 const STATUS_TIMEOUT_MS = 12_000;
 const REDRAW_MS = 30_000;
+const COMPLETION_HOLD_MS = 3 * 60_000;
 const RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
 const SCAN_PARAM = '__bambustatusScan';
 const SCAN_RESULT_PARAM = '__bambustatusDiscovery';
@@ -147,17 +148,25 @@ function serializeSnapshot(instance) {
   };
 }
 
-function hydrateSnapshot(raw) {
+function completionExpiryDelay(snapshot, now = Date.now()) {
+  const completedAt = finiteNumber(snapshot?.completedAt);
+  if (completedAt == null) return 0;
+  return Math.max(0, completedAt + COMPLETION_HOLD_MS - now);
+}
+
+function hydrateSnapshot(raw, now = Date.now()) {
   if (!raw || raw.v !== STATE_VERSION) {
     return {};
   }
-  const completedSnapshot = raw.completedSnapshot && typeof raw.completedSnapshot === 'object'
+  let completedSnapshot = raw.completedSnapshot && typeof raw.completedSnapshot === 'object'
     ? raw.completedSnapshot
     : null;
+  const expired = completedSnapshot && completionExpiryDelay(completedSnapshot, now) === 0;
+  if (expired) completedSnapshot = null;
   return {
     completedSnapshot,
     completionLatched: Boolean(completedSnapshot),
-    suppressFinishedUntilNextTask: Boolean(raw.suppressFinishedUntilNextTask),
+    suppressFinishedUntilNextTask: expired || Boolean(raw.suppressFinishedUntilNextTask),
   };
 }
 
@@ -312,6 +321,43 @@ export function createBambuStatusAction(runtime) {
     }, REDRAW_MS);
   }
 
+  function requestCurrentStatus(instance) {
+    const serial = cleanString(instance.settings.serialNumber);
+    if (!serial || !instance.mqttClient?.connected) return false;
+    instance.mqttClient.publish(`device/${serial}/request`, JSON.stringify({
+      pushing: { sequence_id: String(Date.now()), command: 'pushall' },
+    }), { qos: 0 });
+    return true;
+  }
+
+  function clearCompletion(instance) {
+    clearInstanceTimeout(instance, 'bambustatusCompletionExpiry');
+    instance.completedSnapshot = null;
+    instance.completionLatched = false;
+    instance.suppressFinishedUntilNextTask = true;
+    if (instance.liveStatus === 'FINISHED') instance.liveStatus = 'IDLE';
+    flushSnapshot(instance);
+    renderInstance(instance);
+  }
+
+  function refreshCurrentStatus(instance) {
+    clearCompletion(instance);
+    if (!requestCurrentStatus(instance)) connectPrinter(instance);
+  }
+
+  function scheduleCompletionExpiry(instance, now = Date.now()) {
+    clearInstanceTimeout(instance, 'bambustatusCompletionExpiry');
+    if (!instance.completionLatched || !instance.completedSnapshot) return;
+    const delay = completionExpiryDelay(instance.completedSnapshot, now);
+    if (delay === 0) {
+      refreshCurrentStatus(instance);
+      return;
+    }
+    setInstanceTimeout(instance, 'bambustatusCompletionExpiry', () => {
+      refreshCurrentStatus(instance);
+    }, delay);
+  }
+
   function scheduleReconnect(instance) {
     if (!isCompleteSettings(instance.settings) || instance.active === false) return;
     const index = Math.min(instance.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1);
@@ -352,6 +398,7 @@ export function createBambuStatusAction(runtime) {
       instance.suppressFinishedUntilNextTask = false;
     }
     if (instance.completionLatched && ['RUNNING', 'PREPARING'].includes(nextStatus)) {
+      clearInstanceTimeout(instance, 'bambustatusCompletionExpiry');
       instance.completionLatched = false;
       instance.completedSnapshot = null;
       flushSnapshot(instance);
@@ -364,6 +411,7 @@ export function createBambuStatusAction(runtime) {
       instance.completedSnapshot = snapshotFromInstance(instance);
       instance.completionLatched = true;
       flushSnapshot(instance);
+      scheduleCompletionExpiry(instance, now);
     }
   }
 
@@ -420,9 +468,7 @@ export function createBambuStatusAction(runtime) {
       instance.reconnectAttempt = 0;
       client.subscribe(topic, { qos: 0 }, safeNetwork(instance, generation, (error) => {
         if (error) { markOffline(instance, '订阅状态失败'); return; }
-        client.publish(`device/${serial}/request`, JSON.stringify({
-          pushing: { sequence_id: String(Date.now()), command: 'pushall' },
-        }), { qos: 0 });
+        requestCurrentStatus(instance);
         setInstanceTimeout(instance, 'bambustatusStatusTimeout', () => {
           if (!instance.statusReceived) {
             instance.connectionState = 'INCOMPATIBLE';
@@ -536,15 +582,6 @@ export function createBambuStatusAction(runtime) {
     return selected;
   }
 
-  function resetCompletion(instance) {
-    instance.completedSnapshot = null;
-    instance.completionLatched = false;
-    instance.suppressFinishedUntilNextTask = true;
-    if (instance.liveStatus === 'FINISHED') instance.liveStatus = 'IDLE';
-    flushSnapshot(instance);
-    renderInstance(instance);
-  }
-
   function displayData(instance) {
     return instance.completionLatched && instance.completedSnapshot
       ? instance.completedSnapshot
@@ -635,10 +672,10 @@ export function createBambuStatusAction(runtime) {
       completedSnapshot: null, completionLatched: false, suppressFinishedUntilNextTask: false,
       autoScanStarted: false, reportedOnline: false, ...hydrateSnapshot(readPersistedState(instance.context)),
     }),
-    onRun: (instance) => connectPrinter(instance),
-    onLongPress: (instance) => resetCompletion(instance),
+    onRun: (instance) => refreshCurrentStatus(instance),
     onReady: async (instance) => {
       scheduleRedraw(instance);
+      scheduleCompletionExpiry(instance);
       if (isCompleteSettings(instance.settings)) {
         return shouldConnectOnReady(instance) ? connectPrinter(instance) : undefined;
       }
@@ -662,6 +699,7 @@ export function createBambuStatusAction(runtime) {
       closeDiscovery(instance);
       clearInstanceTimeout(instance, 'bambustatusReconnect');
       clearInstanceTimeout(instance, 'bambustatusRedraw');
+      clearInstanceTimeout(instance, 'bambustatusCompletionExpiry');
       flushSnapshot(instance);
     },
     render: renderBambuStatus,
@@ -672,6 +710,7 @@ export function createBambuStatusAction(runtime) {
     config,
     testing: {
       applyPrintReport,
+      completionExpiryDelay,
       deriveTimes,
       formatAge,
       formatDuration,
