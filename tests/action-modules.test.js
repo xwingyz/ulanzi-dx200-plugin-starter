@@ -20,16 +20,16 @@ test('business actions live outside the Lex Utility framework entry', () => {
   for (const symbol of ['renderLatencyIcon', 'renderPomodoroIcon', 'renderSpeedtestIcon']) {
     assert.doesNotMatch(app, new RegExp(`function ${symbol}\\b`));
   }
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus']) {
     assert.equal(fs.existsSync(path.join(pluginRoot, 'actions', `${key}.js`)), true);
   }
 });
 
 test('individual action modules do not import app.js or sibling actions', () => {
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus']) {
     const source = read(path.join(pluginRoot, 'actions', `${key}.js`));
     assert.doesNotMatch(source, /from\s+['"][^'"]*app\.js['"]/);
-    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus)\.js['"]/);
+    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus|systemstatus)\.js['"]/);
   }
 });
 
@@ -82,6 +82,11 @@ const RENDER_STATES = {
     { connectionState: 'ONLINE', liveStatus: 'PAUSED', model: 'P2S', progress: 43, elapsedSec: 3700, remainingSec: 1100 },
     { connectionState: 'ONLINE', liveStatus: 'FAILED', model: 'P2S', stage: '喷嘴温度异常' },
     { connectionState: 'ONLINE', liveStatus: 'FINISHED', model: 'P2S', progress: 100, elapsedSec: 5000, remainingSec: 0 },
+  ],
+  systemstatus: [
+    { platform: 'darwin', values: {}, lastSampleAt: 0, sampling: false },
+    { platform: 'darwin', values: { cpu: 42, ram: 68, download: 24_000_000 }, lastSampleAt: Date.now(), sampling: false },
+    { platform: 'win32', values: { cpu: 98, ram: 85, download: null }, lastSampleAt: Date.now(), sampleError: true, sampling: false },
   ],
 };
 

@@ -107,6 +107,22 @@
       "Devices": [],
       "Controllers": ["Keypad"],
       "SupportedInMultiActions": false
+    },
+    {
+      "Name": "System Status",
+      "Tooltip": "Show up to three live CPU, RAM, GPU, temperature, upload or download metrics.",
+      "Icon": "assets/icons/actionSystemstatus.svg",
+      "PropertyInspectorPath": "property-inspector/systemstatus.html",
+      "UUID": "com.ulanzi.ulanzistudio.lexutility.systemstatus",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionSystemstatus.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
     }
   ],
   "OS": [

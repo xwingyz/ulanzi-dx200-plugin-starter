@@ -4,6 +4,7 @@ import { createClaudeUsageAction } from './claudeusage.js';
 import { createLatencyAction } from './latency.js';
 import { createPomowaveAction } from './pomowave.js';
 import { createSpeedtestAction } from './speedtest.js';
+import { createSystemStatusAction } from './systemstatus.js';
 
 export function createActionModules(runtime) {
   return [
@@ -13,5 +14,6 @@ export function createActionModules(runtime) {
     createClaudeUsageAction(runtime),
     createChatGptUsageAction(runtime),
     createBambuStatusAction(runtime),
+    createSystemStatusAction(runtime),
   ];
 }

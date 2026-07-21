@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>System Status</title>
+    <style>
+      :root { color-scheme: dark; --bg: #07111f; --panel: #0c1c31; --text: #eff6ff; --muted: #93a8c4; --line: #1e3a5f; --accent: #38bdf8; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #050d18, #0b1b2f); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(12, 28, 49, 0.94); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 17px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      .field > label { color: var(--muted); }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      input, select { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 10px; background: #07111f; color: var(--text); padding: 9px 11px; }
+      input[type="hidden"] { display: none; }
+      .hint { margin-top: 3px; color: var(--muted); font-size: 12px; }
+      .metric-stack { display: grid; gap: 8px; }
+      .metric-row { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
+      .metric-row span { color: var(--muted); font-weight: 700; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #07111f; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .frame-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .frame-toggle { display: flex; gap: 7px; align-items: center; color: var(--muted); cursor: pointer; }
+      .frame-toggle input { width: auto; min-height: 0; }
+      .platform-note { border: 1px solid var(--line); border-radius: 10px; background: rgba(7, 17, 31, 0.8); padding: 10px 12px; color: var(--muted); font-size: 12px; }
+      .action-row { display: flex; gap: 10px; margin-top: 4px; }
+      .action-row button { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 800; cursor: pointer; }
+      .save-btn { background: var(--accent); color: #06243a; }
+      .ghost-btn { background: rgba(56, 189, 248, 0.12); color: var(--text); border: 1px solid var(--line); }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1>System Status</h1>
+        <p>选择 1～3 项本机指标。短按可立即刷新，所有数据只在本机读取。</p>
+        <form id="property-inspector">
+          <div class="field">
+            <label>显示指标（按顺序）</label>
+            <div class="metric-stack">
+              <label class="metric-row"><span>第一项</span><select id="metric1" name="metric1"></select></label>
+              <label class="metric-row"><span>第二项</span><select id="metric2" name="metric2"></select></label>
+              <label class="metric-row"><span>第三项</span><select id="metric3" name="metric3"></select></label>
+            </div>
+            <div class="hint">同一指标不能重复；第二、第三项可设为“不显示”。</div>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="pollSec">刷新间隔（秒）</label>
+              <input id="pollSec" name="pollSec" type="number" min="1" max="30" placeholder="由插件载入">
+            </div>
+            <div class="field">
+              <label for="frameSize">安全框</label>
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max"><span>最佳显示区</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="lhmUrl">Windows 高级传感器</label>
+            <input id="lhmUrl" name="lhmUrl" inputmode="url" placeholder="由插件载入">
+            <div class="hint">可选：LibreHardwareMonitor 本机 HTTP API。仅接受 localhost / 127.0.0.1。</div>
+          </div>
+          <div class="platform-note">
+            macOS 的 GPU 使用系统 I/O Registry；CPU 温度在系统允许读取时显示。Windows 可用 LibreHardwareMonitor 提供更完整的 GPU 与温度值。不可用的传感器会显示 N/A，不会伪装成 0。
+          </div>
+          <div class="field" style="margin-top: 12px">
+            <label for="theme">主题</label>
+            <input id="theme" name="theme" type="hidden">
+            <div class="theme-row" role="group" aria-label="Theme"></div>
+          </div>
+          <div class="field">
+            <label>边框</label>
+            <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox"><span>显示通用边框</span></label>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button">恢复默认</button>
+            <button class="save-btn" type="submit">保存</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" hidden>已保存</span>
+            <span id="feedback-reset" hidden>已恢复默认</span>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./systemstatus.js"></script>
+  </body>
+</html>

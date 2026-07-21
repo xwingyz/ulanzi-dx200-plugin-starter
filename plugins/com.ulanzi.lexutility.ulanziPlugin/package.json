@@ -9,6 +9,10 @@
   },
   "dependencies": {
     "mqtt": "^5.15.2",
+    "systeminformation": "^5.33.0",
     "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "macos-temperature-sensor": "^2.0.0"
   }
 }

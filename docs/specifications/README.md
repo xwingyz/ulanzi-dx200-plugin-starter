@@ -1,7 +1,7 @@
 # Lex Utility 规格文档
 
 状态：持续维护  
-最后代码核对：2026-07-19
+最后代码核对：2026-07-21
 适用插件：`plugins/com.ulanzi.lexutility.ulanziPlugin/`
 
 本目录统一保存 Lex Utility 当前基座和生产 action 的功能、技术与维护规范。它们是**可更新的实现规格**，用于描述当前代码和后续变更的同步要求；仓库长期硬约束仍以 [`../development-rules.md`](../development-rules.md) 为唯一权威。
@@ -15,6 +15,7 @@
 | [`actions/pomowave.md`](actions/pomowave.md) | PomoWave：阶段状态机、无漂移计时、提示音、交互与显示 |
 | [`actions/speedtest.md`](actions/speedtest.md) | Network Speed：Ookla CLI、节点发现、调度、排队、历史与显示 |
 | [`actions/bambustatus.md`](actions/bambustatus.md) | Bambu P2S Status：局域网发现、MQTT 状态、完成锁存与显示 |
+| [`actions/systemstatus.md`](actions/systemstatus.md) | System Status：CPU/RAM/GPU/温度/网络实时状态与跨平台降级 |
 
 ## 文档与规则的边界
 
