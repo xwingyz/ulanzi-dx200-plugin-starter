@@ -275,13 +275,17 @@ export function createClaudeUsageAction(runtime) {
   // 行几何与排版走共享的 renderMeterRow，保证与 chatgptusage 并排时观感必然一致；
   // 这里只决定领域语义部分：颜色由 severity 映射而来。
   function renderDataRow(row, geometry, theme, options) {
+    // 倒计时以 options.nowMs 为参照钟，而不是各自现调 Date.now()——render 内动画
+    // 与倒计时共用同一时刻，测试也能注入固定 now 消除取整漂移（见 development-rules
+    // §4「测试必须确定性」）。
+    const tail = formatCountdown(row.resetsAt, options.nowMs);
     const base = renderMeterRow(geometry, theme, {
       percent: row.percent,
       color: severityColor(row.severity, theme, options.severityColors),
       label: row.label,
       value: `${row.percent}%`,
-      tail: formatCountdown(row.resetsAt),
-      tailColor: countdownColor(formatCountdown(row.resetsAt), theme),
+      tail,
+      tailColor: countdownColor(tail, theme),
       showBar: options.showBar,
     });
     // 流光叠在填充之上：id 用行的 y 派生，保证多行之间不撞名。
@@ -464,7 +468,7 @@ export function createClaudeUsageAction(runtime) {
       + `<rect x="${(ex - 1.5).toFixed(1)}" y="${y}" width="3" height="${height}" fill="url(#${edgeId})" opacity="${pulse.toFixed(3)}"/>`;
   }
 
-  function renderClaudeUsageIcon(instance) {
+  function renderClaudeUsageIcon(instance, nowOverride) {
     const theme = themeFor(instance.settings);
     const frame = frameFor(instance.settings);
     const background = renderThemeBackdrop(theme, theme.accent, frame);
@@ -477,7 +481,7 @@ export function createClaudeUsageAction(runtime) {
     const severity = hasData ? worstSeverity(rows) : 'normal';
 
     const animate = animEnabled(instance);
-    const nowMs = Date.now();
+    const nowMs = Number.isFinite(nowOverride) ? nowOverride : Date.now();
     const scope = animScope(instance);
     const ambiance = animate ? renderAmbiance(theme, scope, nowMs) : '';
     // 深底用近白暖金作高光；浅底（sand）用主题彩色，避免白光扫过深字反而糊掉。
@@ -822,7 +826,8 @@ export function createClaudeUsageAction(runtime) {
       clearInstanceTimeout(instance, 'claudeusageAnim');
       flushState(instance);
     },
-    render: (instance) => renderClaudeUsageIcon(instance),
+    // 第二参 { now } 仅供测试注入固定时钟；框架调用只传 instance，走 Date.now()。
+    render: (instance, options) => renderClaudeUsageIcon(instance, options && options.now),
   };
 
   return {

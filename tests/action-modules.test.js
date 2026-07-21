@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import { __testing as lexTesting } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
 import { __testing as templateTesting } from '../template/com.example.hello.ulanziPlugin/plugin/app.js';
+import { createActionModules as lexActionModules } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/actions/index.js';
+import { createActionModules as templateActionModules } from '../template/com.example.hello.ulanziPlugin/plugin/actions/index.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pluginRoot = path.join(root, 'plugins/com.ulanzi.lexutility.ulanziPlugin/plugin');
@@ -141,3 +143,35 @@ test('template demonstrates one module per action', () => {
     assert.equal(fs.existsSync(path.join(templateRoot, 'actions', `${key}.js`)), true);
   }
 });
+
+// ACTION_TESTING 用 Object.assign 合并所有 action 的 testing，同名键后者静默
+// 覆盖前者——被覆盖那方的测试仍会通过却测的是别人的函数。这条 guard 把「静默」
+// 变成「红线」：任何跨 action 的 testing 键重名都直接报错。
+// 从每个模块各自的 testing 取键（合并后的 __testing 已丢失重名信息），故直接
+// 调 createActionModules，用万能 Proxy 桩喂 runtime（工厂只解构、不在构造期调用）。
+for (const [name, createModules] of [
+  ['plugin', lexActionModules],
+  ['template', templateActionModules],
+]) {
+  test(`[${name}] action testing exports never collide across actions`, () => {
+    const stub = new Proxy(function stubRuntime() { return stub; }, { get: () => stub });
+    const modules = createModules(stub);
+    const owners = new Map();
+    for (const module of modules) {
+      for (const key of Object.keys(module.testing || {})) {
+        if (!owners.has(key)) {
+          owners.set(key, []);
+        }
+        owners.get(key).push(module.key);
+      }
+    }
+    const collisions = [...owners].filter(([, actions]) => actions.length > 1);
+    assert.deepEqual(
+      collisions,
+      [],
+      `testing export name collision — 给这些符号加 action 前缀：${collisions
+        .map(([key, actions]) => `${key}(${actions.join(',')})`)
+        .join('; ')}`,
+    );
+  });
+}

@@ -318,15 +318,16 @@ test('the request carries oauth headers and never a request body', async () => {
 });
 
 test('countdown colour brightens as the reset gets closer, and never borrows alert colours', () => {
-  const decode = (i) => Buffer.from(config.render(i).split(',')[1], 'base64').toString('utf8');
-  const now = Date.now();
+  // 注入固定时钟：resetsAt 与 render 的参照钟共用同一个 now，取整漂移彻底消失，
+  // 余量可以收回到干净的整数边界（见 development-rules §4「测试必须确定性」）。
+  const now = 1_700_000_000_000;
+  const decode = (i) => Buffer.from(config.render(i, { now }).split(',')[1], 'base64').toString('utf8');
   const at = (label, percent, severity, hours) => ({
     label, percent, severity, resetsAt: now + hours * 3600_000,
   });
   const svg = decode(instance({
-    fiveHour: at('5H', 92, 'critical', 0.75),  // 45m（留足余量，避免取整随执行耗时漂移）
-    weekly: at('W', 56, 'normal', 5.05),       // 5h（同样留足余量：整 5h 卡在 300 分钟边界上，
-    //                                            render 耗时哪怕跨一个毫秒就会掉到 299 分→4h）
+    fiveHour: at('5H', 92, 'critical', 0.6),   // 36m
+    weekly: at('W', 56, 'normal', 5),          // 5h
     scoped: at('WF', 40, 'normal', 141),       // 5d
   }));
 
@@ -336,7 +337,7 @@ test('countdown colour brightens as the reset gets closer, and never borrows ale
 
   const ember = { text: '#fff7ed', muted: '#fdba74', low: '#9a3412' };
   assert.deepEqual(tails, [
-    ['45m', ember.text],   // 最近 → 最亮
+    ['36m', ember.text],   // 最近 → 最亮
     ['5h', ember.muted],
     ['5d', ember.low],     // 最远 → 最暗
   ]);

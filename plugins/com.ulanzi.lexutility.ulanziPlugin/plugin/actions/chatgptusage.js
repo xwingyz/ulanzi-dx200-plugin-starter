@@ -387,7 +387,9 @@ export function createChatGptUsageAction(runtime) {
     }
   }
 
-  function renderChatGptUsageIcon(instance) {
+  function renderChatGptUsageIcon(instance, nowOverride) {
+    // 倒计时参照钟可注入（测试注固定 now 消除取整漂移）；框架调用走 Date.now()。
+    const nowMs = Number.isFinite(nowOverride) ? nowOverride : Date.now();
     const theme = themeFor(instance.settings);
     const frame = frameFor(instance.settings);
     const background = renderThemeBackdrop(theme, theme.accent, frame);
@@ -448,8 +450,8 @@ export function createChatGptUsageAction(runtime) {
           color: severityColor(band.severity, theme, severityColors),
           label: band.label,
           value: `${band.percent}%`,
-          tail: formatCountdown(band.resetsAt),
-          tailColor: countdownColor(formatCountdown(band.resetsAt), theme),
+          tail: formatCountdown(band.resetsAt, nowMs),
+          tailColor: countdownColor(formatCountdown(band.resetsAt, nowMs), theme),
           showBar,
         });
       }).join('');
@@ -739,7 +741,8 @@ export function createChatGptUsageAction(runtime) {
       clearInstanceTimeout(instance, 'chatgptusageRedraw');
       flushState(instance);
     },
-    render: (instance) => renderChatGptUsageIcon(instance),
+    // 第二参 { now } 仅供测试注入固定时钟；框架调用只传 instance。
+    render: (instance, options) => renderChatGptUsageIcon(instance, options && options.now),
   };
 
   return {
