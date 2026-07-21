@@ -76,6 +76,16 @@
 - 通用字段（`title` / `subtitle` / `theme` / `frameSize` / `showFrame`）由框架归一化；action 私有字段由该 action 的可选 `normalizeSettings(settings, defaults)` 返回，框架不得持有 action 私有枚举或字段分支。
 - 同一个 action 的运行态不跨 context 共享可变状态，统一放 `INSTANCES`。
 
+### Action 与测试的代码隔离（强制项）
+
+action 之间的隔离不止于业务代码，测试同样要隔离。以下每条都对应过真实回归：
+
+- **每个 action 一份测试文件**：`tests/<key>-action.test.js`，只经 `ACTION_CONFIGS.<key>` 与该 action 自己 `testing` 导出的符号访问被测对象，不去碰兄弟 action 的 config 或 testing。
+- **`testing` 导出名必须防撞**：所有 action 的 `testing` 由 `ACTION_TESTING = Object.freeze(Object.assign({}, ...))` 合并成一个对象，**同名键后者静默覆盖前者，没有任何报错**。后果极隐蔽——被覆盖那一方的测试仍会通过，但测的已经是别人的函数。因此凡是可能重名的通用符号（`applyResult` / `visibleRows` / `hydrateState` / `parseUsage` / `severityFromPercent` 等），导出时必须加 action 前缀（如 `chatgptApplyResult`）。新增 action 时先 grep 既有 `testing` 键名。
+- **action 测试不得硬编码共享原语的渲染细节**：字号、几何、`renderMeterRow` / `formatCountdown` / `frameContent` 产出的具体数值属于共享层，共享层一改，所有硬编码它的 action 测试都会连带变红。断言应针对结构（元素个数、标签存在性、行数），而不是共享层的确切像素/字号。确有必要 pin 共享输出时，在断言处注明"随共享层一起变，非本 action 回归"，改共享原语时一并更新，不要当成 bug 排查。
+- **测试必须确定性，不依赖实时钟**：`render` 或业务逻辑依赖 `Date.now()` 时，断言不能落在整数分钟等取整边界上——全量跑比单跑慢，执行耗时会让 `36m` 掉成 `35m`。**「单独跑绿、全量跑红」优先怀疑共享状态污染或实时钟依赖，而不是业务逻辑**。理想做法是给依赖时间的函数支持注入时钟（`render(instance, { now })`），使测试可控。
+- **测试落盘必须隔离到仓库外**：靠 `npm test` 经 `--import ./tests/setup.mjs` 在模块加载前注入 `ULANZI_PLUGIN_DATA_DIR`（按 `PLUGIN_UUID` 分子目录，业务插件与 template 同进程 import 不互撞）。**不要直接 `node --test`**——路径常量是 import 期求值的，晚了就写进仓库 `data/`。`tests/test-isolation.test.js` 会在隔离失效时报错。
+
 ### 可选生命周期钩子与框架边界
 
 action 可按需声明以下可选能力，未声明时框架直接跳过：
@@ -205,7 +215,8 @@ settings 与运行态是两套东西，不得混用同一个存储：
 4. 只在 `plugin/actions/index.js` 导入并加入 `createActionModules(runtime)`；`ACTION_CONFIGS`、`ACTIONS`、`ACTION_KEY_BY_UUID` 由框架自动生成，不手写第二套映射。
 5. 新建 `property-inspector/<action>.html` 和 `<action>.js`，优先从最接近的现有 action 复制。
 6. 补 `assets/icons/action<Something>.svg`。
-7. 用 `npm run dev:desktop -- --plugin <plugin> --mode sync|rebind|restart` 验证。
+7. 新建 `tests/<key>-action.test.js`；`testing` 导出的通用符号加 action 前缀防撞（见 §4「Action 与测试的代码隔离」）。
+8. 用 `npm run dev:desktop -- --plugin <plugin> --mode sync|rebind|restart` 验证。
 
 ## 9. 项目结构演进规则
 

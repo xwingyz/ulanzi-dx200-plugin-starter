@@ -89,6 +89,8 @@ Ulanzi Studio :3906 / Simulator :39069
 
 `actions/index.js` 是唯一业务注册点。`app.js` 从模块列表生成 `ACTION_CONFIGS`、完整 UUID 映射和测试导出，不维护第二套手写 action 表。
 
+各 action 的 `testing` 由 `ACTION_TESTING = Object.freeze(Object.assign({}, ...ACTION_MODULES.map(m => m.testing)))` 合并成单一对象：**同名键后者静默覆盖前者**。因此可能重名的通用符号导出时必须加 action 前缀。测试隔离的完整要求见 `development-rules.md` §4「Action 与测试的代码隔离」。
+
 模块边界：
 
 - action 不得导入 `app.js`、兄弟 action、桥接对象或持久化路径。
@@ -96,6 +98,7 @@ Ulanzi Studio :3906 / Simulator :39069
 - `defaults` 只保存可序列化设置；`createState` 只创建当前 context 的运行态。
 - `render(instance)` 必须保持纯渲染语义：读取已归一化的 `settings + state` 并返回 data URL，不做 I/O 或持久化。
 - action 私有设置由自身 `normalizeSettings` 处理；框架只归一化共享字段。
+- action 测试只碰自己的 `config` 与前缀化的 `testing` 符号，不硬编码共享原语（`renderMeterRow` / `formatCountdown` 等）的具体字号与几何。
 
 ## 4. 实例与事件生命周期
 
