@@ -275,11 +275,10 @@ export function createClaudeUsageAction(runtime) {
   // 行几何与排版走共享的 renderMeterRow，保证与 chatgptusage 并排时观感必然一致；
   // 这里只决定领域语义部分：颜色由 severity 映射而来。
   function renderDataRow(row, geometry, theme, options) {
-    // 倒计时以 options.nowMs 为参照钟，而不是各自现调 Date.now()——render 内动画
-    // 与倒计时共用同一时刻，测试也能注入固定 now 消除取整漂移（见 development-rules
-    // §4「测试必须确定性」）。
+    // 倒计时以 options.nowMs 为参照钟，而不是各自现调 Date.now()——同一次 render 的各行
+    // 共用同一时刻，测试也能注入固定 now 消除取整漂移（见 development-rules §4「测试必须确定性」）。
     const tail = formatCountdown(row.resetsAt, options.nowMs);
-    const base = renderMeterRow(geometry, theme, {
+    return renderMeterRow(geometry, theme, {
       percent: row.percent,
       color: severityColor(row.severity, theme, options.severityColors),
       label: row.label,
@@ -288,11 +287,6 @@ export function createClaudeUsageAction(runtime) {
       tailColor: countdownColor(tail, theme),
       showBar: options.showBar,
     });
-    // 流光叠在填充之上：id 用行的 y 派生，保证多行之间不撞名。
-    const gloss = options.animate && options.showBar
-      ? renderBarGloss(geometry, row.percent, `${options.scope}-${Math.round(geometry.y)}`, options.nowMs)
-      : '';
-    return base + gloss;
   }
 
   const ERROR_COPY = {
@@ -329,145 +323,6 @@ export function createClaudeUsageAction(runtime) {
     }
   }
 
-  // ---------------------------------------------------------------- 键面动效
-  //
-  // 宿主把 SVG 当静态位图渲染：SMIL / CSS 自动画不生效，且开发规则明令「不得依赖
-  // 宿主可能忽略的 filter」。因此这里的动效恪守两条边界：
-  //   1) 只用实心图形 + 线性/径向渐变 + 透明度作画。软光晕靠径向渐变的透明停止点
-  //      伪造，绝不使用 feGaussianBlur；软边由渐变自身产生，不越界不硬切。
-  //   2) 相位由 Date.now() 驱动，画面靠 scheduleAnim 逐帧重推图动起来（见运行态）。
-  // 所有渐变 id 都带实例上下文后缀：宿主可能把多个键内联进同一 DOM，同名 id 会串色。
-
-  const ANIM_INTERVAL_MS = 120; // ≈8fps。慢光晕/波纹/流光在此帧率已顺滑，功耗可控。
-  const TAU = Math.PI * 2;
-
-  function animEnabled(instance) {
-    return normalizeBooleanString(instance.settings.animate, 'true') === 'true';
-  }
-
-  // 上下文可能含 :: / 空格等非法 id 字符，压成 [a-z0-9]。
-  function animScope(instance) {
-    return String(instance.context || 'x').replace(/[^a-z0-9]/gi, '') || 'x';
-  }
-
-  // 归一化相位 0..1；phase 用来错开多条同源动画。
-  function wave(nowMs, periodMs, phase = 0) {
-    return ((((nowMs / periodMs) + phase) % 1) + 1) % 1;
-  }
-
-  // 相对亮度：用来判断主题深浅，决定鎏光高光该偏白还是偏彩。
-  function hexLum(hex) {
-    const n = Number.parseInt(String(hex).slice(1), 16);
-    if (!Number.isFinite(n)) return 0.5;
-    const r = ((n >> 16) & 0xff) / 255;
-    const g = ((n >> 8) & 0xff) / 255;
-    const b = (n & 0xff) / 255;
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  }
-
-  // 朝白色插值，把主题色提亮成流光高光。
-  function mixWhite(hex, amt) {
-    const n = Number.parseInt(String(hex).slice(1), 16);
-    if (!Number.isFinite(n)) return hex;
-    const ch = (sh) => {
-      const v = (n >> sh) & 0xff;
-      return Math.round(v + (255 - v) * amt);
-    };
-    return `#${(((ch(16) << 16) | (ch(8) << 8) | ch(0)) >>> 0).toString(16).padStart(6, '0')}`;
-  }
-
-  // 背景光晕 + 品牌脉冲波纹：整层画在内容坐标系（0..256），随安全框一起缩放。
-  // 光斑沿慢正弦缓缓漂移、明灭呼吸；波纹从标记处一圈圈扩散、扩散时变淡变细。
-  function renderAmbiance(theme, scope, nowMs) {
-    const blobs = [
-      { color: BRAND_CLAUDE, bx: 78, by: 150, ax: 26, ay: 18, r: 116, period: 17_000, phase: 0.0, op: 0.20 },
-      { color: theme.accent, bx: 188, by: 96, ax: 22, ay: 24, r: 104, period: 21_000, phase: 0.37, op: 0.16 },
-      { color: theme.ok, bx: 150, by: 208, ax: 20, ay: 14, r: 92, period: 27_000, phase: 0.61, op: 0.10 },
-    ];
-    let defs = '';
-    let shapes = '';
-    blobs.forEach((b, i) => {
-      const id = `au${i}-${scope}`;
-      const a = wave(nowMs, b.period, b.phase) * TAU;
-      const a2 = wave(nowMs, b.period * 1.3, b.phase) * TAU;
-      const cx = b.bx + Math.cos(a) * b.ax;
-      const cy = b.by + Math.sin(a * 0.9) * b.ay;
-      const breathe = b.op * (0.78 + 0.22 * Math.sin(a2)); // 整体透明度呼吸
-      defs += `<radialGradient id="${id}" cx="50%" cy="50%" r="50%">`
-        + `<stop offset="0%" stop-color="${b.color}" stop-opacity="${breathe.toFixed(3)}"/>`
-        + `<stop offset="60%" stop-color="${b.color}" stop-opacity="${(breathe * 0.35).toFixed(3)}"/>`
-        + `<stop offset="100%" stop-color="${b.color}" stop-opacity="0"/>`
-        + '</radialGradient>';
-      shapes += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${b.r}" fill="url(#${id})"/>`;
-    });
-    // 品牌脉冲：从标记中心缓缓扩散的两道细环，低透明度、走在内容之后。
-    const originX = 63;
-    const originY = 60;
-    const ringCount = 2;
-    let ripple = '';
-    for (let k = 0; k < ringCount; k += 1) {
-      const p = wave(nowMs, 5200, k / ringCount);
-      const r = 10 + p * 62;
-      const op = (1 - p) * 0.20;
-      const sw = (1 - p) * 2.0 + 0.4;
-      ripple += `<circle cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" fill="none" `
-        + `stroke="${BRAND_CLAUDE}" stroke-width="${sw.toFixed(2)}" opacity="${op.toFixed(3)}"/>`;
-    }
-    return `<defs>${defs}</defs>${shapes}${ripple}`;
-  }
-
-  // 鎏光：给标题文字换成一条横向扫过的高光渐变填充。不新增 text 元素（键面 text
-  // 数量被测试锁定），仅改 fill。亮带中心从 -0.2 扫到 1.2，让亮带完整进出字面；
-  // 各停止点 clamp 到 [0,1] 后天然单调递增，符合 SVG 渐变要求。
-  function shimmerFill(scope, baseColor, highlight, nowMs) {
-    const id = `shine-${scope}`;
-    const c = -0.2 + wave(nowMs, 3600) * 1.4;
-    const clamp = (v) => Math.max(0, Math.min(1, v));
-    const left = clamp(c - 0.16);
-    const mid = clamp(c);
-    const right = clamp(c + 0.16);
-    const def = `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">`
-      + `<stop offset="0" stop-color="${baseColor}"/>`
-      + `<stop offset="${left.toFixed(3)}" stop-color="${baseColor}"/>`
-      + `<stop offset="${mid.toFixed(3)}" stop-color="${highlight}"/>`
-      + `<stop offset="${right.toFixed(3)}" stop-color="${baseColor}"/>`
-      + '<stop offset="1" stop-color="' + baseColor + '"/>'
-      + '</linearGradient>';
-    return { id, def };
-  }
-
-  // 进度条不再平淡：填充段上叠一条流光（objectBoundingBox 映射到填充矩形内，不外溢），
-  // 再在进度到达处点一束呼吸亮缘。用中性亮色，读感不依赖条本身的语义色。
-  function renderBarGloss(geometry, percent, scope, nowMs) {
-    if (percent == null) return '';
-    const { x, y, width, height } = geometry;
-    const pct = Math.max(0, Math.min(100, percent));
-    const filled = width * pct / 100;
-    if (filled < 3) return '';
-    const glossId = `gloss-${scope}`;
-    const edgeId = `edge-${scope}`;
-    const clamp = (v) => Math.max(0, Math.min(1, v));
-    const c = -0.15 + wave(nowMs, 2800) * 1.3; // 亮带在填充宽度内的相对位置
-    const gloss = `<linearGradient id="${glossId}" x1="0" y1="0" x2="1" y2="0">`
-      + '<stop offset="0" stop-color="#ffffff" stop-opacity="0"/>'
-      + `<stop offset="${clamp(c - 0.12).toFixed(3)}" stop-color="#ffffff" stop-opacity="0"/>`
-      + `<stop offset="${clamp(c).toFixed(3)}" stop-color="#ffffff" stop-opacity="0.32"/>`
-      + `<stop offset="${clamp(c + 0.12).toFixed(3)}" stop-color="#ffffff" stop-opacity="0"/>`
-      + '<stop offset="1" stop-color="#ffffff" stop-opacity="0"/>'
-      + '</linearGradient>';
-    // 竖向亮缘：中间亮、上下淡出，呼吸明灭。
-    const edge = `<linearGradient id="${edgeId}" x1="0" y1="0" x2="0" y2="1">`
-      + '<stop offset="0" stop-color="#ffffff" stop-opacity="0"/>'
-      + '<stop offset="0.5" stop-color="#ffffff" stop-opacity="0.85"/>'
-      + '<stop offset="1" stop-color="#ffffff" stop-opacity="0"/>'
-      + '</linearGradient>';
-    const pulse = 0.18 + 0.24 * (0.5 + 0.5 * Math.sin(wave(nowMs, 1600) * TAU));
-    const ex = x + filled;
-    return `<defs>${gloss}${edge}</defs>`
-      + `<rect x="${x}" y="${y}" width="${filled.toFixed(1)}" height="${height}" rx="3" fill="url(#${glossId})"/>`
-      + `<rect x="${(ex - 1.5).toFixed(1)}" y="${y}" width="3" height="${height}" fill="url(#${edgeId})" opacity="${pulse.toFixed(3)}"/>`;
-  }
-
   function renderClaudeUsageIcon(instance, nowOverride) {
     const theme = themeFor(instance.settings);
     const frame = frameFor(instance.settings);
@@ -480,21 +335,8 @@ export function createClaudeUsageAction(runtime) {
 
     const severity = hasData ? worstSeverity(rows) : 'normal';
 
-    const animate = animEnabled(instance);
+    // 倒计时以此刻为参照钟；测试可通过 nowOverride 注入固定时间消除取整漂移。
     const nowMs = Number.isFinite(nowOverride) ? nowOverride : Date.now();
-    const scope = animScope(instance);
-    const ambiance = animate ? renderAmbiance(theme, scope, nowMs) : '';
-    // 深底用近白暖金作高光；浅底（sand）用主题彩色，避免白光扫过深字反而糊掉。
-    const shine = animate
-      ? shimmerFill(
-        scope,
-        background.text,
-        hexLum(theme.canvas) < 0.5 ? mixWhite(theme.accent, 0.55) : theme.accent,
-        nowMs,
-      )
-      : null;
-    const headerFill = shine ? `url(#${shine.id})` : background.text;
-    const shineDef = shine ? `<defs>${shine.def}</defs>` : '';
 
     // 设计箱 40..216。行1 是宠物 + 字样，地平线兼作分隔线；剩余高度按行数等分。
     // 宠物按 normal 帧的 8 行占满整个行1 高度——它是身份标识，缩得太小就只剩
@@ -518,7 +360,7 @@ export function createClaudeUsageAction(runtime) {
         row,
         { x: boxX, y: bodyTop + index * (rowHeight + gap), width: boxWidth, height: rowHeight },
         theme,
-        { showBar, severityColors, animate, scope, nowMs },
+        { showBar, severityColors, nowMs },
       )).join('');
     } else {
       const copy = ERROR_COPY[state] || ERROR_COPY.PENDING;
@@ -549,10 +391,8 @@ export function createClaudeUsageAction(runtime) {
       ${background.outer}
       ${
         frameContent(frame, `
-          ${shineDef}
-          ${ambiance}
           ${mark}
-          <text x="${labelX.toFixed(1)}" y="${headerBaseline - 10}" fill="${headerFill}" font-size="25" font-weight="800" font-family="Arial, Helvetica, sans-serif">Claude</text>
+          <text x="${labelX.toFixed(1)}" y="${headerBaseline - 10}" fill="${background.text}" font-size="25" font-weight="800" font-family="Arial, Helvetica, sans-serif">Claude</text>
           ${groundLine}
           ${staleBadge}
           ${body}
@@ -625,25 +465,6 @@ export function createClaudeUsageAction(runtime) {
       renderInstance(instance);
       scheduleRedraw(instance);
     }, redrawIntervalMs(instance));
-  }
-
-  // 动效帧循环：≈8fps 重推图让光晕/波纹/流光动起来，顺带覆盖倒计时刷新。
-  function scheduleAnim(instance) {
-    setInstanceTimeout(instance, 'claudeusageAnim', () => {
-      renderInstance(instance);
-      scheduleAnim(instance);
-    }, ANIM_INTERVAL_MS);
-  }
-
-  // 开了动效走高频动画帧；关了退回低频重绘（省功耗）。两个时钟互斥，切换时先清干净。
-  function startClock(instance) {
-    clearInstanceTimeout(instance, 'claudeusageAnim');
-    clearInstanceTimeout(instance, 'claudeusageRedraw');
-    if (animEnabled(instance)) {
-      scheduleAnim(instance);
-    } else {
-      scheduleRedraw(instance);
-    }
   }
 
   function isInstanceCurrent(instance, requestId, instances = INSTANCES) {
@@ -769,7 +590,6 @@ export function createClaudeUsageAction(runtime) {
       showScoped: 'true',
       showBarBackground: 'true',
       severityColors: 'true',
-      animate: 'true',
       usageUrl: 'https://claude.ai/settings/usage',
       theme: 'ember',
       frameSize: 'optimal',
@@ -783,7 +603,6 @@ export function createClaudeUsageAction(runtime) {
       showScoped: normalizeBooleanString(settings.showScoped, defaults.showScoped),
       showBarBackground: normalizeBooleanString(settings.showBarBackground, defaults.showBarBackground),
       severityColors: normalizeBooleanString(settings.severityColors, defaults.severityColors),
-      animate: normalizeBooleanString(settings.animate, defaults.animate),
       usageUrl: normalizeUrl(settings.usageUrl, defaults.usageUrl),
     }),
     createState: (instance) => ({
@@ -799,7 +618,7 @@ export function createClaudeUsageAction(runtime) {
         instance.displayState = 'UNSUPPORTED';
         return undefined;
       }
-      startClock(instance);
+      scheduleRedraw(instance);
       return runFetch(instance);
     },
     onSettingsChanged: (instance, previousSettings) => {
@@ -807,10 +626,9 @@ export function createClaudeUsageAction(runtime) {
         clearInstanceTimeout(instance, 'claudeusagePoll');
         schedulePoll(instance);
       }
-      // 动效开关或重绘间隔变了都重起时钟：startClock 内部会按最新设置选对分支。
-      if (previousSettings.animate !== instance.settings.animate
-        || previousSettings.redrawSec !== instance.settings.redrawSec) {
-        startClock(instance);
+      if (previousSettings.redrawSec !== instance.settings.redrawSec) {
+        clearInstanceTimeout(instance, 'claudeusageRedraw');
+        scheduleRedraw(instance);
       }
     },
     onParamFromPlugin: (instance, payload) => {
@@ -823,7 +641,6 @@ export function createClaudeUsageAction(runtime) {
       instance.requestId += 1;
       clearInstanceTimeout(instance, 'claudeusagePoll');
       clearInstanceTimeout(instance, 'claudeusageRedraw');
-      clearInstanceTimeout(instance, 'claudeusageAnim');
       flushState(instance);
     },
     // 第二参 { now } 仅供测试注入固定时钟；框架调用只传 instance，走 Date.now()。
