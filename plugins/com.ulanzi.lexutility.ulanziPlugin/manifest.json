@@ -109,6 +109,22 @@
       "SupportedInMultiActions": false
     },
     {
+      "Name": "Synology NAS Status",
+      "Tooltip": "Monitor one Synology NAS: online state, system temperature and volume usage.",
+      "Icon": "assets/icons/actionNasstatus.svg",
+      "PropertyInspectorPath": "property-inspector/nasstatus.html",
+      "UUID": "com.ulanzi.ulanzistudio.lexutility.nasstatus",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionNasstatus.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
       "Name": "System Status",
       "Tooltip": "Show up to three live CPU, RAM, GPU, temperature, upload or download metrics.",
       "Icon": "assets/icons/actionSystemstatus.svg",

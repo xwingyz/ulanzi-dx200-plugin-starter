@@ -20,16 +20,16 @@ test('business actions live outside the Lex Utility framework entry', () => {
   for (const symbol of ['renderLatencyIcon', 'renderPomodoroIcon', 'renderSpeedtestIcon']) {
     assert.doesNotMatch(app, new RegExp(`function ${symbol}\\b`));
   }
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus', 'healthbreak']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'nasstatus', 'systemstatus', 'healthbreak']) {
     assert.equal(fs.existsSync(path.join(pluginRoot, 'actions', `${key}.js`)), true);
   }
 });
 
 test('individual action modules do not import app.js or sibling actions', () => {
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus', 'healthbreak']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'nasstatus', 'systemstatus', 'healthbreak']) {
     const source = read(path.join(pluginRoot, 'actions', `${key}.js`));
     assert.doesNotMatch(source, /from\s+['"][^'"]*app\.js['"]/);
-    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus|systemstatus|healthbreak)\.js['"]/);
+    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus|nasstatus|systemstatus|healthbreak)\.js['"]/);
   }
 });
 
@@ -82,6 +82,16 @@ const RENDER_STATES = {
     { connectionState: 'ONLINE', liveStatus: 'PAUSED', model: 'P2S', progress: 43, elapsedSec: 3700, remainingSec: 1100 },
     { connectionState: 'ONLINE', liveStatus: 'FAILED', model: 'P2S', stage: '喷嘴温度异常' },
     { connectionState: 'ONLINE', liveStatus: 'FINISHED', model: 'P2S', progress: 100, elapsedSec: 5000, remainingSec: 0 },
+  ],
+  nasstatus: [
+    { connectionState: 'CONFIG_REQUIRED' },
+    { connectionState: 'PENDING' },
+    { connectionState: 'OFFLINE', hostname: 'DiskStation', lastSeenAt: Date.now() - 70_000 },
+    { connectionState: 'ERROR', errorKind: 'AUTH' },
+    { connectionState: 'ERROR', errorKind: 'PERMISSION' },
+    { connectionState: 'ONLINE', hostname: 'DiskStation', temperature: 42, tempHistory: [40, 42, 44, 43], volumes: [{ id: 'volume_1', totalBytes: 2 ** 40, usedBytes: 2 ** 39 }] },
+    // 刷新反馈 + 高温告警 + 无可用卷的组合分支（单点历史走圆点分支）
+    { connectionState: 'ONLINE', refreshing: true, hostname: 'DiskStation', temperature: 61, temperatureWarn: true, tempHistory: [61], volumes: [] },
   ],
   systemstatus: [
     { platform: 'darwin', values: {}, lastSampleAt: 0, sampling: false },

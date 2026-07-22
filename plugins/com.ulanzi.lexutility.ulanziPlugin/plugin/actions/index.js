@@ -3,6 +3,7 @@ import { createBambuStatusAction } from './bambustatus.js';
 import { createClaudeUsageAction } from './claudeusage.js';
 import { createHealthBreakAction } from './healthbreak.js';
 import { createLatencyAction } from './latency.js';
+import { createNasStatusAction } from './nasstatus.js';
 import { createPomowaveAction } from './pomowave.js';
 import { createSpeedtestAction } from './speedtest.js';
 import { createSystemStatusAction } from './systemstatus.js';
@@ -15,6 +16,7 @@ export function createActionModules(runtime) {
     createClaudeUsageAction(runtime),
     createChatGptUsageAction(runtime),
     createBambuStatusAction(runtime),
+    createNasStatusAction(runtime),
     createSystemStatusAction(runtime),
     createHealthBreakAction(runtime),
   ];

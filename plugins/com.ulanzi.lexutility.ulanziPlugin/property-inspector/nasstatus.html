@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>群晖 NAS 状态</title>
+    <style>
+      :root { color-scheme: dark; --bg: #07111f; --panel: #111c30; --text: #e2e8f0; --muted: #94a3b8; --line: #23314f; --accent: #14b8a6; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #07101d, #111827); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(17,28,48,.94); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      .brand svg { width: 84px; height: 24px; fill: var(--text); }
+      h1 { margin: 0; font-size: 16px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      label { color: var(--muted); }
+      input, select { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; color: var(--text); padding: 10px 12px; }
+      input[type="hidden"] { display: none; }
+      .field-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
+      .hint, .probe-status { color: var(--muted); font-size: 12px; }
+      .probe-status { min-height: 18px; margin: -4px 0 12px; }
+      .probe-status.ok { color: #34d399; }
+      .probe-status.warn { color: #fbbf24; }
+      .https-toggle { display: flex; gap: 6px; align-items: center; white-space: nowrap; cursor: pointer; color: var(--muted); }
+      .https-toggle input { width: auto; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #0b1220; padding: 0; cursor: pointer; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .frame-row { display: flex; gap: 10px; align-items: center; }
+      .frame-toggle { display: flex; gap: 6px; align-items: center; white-space: nowrap; cursor: pointer; }
+      .frame-toggle input { width: auto; }
+      .action-row { display: flex; gap: 10px; margin-top: 8px; }
+      button { border-radius: 10px; padding: 10px 12px; font-weight: 700; cursor: pointer; }
+      .action-row button { flex: 1; }
+      .save-btn { border: 0; background: var(--accent); color: #042f2e; }
+      .ghost-btn { border: 1px solid var(--line); background: rgba(148,163,184,.12); color: var(--text); }
+      .probe-btn { width: 100%; margin-bottom: 12px; border: 1px solid var(--accent); background: rgba(20,184,166,.12); color: #5eead4; }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <div class="brand">
+          <h1>群晖 NAS 状态</h1>
+        </div>
+        <p>只读监控一台 Synology NAS。建议使用专门创建的免 2FA 低权限账号。</p>
+        <form id="property-inspector">
+          <div class="field">
+            <label for="nasHost">NAS 地址</label>
+            <input id="nasHost" name="nasHost" autocomplete="off" placeholder="192.168.1.10 或 nas.local">
+          </div>
+          <div class="field">
+            <label for="nasPort">端口与协议</label>
+            <div class="field-row">
+              <input id="nasPort" name="nasPort" inputmode="numeric" autocomplete="off" placeholder="5001">
+              <label class="https-toggle"><input id="useHttps" name="useHttps" type="checkbox" checked><span>HTTPS</span></label>
+            </div>
+            <div class="hint">默认 HTTPS 5001，允许自签证书；关掉则走 HTTP（局域网明文）。</div>
+          </div>
+          <div class="field">
+            <label for="username">用户名</label>
+            <input id="username" name="username" autocomplete="off" placeholder="专用低权限账号">
+          </div>
+          <div class="field">
+            <label for="password">密码</label>
+            <input id="password" name="password" type="text" autocomplete="off" placeholder="账号密码">
+            <div class="hint">明文保存在本机 action 配置中；插件不会输出到日志或键面。</div>
+          </div>
+          <button class="probe-btn" id="probeNas" type="button">测试连接并读取卷列表</button>
+          <div class="probe-status" id="probeStatus">填好连接信息后先测试一次，成功后可选择要监控的卷。</div>
+          <div class="field">
+            <label for="volumeId">监控的卷 1</label>
+            <select id="volumeId" name="volumeId">
+              <option value="">第一个卷（默认）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="volumeId2">监控的卷 2（可选）</label>
+            <select id="volumeId2" name="volumeId2">
+              <option value="">不显示</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="tempChart">温度历史图表</label>
+            <select id="tempChart" name="tempChart">
+              <option value="line">折线图（默认）</option>
+              <option value="bars">柱状图</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="displayName">显示名（可选）</label>
+            <input id="displayName" name="displayName" maxlength="40" autocomplete="off" placeholder="留空则使用 NAS 主机名">
+          </div>
+          <div class="field">
+            <label for="pollSec">刷新间隔（秒）</label>
+            <input id="pollSec" name="pollSec" inputmode="numeric" autocomplete="off" placeholder="60">
+          </div>
+          <div class="field">
+            <label for="theme">主题</label>
+            <input id="theme" name="theme" type="hidden" value="mint">
+            <div class="theme-row" role="group" aria-label="Theme"></div>
+          </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+            <button class="save-btn" type="submit" data-localize="Save">Save</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./nasstatus.js"></script>
+  </body>
+</html>

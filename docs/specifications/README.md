@@ -14,7 +14,10 @@
 | [`actions/latency.md`](actions/latency.md) | Latency Monitor：URL 探测、24 小时统计、SSL、交互与显示 |
 | [`actions/pomowave.md`](actions/pomowave.md) | PomoWave：阶段状态机、无漂移计时、提示音、交互与显示 |
 | [`actions/speedtest.md`](actions/speedtest.md) | Network Speed：Ookla CLI、节点发现、调度、排队、历史与显示 |
+| [`actions/claudeusage.md`](actions/claudeusage.md) | Claude Usage：钥匙串 OAuth 只读取数、限额分级、手动刷新与 STALE 徽章 |
+| [`actions/chatgptusage.md`](actions/chatgptusage.md) | ChatGPT Usage：codex app-server JSON-RPC 取数、限额分级与显示 |
 | [`actions/bambustatus.md`](actions/bambustatus.md) | Bambu P2S Status：局域网发现、MQTT 状态、完成锁存与显示 |
+| [`actions/nasstatus.md`](actions/nasstatus.md) | Synology NAS Status：DSM Web API 轮询、三态语义、温度与卷容量显示 |
 | [`actions/systemstatus.md`](actions/systemstatus.md) | System Status：CPU/RAM/GPU/温度/网络实时状态与跨平台降级 |
 | [`actions/healthbreak.md`](actions/healthbreak.md) | Health Break：多动作组微休息、活动时间周期、提醒协调、引导与统计 |
 
@@ -30,7 +33,7 @@
 ### 修改前：先读对应规格
 
 - 修改基座或共享层之前，必须先完整阅读 [`base.md`](base.md)。
-- 修改某个 action 之前，必须先完整阅读该 action 的规格：[`latency`](actions/latency.md)、[`pomowave`](actions/pomowave.md) 或 [`speedtest`](actions/speedtest.md)。
+- 修改某个 action 之前，必须先完整阅读该 action 的规格（见上方文档索引表，`actions/<key>.md`）。
 - 同时影响基座和 action 时，两类文档都要读；影响多个 action 时，逐份读取全部受影响规格。
 - 新增 action 时，先读 `base.md`，再在编码前创建该 action 的初始规格并明确功能与技术边界。
 
