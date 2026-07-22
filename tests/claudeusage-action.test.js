@@ -13,6 +13,9 @@ const {
   hydrateState,
   parseUsage,
   readScopedLimit,
+  resolveClaudeCommand,
+  runClaudeRefresh,
+  runManualRefresh,
   severityFromPercent,
   visibleRows,
   worstSeverity,
@@ -273,6 +276,102 @@ test('manual refresh is rate limited so the key cannot be poked into a 429', () 
   assert.equal(runs, 1, 'a second press inside the cooldown must be swallowed');
   handleShortPress(inst, { now: t0 + 11_000, run });
   assert.equal(runs, 2, 'the press should go through once the cooldown expires');
+});
+
+test('resolveClaudeCommand searches PATH then the fallback bin dirs, and wraps bare .js in node', () => {
+  // 命中 EXTRA_BIN_DIRS：PATH 里没有，但兵库里的 homebrew 路径存在。
+  const only = (hit) => ({ statSync: (p) => { if (p === hit) return { isFile: () => true }; throw new Error('nope'); } });
+  const spec = resolveClaudeCommand('claude', { fsImpl: only('/opt/homebrew/bin/claude'), pathEnv: '/usr/bin:/bin' });
+  assert.equal(spec.resolved, '/opt/homebrew/bin/claude');
+  assert.equal(spec.command, '/opt/homebrew/bin/claude');
+  assert.deepEqual(spec.prefixArgs, []);
+
+  // 带路径分隔符的当路径直接校验；裸 .js 必须用 node 拉起。
+  const js = resolveClaudeCommand('/x/cli.js', { fsImpl: { statSync: () => ({ isFile: () => true }) } });
+  assert.equal(js.command, process.execPath);
+  assert.deepEqual(js.prefixArgs, ['/x/cli.js']);
+
+  // 哪都找不到就是 null——上游据此判定 NO_CLI，而不是 spawn 一个不存在的命令。
+  assert.equal(resolveClaudeCommand('claude', { fsImpl: { statSync: () => { throw new Error('x'); } }, pathEnv: '' }), null);
+});
+
+test('runClaudeRefresh maps the child lifecycle to a best-effort result and never throws', async () => {
+  const fakeChild = () => {
+    const h = {};
+    return { on(ev, cb) { h[ev] = cb; return this; }, emit(ev, ...a) { h[ev]?.(...a); }, kill() { this.killed = true; } };
+  };
+  const spec = { command: 'claude', prefixArgs: [], resolved: '/bin/claude' };
+
+  // 解析不到 CLI：直接 NO_CLI，连 spawn 都不发生。
+  assert.deepEqual(await runClaudeRefresh({ resolveCommand: () => null }), { ok: false, reason: 'NO_CLI' });
+
+  // 退出码 0 → ok；非 0 → EXIT。
+  let child = fakeChild();
+  let p = runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child });
+  child.emit('close', 0);
+  assert.deepEqual(await p, { ok: true });
+
+  child = fakeChild();
+  p = runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child });
+  child.emit('close', 1);
+  assert.deepEqual(await p, { ok: false, reason: 'EXIT' });
+
+  // spawn 抛异常 / 子进程 error 事件都归为 SPAWN_FAILED。
+  assert.deepEqual(
+    await runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => { throw new Error('boom'); } }),
+    { ok: false, reason: 'SPAWN_FAILED' },
+  );
+  child = fakeChild();
+  p = runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child });
+  child.emit('error', new Error('spawn'));
+  assert.deepEqual(await p, { ok: false, reason: 'SPAWN_FAILED' });
+
+  // 挂住不退出：超时杀掉进程，绝不让按键永远卡在刷新态。
+  child = fakeChild();
+  const timedOut = await runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child, timeoutMs: 5 });
+  assert.deepEqual(timedOut, { ok: false, reason: 'TIMEOUT' });
+  assert.equal(child.killed, true);
+});
+
+test('manual refresh raises the refreshing flag around the claude call, then hands off to fetch', async () => {
+  const seq = [];
+  // active:false 让框架层 renderInstance 短路，避免真的往宿主发帧。
+  const inst = instance({ active: false });
+  const refresh = async () => { seq.push(`refresh:${inst.refreshing}`); };
+  const run = async () => { seq.push(`run:${inst.refreshing}`); return 'ran'; };
+
+  const result = await runManualRefresh(inst, { refresh, run });
+  // 刷新期间角标亮（refreshing=true）；交给拉取时已落下（false）。
+  assert.deepEqual(seq, ['refresh:true', 'run:false']);
+  assert.equal(inst.refreshing, false);
+  assert.equal(result, 'ran');
+});
+
+test('refresh failure still hands off to the fetch instead of blocking the key', async () => {
+  const inst = instance({ active: false });
+  let ran = false;
+  await runManualRefresh(inst, {
+    refresh: async () => { throw new Error('claude missing'); },
+    run: async () => { ran = true; },
+  });
+  assert.equal(ran, true, 'a thrown refresh must not swallow the fetch');
+  assert.equal(inst.refreshing, false);
+});
+
+test('while refreshing, the key shows the refresh badge and suppresses the stale badge', () => {
+  const decode = (i) => Buffer.from(config.render(i).split(',')[1], 'base64').toString('utf8');
+  const rows = { weekly: limit('W', 66), fiveHour: limit('5H', 57) };
+  const REFRESH_PATH = 'M17.65 6.35A7.958';
+
+  // 刷新中：即便底层是需要动手的 AUTH 陈旧态，也换成循环箭头，盖掉错误角标——
+  // 不能同时给"出错"和"正在修"两个矛盾信号。
+  const refreshing = decode(instance({ ...rows, displayState: 'STALE', lastErrorKind: 'AUTH', refreshing: true }));
+  assert.ok(refreshing.includes(REFRESH_PATH), 'refresh badge must be drawn while refreshing');
+  assert.ok(!refreshing.includes('scale(0.5)'), 'the stale badge must be suppressed while refreshing');
+
+  // 非刷新态不该出现循环箭头。
+  assert.ok(!decode(instance({ ...rows, displayState: 'OK' })).includes(REFRESH_PATH));
+  assert.ok(!decode(instance({ ...rows, displayState: 'STALE', lastErrorKind: 'AUTH' })).includes(REFRESH_PATH));
 });
 
 test('http failures map to their own error kinds', async () => {

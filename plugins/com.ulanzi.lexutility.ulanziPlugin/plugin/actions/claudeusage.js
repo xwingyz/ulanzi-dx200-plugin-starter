@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 export function createClaudeUsageAction(runtime) {
   const {
@@ -28,11 +30,34 @@ export function createClaudeUsageAction(runtime) {
   const OAUTH_BETA = 'oauth-2025-04-20';
   const REQUEST_TIMEOUT_MS = 12_000;
   const MANUAL_COOLDOWN_MS = 10_000;
-  const MANUAL_FEEDBACK_MS = 500;
   const STATE_VERSION = 1;
+
+  // 手动刷新：短按时主动 spawn `claude` 让 CLI 用 refreshToken 自行刷新钥匙串凭据
+  // （凭据生命周期归 CLI 管，插件从不写钥匙串）。用 `-p` 打一条极短消息真实消耗一点
+  // 额度来「激活」——这是用户明确选择的方式（见 sessions 记录）。锁死 haiku 把消耗压到
+  // 最小；--max-turns 1 杜绝任何工具循环；cwd 用临时目录避开本仓 CLAUDE.md / hooks。
+  const REFRESH_COMMAND = 'claude';
+  const REFRESH_ARGS = ['-p', 'ping', '--model', 'haiku', '--max-turns', '1'];
+  const REFRESH_TIMEOUT_MS = 45_000;
+
+  // 插件进程由 Ulanzi Studio 拉起，其 PATH 未必包含 homebrew 等前缀——补一份常见兵库。
+  // 与 chatgptusage 的探测同构，但按隔离规范各自持有，不跨 action 借用。
+  const EXTRA_BIN_DIRS = [
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    path.join(os.homedir(), '.local', 'bin'),
+    path.join(os.homedir(), '.bun', 'bin'),
+    '/usr/bin',
+    '/bin',
+  ];
 
   // 品牌色：Claude 标记的身份标识，固定不随主题。
   const BRAND_CLAUDE = '#d97757';
+
+  // 刷新中角标：Material 的 refresh 字形（viewBox 0 0 24 24）。键面是静态渲染
+  // （见 8f7d2ba：claudeusage 已移除键面动效），所以用一个静态的循环箭头表示
+  // 「正在刷新」，而不是转圈动画。
+  const REFRESH_MARK = 'M17.65 6.35A7.958 7.958 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z';
 
   // Claude 官方标记，viewBox 0 0 24 24，取自 simple-icons（收录的是官方标记）。
   // 改用矢量而非早先的像素宠物：196px 的键面上像素网格的腿和眼睛会糊成一团，
@@ -76,6 +101,83 @@ export function createClaudeUsageAction(runtime) {
     } catch {
       return null;
     }
+  }
+
+  // ---------------------------------------------------------------- CLI 发现与刷新
+
+  function isExecutable(candidate, fsImpl = fs) {
+    try {
+      return fsImpl.statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  }
+
+  function buildSpec(resolved) {
+    // npm 全局装出来的 bin 有时是裸 .js（缺可执行位或 shebang），必须用 node 拉起。
+    if (resolved.endsWith('.js')) {
+      return { command: process.execPath, prefixArgs: [resolved], resolved };
+    }
+    return { command: resolved, prefixArgs: [], resolved };
+  }
+
+  function resolveClaudeCommand(command, options = {}) {
+    const fsImpl = options.fsImpl ?? fs;
+    const requested = String(command || REFRESH_COMMAND).trim() || REFRESH_COMMAND;
+    if (requested.includes(path.sep)) {
+      return isExecutable(requested, fsImpl) ? buildSpec(requested) : null;
+    }
+    const pathDirs = String(options.pathEnv ?? process.env.PATH ?? '')
+      .split(path.delimiter)
+      .filter(Boolean);
+    for (const dir of [...pathDirs, ...EXTRA_BIN_DIRS]) {
+      const candidate = path.join(dir, requested);
+      if (isExecutable(candidate, fsImpl)) {
+        return buildSpec(candidate);
+      }
+    }
+    return null;
+  }
+
+  // 尽力而为：失败也不抛，让调用方照常走一次拉取——刷新只是「更可能拿到新鲜数据」，
+  // 不是拉取的前置条件。stdio 全丢弃，只关心退出码；超时就杀掉，绝不让它挂住按键。
+  function runClaudeRefresh(options = {}) {
+    return new Promise((resolve) => {
+      const spawnFn = options.spawnFn ?? spawn;
+      const resolveCommand = options.resolveCommand ?? resolveClaudeCommand;
+      const timeoutMs = options.timeoutMs ?? REFRESH_TIMEOUT_MS;
+      const spec = resolveCommand(options.command ?? REFRESH_COMMAND);
+      if (!spec) {
+        resolve({ ok: false, reason: 'NO_CLI' });
+        return;
+      }
+      let child;
+      try {
+        child = spawnFn(spec.command, [...spec.prefixArgs, ...REFRESH_ARGS], {
+          cwd: os.tmpdir(),
+          stdio: 'ignore',
+          env: process.env,
+        });
+      } catch {
+        resolve({ ok: false, reason: 'SPAWN_FAILED' });
+        return;
+      }
+      let settled = false;
+      const finish = (result) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch {}
+        finish({ ok: false, reason: 'TIMEOUT' });
+      }, timeoutMs);
+      child.on('error', () => finish({ ok: false, reason: 'SPAWN_FAILED' }));
+      child.on('close', (code) => finish(code === 0 ? { ok: true } : { ok: false, reason: 'EXIT' }));
+    });
   }
 
   // ---------------------------------------------------------------- 取数
@@ -272,6 +374,11 @@ export function createClaudeUsageAction(runtime) {
     return `<g transform="translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${scale.toFixed(4)})"><path d="${CLAUDE_MARK}" fill="${color}"/></g>`;
   }
 
+  function renderRefreshBadge(x, y, size, color) {
+    const scale = size / 24;
+    return `<g transform="translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${scale.toFixed(4)})"><path d="${REFRESH_MARK}" fill="${color}"/></g>`;
+  }
+
   // 行几何与排版走共享的 renderMeterRow，保证与 chatgptusage 并排时观感必然一致；
   // 这里只决定领域语义部分：颜色由 severity 映射而来。
   function renderDataRow(row, geometry, theme, options) {
@@ -370,11 +477,17 @@ export function createClaudeUsageAction(runtime) {
         <text x="128" y="188" text-anchor="middle" fill="${color}" font-size="22" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(copy.text)}</text>`;
     }
 
+    // 刷新中角标优先于 STALE：一旦用户按下、正在跑 claude 刷新，就换成循环箭头，
+    // 盖掉旧的错误角标——否则会同时出现"出错"和"正在修"两个互相矛盾的信号。
+    const refreshBadge = instance.refreshing
+      ? renderRefreshBadge(boxX + boxWidth - 22, headerBaseline - 44, 20, theme.accent)
+      : '';
+
     // STALE 徽章：在 header 右上角画对应失败原因的错误图标（缩小版），而不只是一个
     // 说不清原因的琥珀点。图标本身回答"要不要动手"——bang=重新登录、offline=网络、
     // wait=被限流。AUTH / NO_TOKEN 需要用户去刷新凭据，用 crit 提级；其余是暂时性
     // 故障，用 warn。
-    const staleBadge = instance.displayState === 'STALE' && hasData
+    const staleBadge = !instance.refreshing && instance.displayState === 'STALE' && hasData
       ? (() => {
         const kind = instance.lastErrorKind || 'AUTH';
         const glyph = (ERROR_COPY[kind] || ERROR_COPY.AUTH).glyph;
@@ -395,6 +508,7 @@ export function createClaudeUsageAction(runtime) {
           <text x="${labelX.toFixed(1)}" y="${headerBaseline - 10}" fill="${background.text}" font-size="25" font-weight="800" font-family="Arial, Helvetica, sans-serif">Claude</text>
           ${groundLine}
           ${staleBadge}
+          ${refreshBadge}
           ${body}
         `)
       }
@@ -526,17 +640,34 @@ export function createClaudeUsageAction(runtime) {
     schedulePoll(instance);
   }
 
-  // 短按冷却：接口对频率敏感，连点会把自己戳到 429——而 429 恰恰是这个 action
-  // 最没用的状态（它本来就是来告诉你还剩多少的）。
+  // 手动刷新序列：立刻亮起刷新角标 → 跑一次 claude 让 CLI 刷新凭据（尽力而为，失败
+  // 也继续）→ 清角标并照常拉取。角标在 claude 那 ~5s 窗口里可见，给用户"按下有反应"
+  // 的即时反馈；随后的 GET 很快，最终由 runFetch 渲染结果。
+  async function runManualRefresh(instance, options = {}) {
+    const refresh = options.refresh ?? runClaudeRefresh;
+    const run = options.run ?? runFetch;
+    instance.refreshing = true;
+    renderInstance(instance);
+    try {
+      await refresh();
+    } catch {
+      // 刷新失败不阻断拉取：旧 token 也许仍能用，不行就照常降级 STALE。
+    }
+    instance.refreshing = false;
+    return run(instance, { immediateRender: true });
+  }
+
+  // 短按冷却：claude 刷新会 spawn 进程、真实消耗一点额度，连点毫无意义还会堆进程；
+  // 冷却窗口内直接忽略。
   function handleShortPress(instance, options = {}) {
     const now = options.now ?? Date.now();
-    const run = options.run ?? runFetch;
+    const run = options.run ?? runManualRefresh;
     if (instance.lastManualAt && now - instance.lastManualAt < MANUAL_COOLDOWN_MS) {
       return undefined;
     }
     instance.lastManualAt = now;
     clearInstanceTimeout(instance, 'claudeusagePoll');
-    return run(instance, { immediateRender: true });
+    return run(instance);
   }
 
   const PROBE_PARAM = '__claudeusageProbe';
@@ -607,6 +738,7 @@ export function createClaudeUsageAction(runtime) {
     }),
     createState: (instance) => ({
       fetching: false,
+      refreshing: false,
       requestId: 0,
       lastManualAt: 0,
       ...hydrateState(readPersistedState(instance.context)),
@@ -659,6 +791,9 @@ export function createClaudeUsageAction(runtime) {
       hydrateState,
       parseUsage,
       readScopedLimit,
+      resolveClaudeCommand,
+      runClaudeRefresh,
+      runManualRefresh,
       severityFromPercent,
       visibleRows,
       worstSeverity,
