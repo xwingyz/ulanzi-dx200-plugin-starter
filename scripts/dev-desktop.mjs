@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { syncPluginDir } from './lib/plugin-sync.mjs';
+import { assertDeployableRoot } from './lib/worktree-guard.mjs';
 
 function parseArgs(argv) {
   const result = {};
@@ -114,6 +115,16 @@ function main() {
   }
 
   const rootDir = process.cwd();
+
+  // 并行 agent 协同的机器护栏：只从主检出部署，杜绝 worktree 部署互相踩踏
+  // （见 development-rules §11「部署协同」）。--allow-worktree 显式放行单人场景。
+  try {
+    assertDeployableRoot(rootDir, { allowWorktree: args['allow-worktree'] === 'true' });
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+
   const resetData = args['reset-data'] === 'true';
   const targetDir = syncPlugin(rootDir, pluginName, { resetData });
 

@@ -303,6 +303,20 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 没验证宿主运行态前，不得宣称“图标渲染不支持”或“字体不支持”。
 - 如果需要新增公共约束，先改这份文档，再改模板或代码。
 
+### 部署协同（多 agent 并行强制项）
+
+多个 agent 各自在独立 worktree 里开发各自的 action 时，**开发与测试可以并行，部署到共享实机必须串行且只从主线**。原因是部署这一步有两个共享资源无法并发：
+
+- **整目录替换**：`dev:desktop` 从 `process.cwd()` 的 `plugins/<plugin>` 全量同步到宿主副本（`syncPluginDir` 先清空再拷贝，仅保留 `data/`）。从缺少兄弟 action 的 worktree 部署，会把实机上别的 agent 的 action **静默删掉**。
+- **全局单宿主重启**：`restart` 会 `pkill` 唯一的 Ulanzi Studio 及其插件 Node 子进程再拉起。一个 agent 的重启会把宿主从**所有**正在实机联调的 agent 脚下抽走。
+
+因此强制：
+
+1. **worktree 只用于构建 + `npm test`**，不直接部署到共享实机。
+2. **部署只从主检出（`.git` 为目录的那份规范树）进行，且必须在该 action 已合并回主线之后**。一棵集成好的树 → 一次连贯部署。
+3. 跨 action 的唯一改动接触点是 `plugin/actions/index.js` 与 `manifest.json`；这两个文件的合并冲突在主线上解决一次，然后由集成者部署一次，其他 agent 不各自抢重启。
+4. 该约束由 `scripts/lib/worktree-guard.mjs` 机器执行：`dev-desktop.mjs` 在同步前调用 `assertDeployableRoot`，从联动 worktree 部署会直接报错退出；确需单人从 worktree 部署（无并行 agent）时附加 `--allow-worktree` 显式放行。判定只用文件系统事实（联动 worktree 的 `.git` 是文件而非目录），不依赖 git 可执行。
+
 ## 12. 完成定义
 
 一个 action 开发完成，至少满足：
