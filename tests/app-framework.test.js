@@ -91,10 +91,10 @@ test('Lex Utility only exposes production actions', () => {
   );
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-  assert.deepEqual(Object.keys(lexActionConfigs).sort(), ['bambustatus', 'chatgptusage', 'claudeusage', 'latency', 'pomowave', 'speedtest', 'systemstatus']);
+  assert.deepEqual(Object.keys(lexActionConfigs).sort(), ['bambustatus', 'chatgptusage', 'claudeusage', 'healthbreak', 'latency', 'pomowave', 'speedtest', 'systemstatus']);
   assert.deepEqual(
     manifest.Actions.map((action) => action.UUID.split('.').at(-1)).sort(),
-    ['bambustatus', 'chatgptusage', 'claudeusage', 'latency', 'pomowave', 'speedtest', 'systemstatus'],
+    ['bambustatus', 'chatgptusage', 'claudeusage', 'healthbreak', 'latency', 'pomowave', 'speedtest', 'systemstatus'],
   );
 });
 

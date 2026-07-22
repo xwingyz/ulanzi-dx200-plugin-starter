@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Health Break</title>
+    <style>
+      :root { color-scheme: dark; --bg: #071b20; --panel: #10272e; --text: #effcf9; --muted: #94b8b2; --line: #21444a; --accent: #52e0c4; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #06161b, #0c252b); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(16, 39, 46, 0.95); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 17px; }
+      h2 { margin: 16px 0 8px; font-size: 14px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      .field > label, .field-label { color: var(--muted); }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      input { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 10px; background: #071b20; color: var(--text); padding: 9px 11px; }
+      input[type="hidden"] { display: none; }
+      input[type="checkbox"] { width: 18px; min-height: 0; height: 18px; padding: 0; accent-color: var(--accent); }
+      .group-list { display: grid; gap: 7px; }
+      .group-row { display: grid; grid-template-columns: 1fr 34px 34px; gap: 6px; }
+      .group-toggle, .icon-btn, .day-btn { border: 1px solid var(--line); border-radius: 9px; background: #071b20; color: var(--text); cursor: pointer; min-height: 38px; }
+      .group-toggle { text-align: left; padding: 8px 10px; }
+      .group-toggle.active, .day-btn.active { border-color: var(--accent); background: rgba(82, 224, 196, 0.13); color: var(--accent); font-weight: 800; }
+      .icon-btn:disabled { opacity: 0.25; cursor: default; }
+      .hint, .safety { color: var(--muted); font-size: 12px; }
+      .safety { border: 1px solid rgba(245, 158, 11, 0.32); background: rgba(245, 158, 11, 0.08); border-radius: 9px; padding: 9px 10px; }
+      .day-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+      .day-btn { min-height: 34px; padding: 0; }
+      .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 10px; background: #071b20; padding: 10px 12px; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #071b20; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .frame-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .frame-toggle { display: flex; gap: 7px; align-items: center; color: var(--muted); cursor: pointer; }
+      .frame-toggle input { width: auto; min-height: 0; }
+      .stats { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+      .stats-summary { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; background: #071b20; }
+      .stats-summary div { padding: 9px 4px; border-right: 1px solid var(--line); }
+      .stats-summary div:last-child { border-right: 0; }
+      .stats-summary strong { display: block; color: var(--accent); font-size: 17px; }
+      .history { max-height: 150px; overflow: auto; }
+      .history-row { display: grid; grid-template-columns: 1fr repeat(4, 32px); gap: 4px; padding: 7px 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+      .history-row span:not(:first-child) { text-align: right; }
+      .action-row { display: flex; gap: 10px; margin-top: 12px; }
+      .action-row button { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 800; cursor: pointer; }
+      .save-btn { background: var(--accent); color: #06352d; }
+      .ghost-btn { background: rgba(82, 224, 196, 0.1); color: var(--text); border: 1px solid var(--line) !important; }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1>Health Break · 健康微休息</h1>
+        <p>短按开始或暂停，长按跳过到期提醒；练习中长按取消。完整跟完引导记为完成一次。</p>
+        <form id="property-inspector">
+          <div class="field">
+            <span class="field-label">动作组（1～4 个，按此顺序执行）</span>
+            <input id="groups" name="groups" type="hidden">
+            <div class="group-list" id="groupList">
+              <div class="group-row" data-group-row="eyes"><button class="group-toggle" type="button" data-group-key="eyes">◉ 护眼 · 远眺与眨眼</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="neck"><button class="group-toggle" type="button" data-group-key="neck">↔ 颈肩 · 微收与转动</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="hands"><button class="group-toggle" type="button" data-group-key="hands">✋ 手腕手指 · 张合与伸展</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="stand"><button class="group-toggle" type="button" data-group-key="stand">↥ 起身活动 · 提踵与走动</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="breathe"><button class="group-toggle" type="button" data-group-key="breathe">≈ 呼吸复位 · 缓慢吸气呼气</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="pelvic"><button class="group-toggle" type="button" data-group-key="pelvic">◇ 盆底肌 · 收缩与充分放松</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+            </div>
+            <div class="hint" id="durationHint"></div>
+            <div class="safety">盆底肌并非越紧越好。如有盆腔疼痛、排尿排便困难、术后或孕产期问题，请先咨询专业人士；出现疼痛、眩晕或麻木应立即停止。</div>
+          </div>
+
+          <div class="grid">
+            <div class="field"><label for="intervalMin">活动周期（分钟）</label><input id="intervalMin" name="intervalMin" type="number" min="5" max="240"></div>
+            <div class="field"><label for="dailyGoal">每日目标（次）</label><input id="dailyGoal" name="dailyGoal" type="number" min="1" max="12"></div>
+          </div>
+          <div class="grid">
+            <div class="field"><label for="activeStart">有效时段开始</label><input id="activeStart" name="activeStart" type="time"></div>
+            <div class="field"><label for="activeEnd">有效时段结束</label><input id="activeEnd" name="activeEnd" type="time"></div>
+          </div>
+          <div class="field">
+            <span class="field-label">有效星期</span>
+            <input id="activeDays" name="activeDays" type="hidden">
+            <div class="day-row">
+              <button class="day-btn" type="button" data-day="1">一</button><button class="day-btn" type="button" data-day="2">二</button><button class="day-btn" type="button" data-day="3">三</button><button class="day-btn" type="button" data-day="4">四</button><button class="day-btn" type="button" data-day="5">五</button><button class="day-btn" type="button" data-day="6">六</button><button class="day-btn" type="button" data-day="0">日</button>
+            </div>
+            <div class="hint">结束时间早于开始时间时按跨夜班次处理。</div>
+          </div>
+          <div class="grid">
+            <div class="field"><label for="repeatReminderMin">增强提醒间隔（分钟）</label><input id="repeatReminderMin" name="repeatReminderMin" type="number" min="0" max="30"></div>
+            <div class="field"><label>声音</label><label class="toggle" for="soundEnabled"><span>阶段提示音</span><input id="soundEnabled" name="soundEnabled" type="checkbox"></label></div>
+          </div>
+          <div class="field">
+            <label for="theme">主题</label><input id="theme" name="theme" type="hidden"><div class="theme-row" role="group" aria-label="Theme"></div>
+          </div>
+          <div class="field">
+            <span class="field-label">安全框</span>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max"><span>最佳显示区</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox"><span>显示通用边框</span></label>
+            </div>
+          </div>
+
+          <h2>最近 30 个健康日</h2>
+          <div class="stats">
+            <div class="stats-summary"><div><strong id="todayCompleted">0</strong>今日完成</div><div><strong id="todayBonus">0</strong>今日加练</div><div><strong id="streak">0</strong>连续达标</div></div>
+            <div class="history" id="history"><div class="history-row"><span>暂无记录</span></div></div>
+          </div>
+
+          <div class="action-row"><button class="ghost-btn" id="resetDefaults" type="button">恢复默认</button><button class="save-btn" type="submit">保存</button></div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden><span id="feedback-saved" hidden>已保存</span><span id="feedback-reset" hidden>已恢复默认</span></div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./healthbreak.js"></script>
+  </body>
+</html>

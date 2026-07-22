@@ -1,6 +1,7 @@
 import { createChatGptUsageAction } from './chatgptusage.js';
 import { createBambuStatusAction } from './bambustatus.js';
 import { createClaudeUsageAction } from './claudeusage.js';
+import { createHealthBreakAction } from './healthbreak.js';
 import { createLatencyAction } from './latency.js';
 import { createPomowaveAction } from './pomowave.js';
 import { createSpeedtestAction } from './speedtest.js';
@@ -15,5 +16,6 @@ export function createActionModules(runtime) {
     createChatGptUsageAction(runtime),
     createBambuStatusAction(runtime),
     createSystemStatusAction(runtime),
+    createHealthBreakAction(runtime),
   ];
 }

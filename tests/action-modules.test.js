@@ -20,16 +20,16 @@ test('business actions live outside the Lex Utility framework entry', () => {
   for (const symbol of ['renderLatencyIcon', 'renderPomodoroIcon', 'renderSpeedtestIcon']) {
     assert.doesNotMatch(app, new RegExp(`function ${symbol}\\b`));
   }
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus', 'healthbreak']) {
     assert.equal(fs.existsSync(path.join(pluginRoot, 'actions', `${key}.js`)), true);
   }
 });
 
 test('individual action modules do not import app.js or sibling actions', () => {
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'systemstatus', 'healthbreak']) {
     const source = read(path.join(pluginRoot, 'actions', `${key}.js`));
     assert.doesNotMatch(source, /from\s+['"][^'"]*app\.js['"]/);
-    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus|systemstatus)\.js['"]/);
+    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus|systemstatus|healthbreak)\.js['"]/);
   }
 });
 
@@ -87,6 +87,14 @@ const RENDER_STATES = {
     { platform: 'darwin', values: {}, lastSampleAt: 0, sampling: false },
     { platform: 'darwin', values: { cpu: 42, ram: 68, download: 24_000_000 }, lastSampleAt: Date.now(), sampling: false },
     { platform: 'win32', values: { cpu: 98, ram: 85, download: null }, lastSampleAt: Date.now(), sampleError: true, sampling: false },
+  ],
+  healthbreak: [
+    { healthStatus: 'waiting', intervalRemainingMs: 1_200_000 },
+    { healthStatus: 'queued', queueKind: 'due', intervalRemainingMs: 0 },
+    { healthStatus: 'due', dueAt: Date.now() - 30_000, animFrame: 0 },
+    { healthStatus: 'running', sessionPlan: [{ groupKey: 'eyes', label: '远眺', durationMs: 20_000 }], stageRemainingMs: 12_000 },
+    { healthStatus: 'paused', sessionPlan: [{ groupKey: 'neck', label: '下巴微收', durationMs: 15_000 }], stageRemainingMs: 8_000 },
+    { healthStatus: 'done', today: { dayKey: '2026-07-22', completed: 6, bonus: 1, skipped: 0, cancelled: 0 } },
   ],
 };
 
