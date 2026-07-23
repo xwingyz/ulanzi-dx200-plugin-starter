@@ -441,15 +441,15 @@ npm install
 - [JEAN-ALMEIDA-CZO/Ulanzi-Pomodoro-Timer](https://github.com/JEAN-ALMEIDA-CZO/Ulanzi-Pomodoro-Timer)
 - [narlei/ulanzideck_claude](https://github.com/narlei/ulanzideck_claude)
 
-## 致谢 / Acknowledgements
+## 贡献者 / Contributors
 
-本项目在开发中大量使用 AI 结对编程协助：
+- **[@xwingyz](https://github.com/xwingyz)** — 作者与维护者 / author & maintainer
+- **ChatGPT (Codex)** — OpenAI 的 Codex CLI，AI 结对编程，参与需求拆解与实现
+- **Claude (Claude Code)** — Anthropic，AI 结对编程，参与实现、评审与文档
 
-- **ChatGPT (Codex)** — OpenAI 的 Codex CLI，参与需求拆解与实现
-- **Claude (Claude Code)** — Anthropic，参与实现、评审与文档
-
-This project was built with AI pair-programming assistance from
-**ChatGPT (Codex)** and **Claude (Claude Code)**.
+> GitHub 的 Contributors 图谱按提交作者邮箱统计，不会列出 AI 工具，
+> 因此在此显式记录。This project was built with AI pair-programming
+> assistance from **ChatGPT (Codex)** and **Claude (Claude Code)**.
 
 ## 许可 / License
 
