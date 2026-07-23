@@ -1,5 +1,8 @@
 # Ulanzi DX200 Plugin Starter
 
+[![CI](https://github.com/xwingyz/ulanzi-dx200-plugin-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/xwingyz/ulanzi-dx200-plugin-starter/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 > **English (short version):** A minimal, ready-to-extend base for building
 > Ulanzi DX200 / Ulanzi Deck JavaScript plugins. It ships a runnable plugin
 > template, a trimmed Ulanzi WebSocket API wrapper, a simple Property Inspector,
