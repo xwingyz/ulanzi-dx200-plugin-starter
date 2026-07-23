@@ -235,9 +235,10 @@ npm run dev:desktop -- \
 
 ### 2. Simulator 开发流
 
-先准备官方 Simulator：
+先准备官方 Simulator：从官方 SDK 仓库 clone 获取（`UlanziDeckSimulator` 随 [UlanziTechnology/UlanziDeckPlugin-SDK](https://github.com/UlanziTechnology/UlanziDeckPlugin-SDK) 提供）。下面以 clone 到 `/tmp/UlanziDeckPlugin-SDK` 为例，实际换成你自己的路径即可：
 
 ```bash
+git clone https://github.com/UlanziTechnology/UlanziDeckPlugin-SDK.git /tmp/UlanziDeckPlugin-SDK
 cd /tmp/UlanziDeckPlugin-SDK/UlanziDeckSimulator
 npm install
 npm start
