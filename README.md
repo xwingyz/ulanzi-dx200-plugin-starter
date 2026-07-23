@@ -27,6 +27,20 @@
 - 一个简单的 Property Inspector
 - 一个脚手架命令，用来生成多个独立插件
 
+## 官方 SDK 资源 / Official SDK
+
+本仓库是**官方协议兼容的最小基座**，不 vendor 官方 SDK 源码。开发前建议先读官方文档，本仓库与之保持协议对齐（要求 Ulanzi Studio 3.0.11+）：
+
+- **SDK 主仓库**：[UlanziTechnology/UlanziDeckPlugin-SDK](https://github.com/UlanziTechnology/UlanziDeckPlugin-SDK) —— 协议、`manifest.json` 规范、生命周期、调试与 Simulator 说明（含 [中文 README](https://github.com/UlanziTechnology/UlanziDeckPlugin-SDK/blob/main/README.zh.md)）
+- **HTML SDK**：[UlanziTechnology/plugin-common-html](https://github.com/UlanziTechnology/plugin-common-html) —— Property Inspector 侧的 WebSocket 客户端、UI 工具与 i18n
+- **Node.js SDK**：[UlanziTechnology/plugin-common-node](https://github.com/UlanziTechnology/plugin-common-node) —— 主服务侧的 WebSocket 服务端与系统 API
+- **Simulator**：`UlanziDeckSimulator`（随 SDK 主仓库提供）—— 无需桌面宿主即可测试插件
+- **官方文档站**：<https://docs.ulanzistudio.com/>
+- **社区论坛**：<https://bbs.ulanzistudio.com>
+- **桌面应用下载**：<https://www.ulanzi.com/pages/ulanzi-app>
+
+> 官方 SDK 以 Apache-2.0 许可；本仓库以 MIT 许可（见 [LICENSE](LICENSE)）。二者相互独立。
+
 ## 目录结构
 
 ```text
