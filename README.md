@@ -7,7 +7,7 @@
 > Ulanzi DX200 / Ulanzi Deck JavaScript plugins. It ships a runnable plugin
 > template, a trimmed Ulanzi WebSocket API wrapper, a simple Property Inspector,
 > and a scaffolding command (`npm run new`) to spin up more independent plugins.
-> Run the test suite with `npm test` (Node.js 20+, zero runtime dependencies).
+> Run the test suite with `npm test` (Node.js 24+, zero root runtime dependencies).
 > Licensed under [MIT](LICENSE). The full guide below is in Chinese.
 
 这个仓库提供一个可直接扩展的 Ulanzi DX200 / Ulanzi Deck JavaScript 插件最小框架。
@@ -440,3 +440,17 @@ npm install
 - [JEAN-ALMEIDA-CZO/Ulanzi-Uptime-Monitor-Plugin](https://github.com/JEAN-ALMEIDA-CZO/Ulanzi-Uptime-Monitor-Plugin)
 - [JEAN-ALMEIDA-CZO/Ulanzi-Pomodoro-Timer](https://github.com/JEAN-ALMEIDA-CZO/Ulanzi-Pomodoro-Timer)
 - [narlei/ulanzideck_claude](https://github.com/narlei/ulanzideck_claude)
+
+## 致谢 / Acknowledgements
+
+本项目在开发中大量使用 AI 结对编程协助：
+
+- **ChatGPT (Codex)** — OpenAI 的 Codex CLI，参与需求拆解与实现
+- **Claude (Claude Code)** — Anthropic，参与实现、评审与文档
+
+This project was built with AI pair-programming assistance from
+**ChatGPT (Codex)** and **Claude (Claude Code)**.
+
+## 许可 / License
+
+以 [MIT License](LICENSE) 开源。Licensed under the [MIT License](LICENSE).
