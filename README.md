@@ -241,7 +241,7 @@ export ULANZI_SIMULATOR_DIR=/tmp/UlanziDeckPlugin-SDK/UlanziDeckSimulator
 同步插件到 Simulator：
 
 ```bash
-cd /Users/yuanlei/Documents/Lab/Ulanzi
+# 在仓库根目录执行
 npm run dev:sim -- --plugin com.ulanzi.lexutility.ulanziPlugin
 ```
 
@@ -259,7 +259,7 @@ npm run sync-plugin -- \
 对 Node.js 插件，还需要单独启动主服务：
 
 ```bash
-cd /Users/yuanlei/Documents/Lab/Ulanzi
+# 在仓库根目录执行
 npm run run-plugin -- --plugin com.ulanzi.lexutility.ulanziPlugin
 ```
 
