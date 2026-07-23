@@ -2,6 +2,9 @@
   "name": "ulanzi-dx200-plugin-starter",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "node --test --import ./tests/setup.mjs tests/*.test.js",
     "new": "node scripts/create-plugin.mjs",
