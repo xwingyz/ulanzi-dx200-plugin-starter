@@ -445,11 +445,10 @@ npm install
 
 - **[@xwingyz](https://github.com/xwingyz)** — 作者与维护者 / author & maintainer
 - **ChatGPT (Codex)** — OpenAI 的 Codex CLI，AI 结对编程，参与需求拆解与实现
-- **Claude (Claude Code)** — Anthropic，AI 结对编程，参与实现、评审与文档
 
 > GitHub 的 Contributors 图谱按提交作者邮箱统计，不会列出 AI 工具，
 > 因此在此显式记录。This project was built with AI pair-programming
-> assistance from **ChatGPT (Codex)** and **Claude (Claude Code)**.
+> assistance from **ChatGPT (Codex)**.
 
 ## 许可 / License
 
