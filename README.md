@@ -1,5 +1,12 @@
 # Ulanzi DX200 Plugin Starter
 
+> **English (short version):** A minimal, ready-to-extend base for building
+> Ulanzi DX200 / Ulanzi Deck JavaScript plugins. It ships a runnable plugin
+> template, a trimmed Ulanzi WebSocket API wrapper, a simple Property Inspector,
+> and a scaffolding command (`npm run new`) to spin up more independent plugins.
+> Run the test suite with `npm test` (Node.js 20+, zero runtime dependencies).
+> Licensed under [MIT](LICENSE). The full guide below is in Chinese.
+
 这个仓库提供一个可直接扩展的 Ulanzi DX200 / Ulanzi Deck JavaScript 插件最小框架。
 
 长期协作规则见 [docs/development-rules.md](docs/development-rules.md)，基座架构分析见 [docs/base-architecture.md](docs/base-architecture.md)，Lex Utility 基座与 3 个生产 action 的持续维护规格见 [docs/specifications/](docs/specifications/README.md)。
