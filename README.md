@@ -9,7 +9,7 @@
 
 这个仓库提供一个可直接扩展的 Ulanzi DX200 / Ulanzi Deck JavaScript 插件最小框架。
 
-长期协作规则见 [docs/development-rules.md](docs/development-rules.md)，基座架构分析见 [docs/base-architecture.md](docs/base-architecture.md)，Lex Utility 基座与 3 个生产 action 的持续维护规格见 [docs/specifications/](docs/specifications/README.md)。
+长期协作规则见 [docs/development-rules.md](docs/development-rules.md)，基座架构分析见 [docs/base-architecture.md](docs/base-architecture.md)，Lex Utility 基座与各生产 action 的持续维护规格见 [docs/specifications/](docs/specifications/README.md)。
 
 当前已经按官方 SDK 的公开约定收敛了最关键的命名规则：
 
@@ -49,7 +49,7 @@
 │       │   └── actions/<key>.js   # 每个 action 的私有实现
 │       └── property-inspector/   # 每个 action 一组 <key>.html + <key>.js，共用 inspector-shared.js
 └── plugins/
-    └── com.ulanzi.lexutility.ulanziPlugin/   # 示例插件（3 个生产 action）
+    └── com.ulanzi.lexutility.ulanziPlugin/   # 示例插件（一组生产 action）
 ```
 
 ## 快速开始
@@ -83,7 +83,7 @@ plugins/com.ulanzi.lexutility.ulanziPlugin
   - `com.ulanzi.ulanzistudio.<id>.fontprobe`
 - `id` 会被规整成单一段名，只保留字母数字；例如 `lex-utility` 会变成 `lexutility`
 
-模板现在默认带 4 个示例 action，但结构不是固定 3 个，也不是固定 4 个。后续继续新增 action 时，主要补这几处：
+模板默认带一组示例 action（当前为 4 个：Counter / Badge / Swatch / Font Test），数量不是固定的。后续继续新增 action 时，主要补这几处：
 
 - `plugin/actions/<key>.js` 的 action 定义，并在 `plugin/actions/index.js` 注册
 - `manifest.json` 里的 `Actions`
@@ -114,7 +114,7 @@ npm install
 然后从仓库根目录同步到 macOS 的 Ulanzi 插件目录：
 
 ```bash
-cd /Users/yuanlei/Documents/Lab/Ulanzi
+# 在仓库根目录执行
 npm run install-plugin -- --plugin com.ulanzi.lexutility.ulanziPlugin
 ```
 
@@ -320,15 +320,21 @@ npm test
 
 > 约定：action key 用于 UUID、`plugin/actions/<key>.js` 的注册 key、`property-inspector/<key>.html` 与 `<key>.js`、`assets/icons/action<Key>.svg` 四层命名，必须保持一致（详见 [docs/development-rules.md](docs/development-rules.md) §4、§8）。`Font Test` 的展示名是 “Font Test”，但 key 是 `fontprobe`，对应文件即 `fontprobe.html` / `fontprobe.js`。
 
-仓库内的业务插件 `plugins/com.ulanzi.lexutility.ulanziPlugin` 不携带上述模板测试 action，只保留实际使用的工具：
+仓库内的业务插件 `plugins/com.ulanzi.lexutility.ulanziPlugin` 不携带上述模板测试 action，只保留实际使用的工具（当前 9 个）：
 
-- `Latency`（key `latency`）：网络/接口延迟监测展示
-- `Pomowave`（key `pomowave`）：番茄钟节奏可视化
-- `Network Speed`（key `speedtest`）：使用用户单独安装并接受条款的 Ookla Speedtest CLI，按实例测试中国大陆或海外节点的上下行速度
+- `Network Speed`（key `speedtest`）：用 Ookla Speedtest 服务器测下载/上传速度（需单独安装并接受其条款的 Speedtest CLI）
+- `Latency Monitor`（key `latency`）：监控单个 URL，实时显示延迟
+- `Pomowave`（key `pomowave`）：番茄钟，带声音提示与节奏性休息
+- `Claude Usage`（key `claudeusage`）：显示 Claude 订阅额度（每周 + 5 小时窗口）及重置倒计时；凭据从 macOS 钥匙串只读读取，仅 macOS
+- `ChatGPT Usage`（key `chatgptusage`）：从 Codex CLI 读取用量额度与重置倒计时
+- `Bambu P2S Status`（key `bambustatus`）：显示单台拓竹 P2S 的实时状态、进度、已用/剩余时间
+- `Synology NAS Status`（key `nasstatus`）：监控单台群晖 NAS 的在线状态、系统温度、卷使用率
+- `System Status`（key `systemstatus`）：显示最多 3 项实时指标（CPU / 内存 / GPU / 温度 / 上传 / 下载）
+- `Health Break`（key `healthbreak`）：长时间用电脑时引导护眼、体态、活动的短暂休息
 
 新增 action 时按相同四层命名扩展即可，不需要改脚手架。
 
-三个业务 action 都复用内置主题、安全框和共享 Inspector。
+这些业务 action 都复用内置主题、安全框和共享 Inspector。
 
 图标基线：
 

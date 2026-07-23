@@ -17,5 +17,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+      # The test suite imports the plugin's runtime modules (ws, mqtt, …),
+      # so the plugin's dependencies must be installed before running tests.
+      - name: Install plugin dependencies
+        working-directory: plugins/com.ulanzi.lexutility.ulanziPlugin
+        run: npm ci --registry https://registry.npmjs.org
       - name: Run tests
         run: npm test
