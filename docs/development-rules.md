@@ -207,6 +207,17 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 恢复默认按钮只发送 `__resetDefaults` 控制参数并取消未提交的去抖尾值；默认值的唯一权威是插件侧 `ACTION_CONFIGS.defaults`，PI 页面不得自带默认值副本。
 - PI 每次连接成功都发送一次 `__requestSettings` 控制请求；在收到权威回推前不得主动提交 HTML 初始值。
 
+## 7.1 多语言（i18n）规范
+
+对齐官方 `plugin-common-html` 约定，i18n 作为基础层能力，新 action / 新插件默认继承。
+
+- **语言文件**：插件根目录下 `<locale>.json`（与 `libs/` 同级），locale 用完整形态（`en.json` / `zh_CN.json` / `zh_HK.json` / `ja_JP.json` …）。**新增语言 = 丢一个语言文件，零改代码**。
+- **文件结构（四段制）**：`Name`、`Description`、`Actions[]`（按 `manifest.json` 的 Actions 顺序对齐，每项 `{Name, Tooltip}`，宿主用它本地化动作列表）、`Localization{}`（key → 译文，配 `data-localize`）。
+- **key 对齐**：所有语言文件的 `Localization` key 集必须与 `en.json` 完全一致；缺 key 会在界面漏出未翻译文案。`en.json` 是回退基准。由 `tests/i18n.test.js` 锁定。
+- **PI 侧**：文案元素加 `data-localize`（缺省 key 时回退元素当前文案）；`localizeUI` 由 `libs/js/ulanzideckApi.js` 统一处理 text/placeholder/title；代码里取译文用 `$UD.t('key')`。语言从宿主 query 参数 `language` 解析，`adaptLanguage` 未知 locale 保留 `xx_YY`。
+- **运行态（Node）侧**：图标文案经 `libs/node/i18n.js` 的 `createI18n({dir}).t(key)` 本地化，与 PI 复用同一份 `<locale>.json`；语言从 OS locale（`LANG` 等）解析，回退英文。避免在 `render` 里硬编码用户可见英文句子（`ERR` 这类通用缩写除外）。
+- **回流模板**：`libs/js/utils.js`、`libs/js/ulanzideckApi.js`、`libs/node/i18n.js` 属基础层，必须与 template 逐字节一致（`tests/i18n.test.js` 校验）。
+
 ## 8. 新增 Action 的标准步骤
 
 1. 先确认 action key、用途、默认标题和默认 theme。

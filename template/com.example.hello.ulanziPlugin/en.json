@@ -1,4 +1,12 @@
 {
+  "Name": "__PLUGIN_NAME__",
+  "Description": "__PLUGIN_DESCRIPTION__",
+  "Actions": [
+    { "Name": "Counter", "Tooltip": "Incrementing counter action." },
+    { "Name": "Badge", "Tooltip": "Toggleable status badge." },
+    { "Name": "Swatch", "Tooltip": "Cycle through preset colors." },
+    { "Name": "Font Test", "Tooltip": "Three-line font size test for 28px, 32px, and 36px." }
+  ],
   "Localization": {
     "__PLUGIN_NAME__": "__PLUGIN_NAME__",
     "Title": "Title",
@@ -10,6 +18,7 @@
     "Defaults restored": "Defaults restored",
     "Safe frame": "Safe frame",
     "Optimal area": "Optimal area",
-    "Show frame": "Show frame"
+    "Show frame": "Show frame",
+    "see plugin log": "see plugin log"
   }
 }

@@ -1,5 +1,6 @@
 import UlanzideckApi from '../libs/node/ulanzideckApi.js';
 import { log } from '../libs/node/utils.js';
+import { createI18n } from '../libs/node/i18n.js';
 import { createActionModules } from './actions/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 const PLUGIN_UUID = 'com.ulanzi.ulanzistudio.lexutility';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// 运行态图标文案的本地化：语言文件在插件根目录（与 libs/ 同级）。
+const i18n = createI18n({ dir: path.join(__dirname, '..') });
+const t = (key) => i18n.t(key);
 // 数据目录默认在插件目录下，但允许 ULANZI_PLUGIN_DATA_DIR 覆盖。宿主永远不设它——
 // 这是给测试用的：测试会 import 本文件并触发真实落盘，不隔离就会把测试键写进仓库的
 // data/，再被同步脚本带到用户机器上。路径常量在 import 期求值，所以只能靠进程级环境
@@ -449,7 +453,7 @@ function renderErrorState(instance) {
         ${renderScreenFrame(theme, theme.accent, `
           <text x="128" y="116" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="700" font-family="Arial, Helvetica, sans-serif">ERR</text>
           <text x="128" y="150" text-anchor="middle" fill="${theme.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${escapeXml(actionKey)}</text>
-          <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">see plugin log</text>
+          <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">${escapeXml(t('see plugin log'))}</text>
         `, frameFor(instance.settings || {}))}
       </svg>
     `));

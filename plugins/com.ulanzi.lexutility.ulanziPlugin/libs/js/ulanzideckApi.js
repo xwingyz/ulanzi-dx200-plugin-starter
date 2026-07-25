@@ -88,12 +88,25 @@ class UlanziDeck {
     if (!this.localization) {
       return;
     }
+    // 对齐官方 plugin-common-html：按元素类型选择本地化目标属性，
+    // data-localize 显式指定 key，缺省时回退到元素当前文案/占位符。
     wrapper.querySelectorAll('[data-localize]').forEach((element) => {
       const key = element.dataset.localize;
-      if (key && this.localization[key]) {
-        element.textContent = this.localization[key];
+      const tag = element.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') {
+        element.placeholder = this.localization[key || element.placeholder] || element.placeholder;
+      } else if (element.title) {
+        element.title = this.localization[key || element.title] || element.title;
+      } else {
+        const source = key || element.textContent;
+        element.textContent = this.localization[source] || element.textContent;
       }
     });
+  }
+
+  // 对齐官方：取译文，缺失时回退 key 本身，便于代码里直接 $UD.t('Save')。
+  t(key) {
+    return (this.localization && this.localization[key]) || key;
   }
 
   encodeContext(data) {

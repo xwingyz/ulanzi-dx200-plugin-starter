@@ -1,4 +1,17 @@
 {
+  "Name": "Lex Utility",
+  "Description": "Ulanzi DX200 实用工具起步插件。",
+  "Actions": [
+    { "Name": "网络测速", "Tooltip": "通过 Ookla Speedtest 服务器测试下载和上传速度。" },
+    { "Name": "延迟监测", "Tooltip": "监测单个 URL 并实时显示延迟。" },
+    { "Name": "Pomowave", "Tooltip": "带声音提示和节奏休息的番茄钟。" },
+    { "Name": "Claude 用量", "Tooltip": "显示 Claude 订阅用量：每周与 5 小时额度及重置倒计时。仅限 macOS。" },
+    { "Name": "ChatGPT 用量", "Tooltip": "从 Codex CLI 显示 Codex 用量额度与重置倒计时。" },
+    { "Name": "拓竹 P2S 状态", "Tooltip": "显示单台 Bambu Lab P2S 的实时状态、进度、已用与剩余时间。" },
+    { "Name": "群晖 NAS 状态", "Tooltip": "监测单台群晖 NAS：在线状态、系统温度与存储空间占用。" },
+    { "Name": "系统状态", "Tooltip": "实时显示最多三项 CPU、内存、GPU、温度、上传或下载指标。" },
+    { "Name": "健康休息", "Tooltip": "在长时间用电脑时引导短暂的护眼、姿势与活动休息。" }
+  ],
   "Localization": {
     "Lex Utility": "Lex Utility",
     "Bambu P2S Status": "拓竹 P2S 状态",
@@ -13,6 +26,7 @@
     "Reset timer": "重置计时",
     "Skip phase": "跳过阶段",
     "Optimal area": "最佳范围",
-    "Show frame": "显示边框"
+    "Show frame": "显示边框",
+    "see plugin log": "详见插件日志"
   }
 }

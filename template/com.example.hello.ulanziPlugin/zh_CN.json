@@ -1,4 +1,12 @@
 {
+  "Name": "__PLUGIN_NAME__",
+  "Description": "__PLUGIN_DESCRIPTION__",
+  "Actions": [
+    { "Name": "计数器", "Tooltip": "递增计数动作。" },
+    { "Name": "徽章", "Tooltip": "可切换的状态徽章。" },
+    { "Name": "色卡", "Tooltip": "在预设颜色间循环。" },
+    { "Name": "字体测试", "Tooltip": "28px、32px、36px 三行字号测试。" }
+  ],
   "Localization": {
     "__PLUGIN_NAME__": "__PLUGIN_NAME__",
     "Title": "标题",
@@ -10,6 +18,7 @@
     "Defaults restored": "已恢复默认",
     "Safe frame": "安全边框",
     "Optimal area": "最佳范围",
-    "Show frame": "显示边框"
+    "Show frame": "显示边框",
+    "see plugin log": "详见插件日志"
   }
 }
