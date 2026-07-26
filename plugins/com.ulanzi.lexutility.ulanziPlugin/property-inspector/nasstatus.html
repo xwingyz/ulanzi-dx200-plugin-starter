@@ -40,6 +40,8 @@
       .probe-btn { width: 100%; margin-bottom: 12px; border: 1px solid var(--accent); background: rgba(20,184,166,.12); color: #5eead4; }
       .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
       .uspi-feedback[hidden] { display: none; }
+          .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
+      .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     </style>
   </head>
   <body>
@@ -48,7 +50,6 @@
         <div class="brand">
           <h1>群晖 NAS 状态</h1>
         </div>
-        <p>只读监控一台 Synology NAS。建议使用专门创建的免 2FA 低权限账号。</p>
         <form id="property-inspector">
           <div class="field">
             <label for="nasHost">NAS 地址</label>
@@ -100,6 +101,7 @@
             <label for="pollSec">刷新间隔（秒）</label>
             <input id="pollSec" name="pollSec" inputmode="numeric" autocomplete="off" placeholder="60">
           </div>
+          <hr class="pi-divider">
           <div class="field">
             <label for="theme">主题</label>
             <input id="theme" name="theme" type="hidden" value="mint">
@@ -112,6 +114,15 @@
               <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
             </div>
           </div>
+          <div class="field">
+            <label for="uiLanguage" data-localize="Language">Language</label>
+            <select id="uiLanguage" name="uiLanguage">
+              <option value="auto" data-localize="Auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh_CN">简体中文</option>
+            </select>
+          </div>
+          <p class="pi-note">只读监控一台 Synology NAS。建议使用专门创建的免 2FA 低权限账号。</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button class="save-btn" type="submit" data-localize="Save">Save</button>

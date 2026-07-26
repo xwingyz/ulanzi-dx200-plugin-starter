@@ -39,13 +39,14 @@
       .diag .bad { color: #ef4444; }
       .diag .good { color: #22c55e; }
       .probe-btn { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: rgba(161, 161, 170, 0.14); color: var(--text); font-weight: 700; cursor: pointer; }
+          .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
+      .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     </style>
   </head>
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
         <h1>ChatGPT Usage</h1>
-        <p>通过 Codex CLI 读取限额用量与重置倒计时。需要先安装 Codex CLI 并运行 <code>codex login</code>。显示的是 Codex 限额，不是整个 ChatGPT 账户的用量。</p>
         <form id="property-inspector">
           <div class="field">
             <label for="codexCommand">Codex 命令</label>
@@ -93,19 +94,6 @@
             <div class="hint">分级阈值：已用 ≥75% 转黄、≥90% 转红，与 Claude Usage 一致。</div>
           </div>
           <div class="field">
-            <label for="theme">Theme</label>
-            <input id="theme" name="theme" type="hidden" value="mono">
-            <div class="theme-row" role="group" aria-label="Theme">
-            </div>
-          </div>
-          <div class="field">
-            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
-            <div class="frame-row">
-              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
-              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
-            </div>
-          </div>
-          <div class="field">
             <label data-localize="Diagnostics">Diagnostics</label>
             <div class="diag">
               <dl>
@@ -120,6 +108,29 @@
               <button class="probe-btn" id="probe" type="button">立即测试</button>
             </div>
           </div>
+          <hr class="pi-divider">
+          <div class="field">
+            <label for="theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="mono">
+            <div class="theme-row" role="group" aria-label="Theme">
+            </div>
+          </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="uiLanguage" data-localize="Language">Language</label>
+            <select id="uiLanguage" name="uiLanguage">
+              <option value="auto" data-localize="Auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh_CN">简体中文</option>
+            </select>
+          </div>
+          <p class="pi-note">通过 Codex CLI 读取限额用量与重置倒计时。需要先安装 Codex CLI 并运行 <code>codex login</code>。显示的是 Codex 限额，不是整个 ChatGPT 账户的用量。</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button class="save-btn" type="submit" data-localize="Save">Save</button>

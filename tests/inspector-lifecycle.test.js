@@ -80,6 +80,7 @@ function createHarness(entryFile) {
     ['title', new FakeElement({ id: 'title', value: 'latest' })],
     ['frameSize', new FakeElement({ id: 'frameSize', type: 'checkbox', dataset: { on: 'optimal', off: 'max' } })],
     ['showFrame', new FakeElement({ id: 'showFrame', type: 'checkbox' })],
+    ['uiLanguage', new FakeElement({ id: 'uiLanguage', value: 'auto' })],
     ['graphMode', new FakeElement({ id: 'graphMode', value: 'bars' })],
     ['soundStyle', new FakeElement({ id: 'soundStyle', value: 'glass' })],
     ['resetTimer', new FakeElement({ id: 'resetTimer' })],
@@ -135,6 +136,7 @@ function createHarness(entryFile) {
 
   const callbacks = { connected: [], add: [], app: [], plugin: [] };
   const sends = [];
+  const languageCalls = [];
   const $UD = {
     connect: () => {},
     onConnected: (callback) => callbacks.connected.push(callback),
@@ -142,6 +144,7 @@ function createHarness(entryFile) {
     onParamFromApp: (callback) => callbacks.app.push(callback),
     onParamFromPlugin: (callback) => callbacks.plugin.push(callback),
     sendParamFromPlugin: (settings, context) => sends.push({ settings, context }),
+    setLanguage: (lang) => languageCalls.push(lang),
   };
 
   const context = vm.createContext({
@@ -173,6 +176,7 @@ function createHarness(entryFile) {
     callbacks,
     elements,
     form,
+    languageCalls,
     runTimers,
     selectors,
     sends,
@@ -258,6 +262,33 @@ test('mapped checkbox collects data-on/off values and applies back from settings
   assert.equal(frameSize.checked, true);
   harness.callbacks.add.forEach((callback) => callback({ context: 'ctx-1', param: { frameSize: 'max' } }));
   assert.equal(frameSize.checked, false);
+});
+
+test('language selector re-localizes on change and persists the choice', () => {
+  const harness = createHarness();
+  harness.callbacks.connected[0]();
+  harness.languageCalls.length = 0; // 忽略首个 add（空 param）的初始重定位。
+
+  const select = harness.elements.get('uiLanguage');
+  select.value = 'zh_CN';
+  select.dispatchEvent({ type: 'change' });
+  harness.runTimers();
+
+  // 立即触发界面重定位。
+  assert.deepEqual(harness.languageCalls, ['zh_CN']);
+  // 选择随普通设置一起持久化（走既有管线）。
+  assert.equal(harness.sends.at(-1).settings.uiLanguage, 'zh_CN');
+});
+
+test('persisted uiLanguage re-localizes the panel when settings arrive', () => {
+  const harness = createHarness();
+  harness.callbacks.connected[0]();
+  harness.languageCalls.length = 0;
+
+  harness.elements.get('uiLanguage').value = 'en';
+  harness.callbacks.add.forEach((cb) => cb({ context: 'ctx-1', param: { uiLanguage: 'en' } }));
+
+  assert.ok(harness.languageCalls.includes('en'));
 });
 
 test('reset defaults button cancels pending autosave and sends only the reset control', () => {

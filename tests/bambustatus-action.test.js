@@ -98,7 +98,8 @@ test('bambustatus host restore echoes the saved printer name and connection sett
   controller.hostRestore(context, { ...persisted });
 
   assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0], { __settingsSync: 'true', ...persisted });
+  // uiLanguage 是框架级通用设置，归一化后恒存在（默认 'auto'）。
+  assert.deepEqual(sent[0], { __settingsSync: 'true', uiLanguage: 'auto', ...persisted });
 });
 
 test('bambustatus completion snapshot hydration is versioned', () => {

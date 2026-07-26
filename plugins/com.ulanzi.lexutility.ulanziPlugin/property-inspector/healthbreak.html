@@ -51,13 +51,14 @@
       .ghost-btn { background: rgba(82, 224, 196, 0.1); color: var(--text); border: 1px solid var(--line) !important; }
       .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
       .uspi-feedback[hidden] { display: none; }
+          .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
+      .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     </style>
   </head>
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
         <h1>Health Break · 健康微休息</h1>
-        <p>短按开始或暂停，长按跳过到期提醒；练习中长按取消。完整跟完引导记为完成一次。</p>
         <form id="property-inspector">
           <div class="field">
             <span class="field-label">动作组（1～4 个，按此顺序执行）</span>
@@ -94,6 +95,14 @@
             <div class="field"><label for="repeatReminderMin">增强提醒间隔（分钟）</label><input id="repeatReminderMin" name="repeatReminderMin" type="number" min="0" max="30"></div>
             <div class="field"><label>声音</label><label class="toggle" for="soundEnabled"><span>阶段提示音</span><input id="soundEnabled" name="soundEnabled" type="checkbox"></label></div>
           </div>
+
+          <h2>最近 30 个健康日</h2>
+          <div class="stats">
+            <div class="stats-summary"><div><strong id="todayCompleted">0</strong>今日完成</div><div><strong id="todayBonus">0</strong>今日加练</div><div><strong id="streak">0</strong>连续达标</div></div>
+            <div class="history" id="history"><div class="history-row"><span>暂无记录</span></div></div>
+          </div>
+
+          <hr class="pi-divider">
           <div class="field">
             <label for="theme">主题</label><input id="theme" name="theme" type="hidden"><div class="theme-row" role="group" aria-label="Theme"></div>
           </div>
@@ -104,13 +113,15 @@
               <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox"><span>显示通用边框</span></label>
             </div>
           </div>
-
-          <h2>最近 30 个健康日</h2>
-          <div class="stats">
-            <div class="stats-summary"><div><strong id="todayCompleted">0</strong>今日完成</div><div><strong id="todayBonus">0</strong>今日加练</div><div><strong id="streak">0</strong>连续达标</div></div>
-            <div class="history" id="history"><div class="history-row"><span>暂无记录</span></div></div>
+          <div class="field">
+            <label for="uiLanguage" data-localize="Language">Language</label>
+            <select id="uiLanguage" name="uiLanguage">
+              <option value="auto" data-localize="Auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh_CN">简体中文</option>
+            </select>
           </div>
-
+          <p class="pi-note">短按开始或暂停，长按跳过到期提醒；练习中长按取消。完整跟完引导记为完成一次。</p>
           <div class="action-row"><button class="ghost-btn" id="resetDefaults" type="button">恢复默认</button><button class="save-btn" type="submit">保存</button></div>
           <div class="uspi-feedback" id="inspector-feedback" hidden><span id="feedback-saved" hidden>已保存</span><span id="feedback-reset" hidden>已恢复默认</span></div>
         </form>

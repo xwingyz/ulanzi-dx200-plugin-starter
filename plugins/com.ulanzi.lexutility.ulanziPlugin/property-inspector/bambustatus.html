@@ -37,6 +37,8 @@
       .scan-btn { width: 100%; margin-bottom: 12px; border: 1px solid #00ae42; background: rgba(0,174,66,.12); color: #86efac; }
       .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
       .uspi-feedback[hidden] { display: none; }
+          .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
+      .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     </style>
   </head>
   <body>
@@ -46,7 +48,6 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z"/></svg>
           <h1>拓竹 P2S 状态</h1>
         </div>
-        <p>只读监测一台打印机。保持云端模式，不要求开启 LAN Only 或 Developer Mode。</p>
         <form id="property-inspector">
           <button class="scan-btn" id="scanPrinter" type="button">扫描并自动填充</button>
           <div class="scan-status" id="scanStatus">配置不完整时会自动扫描并保存，也可随时手动重扫。</div>
@@ -67,6 +68,7 @@
             <input id="accessCode" name="accessCode" type="text" autocomplete="off" placeholder="打印机 Access Code">
             <div class="hint">按你的选择明文显示并保存在本机 action 配置中；插件不会输出到日志或键面。</div>
           </div>
+          <hr class="pi-divider">
           <div class="field">
             <label for="theme">主题</label>
             <input id="theme" name="theme" type="hidden" value="mint">
@@ -79,6 +81,15 @@
               <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
             </div>
           </div>
+          <div class="field">
+            <label for="uiLanguage" data-localize="Language">Language</label>
+            <select id="uiLanguage" name="uiLanguage">
+              <option value="auto" data-localize="Auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh_CN">简体中文</option>
+            </select>
+          </div>
+          <p class="pi-note">只读监测一台打印机。保持云端模式，不要求开启 LAN Only 或 Developer Mode。</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button class="save-btn" type="submit" data-localize="Save">Save</button>

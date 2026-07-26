@@ -187,12 +187,27 @@ function bindThemeButtons(pushSettings) {
   syncThemeButtons();
 }
 
+// 语言覆盖是框架级通用字段：无论页面 fields 是否声明，都自动纳管。
+// 页面只需提供一个 #uiLanguage <select>（选项 auto/en/zh_CN），其余由共享层处理。
+function withLanguageField(fields) {
+  return fields.includes('uiLanguage') ? fields : [...fields, 'uiLanguage'];
+}
+
+// 按 #uiLanguage 当前值把界面本地化到对应语言（'auto' 回到宿主/系统语言）。
+function applyLanguageSelection() {
+  const select = document.getElementById('uiLanguage');
+  if (select && select.value) {
+    $UD.setLanguage(select.value);
+  }
+}
+
 function initInspector(actionUuid, fields) {
+  const allFields = withLanguageField(fields);
   let currentContext = '';
   let uiBound = false;
 
   function pushSettings() {
-    $UD.sendParamFromPlugin(collectSettings(fields), currentContext);
+    $UD.sendParamFromPlugin(collectSettings(allFields), currentContext);
   }
   const autosave = debounce(pushSettings, AUTOSAVE_DEBOUNCE_MS);
 
@@ -225,6 +240,15 @@ function initInspector(actionUuid, fields) {
       autosave.cancel();
       $UD.sendParamFromPlugin({ [RESET_DEFAULTS_PARAM]: 'true' }, currentContext);
     });
+
+    // 语言选择器：立即重定位界面并提交（持久化 + 回推运行态图标语言）。
+    const languageSelect = document.getElementById('uiLanguage');
+    if (languageSelect) {
+      languageSelect.addEventListener('change', () => {
+        $UD.setLanguage(languageSelect.value);
+        commitSettings();
+      });
+    }
     window.addEventListener('pagehide', () => {
       autosave.flush();
       autosave.cancel();
@@ -241,7 +265,9 @@ function initInspector(actionUuid, fields) {
 
   function apply(message) {
     currentContext = message.context || currentContext;
-    applySettings(fields, message.param || {});
+    applySettings(allFields, message.param || {});
+    // 权威设置到达后，按持久化的 uiLanguage 把界面重定位到用户所选语言。
+    applyLanguageSelection();
   }
 
   $UD.onAdd(apply);

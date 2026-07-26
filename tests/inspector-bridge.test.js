@@ -280,6 +280,11 @@ for (const copy of COPIES) {
         'data-on="optimal"',
         'data-off="max"',
         'id="showFrame"',
+        // 语言选择器：基座通用控件，每页必备（选项 auto/en/zh_CN）。
+        'id="uiLanguage"',
+        'value="auto" data-localize="Auto"',
+        // 简体中文选项必须是正确 UTF-8 字面量（防双重编码乱码回归）。
+        '<option value="zh_CN">简体中文</option>',
         'type="submit"',
         // 主题必须走共享色卡：隐藏 theme 输入 + 空的 .theme-row 容器，
         // 页面自建 select/色板会绕过 THEME_SWATCHES 的一致性校验。

@@ -49,6 +49,21 @@ for (const plugin of PLUGINS) {
     assert.equal(en.t('see plugin log'), 'see plugin log');
   });
 
+  test(`[${plugin.name}] per-call language override beats the auto locale`, () => {
+    // autoLocale=en，但调用方传入 uiLanguage='zh_CN' 时按中文出（运行态图标跟随实例语言）。
+    const i18n = createI18n({ dir: plugin.dir, locale: 'en' });
+    assert.equal(i18n.t('see plugin log', 'zh_CN'), '详见插件日志');
+    assert.equal(i18n.t('see plugin log', 'en'), 'see plugin log');
+    // 'auto'/空回落 autoLocale（此处 en）。
+    assert.equal(i18n.t('see plugin log', 'auto'), 'see plugin log');
+    assert.equal(i18n.t('see plugin log'), 'see plugin log');
+    // 未知语言无文件 → 回退英文表。
+    assert.equal(i18n.t('see plugin log', 'ja_JP'), 'see plugin log');
+    // Language / Auto 两个语言选择器 key 存在并按语言解析。
+    assert.equal(i18n.t('Auto', 'zh_CN'), '自动');
+    assert.equal(i18n.t('Language', 'zh_CN'), '语言');
+  });
+
   test(`[${plugin.name}] language files are complete: 4 sections, en/zh key parity, manifest alignment`, () => {
     const en = readJson(path.join(plugin.dir, 'en.json'));
     const zh = readJson(path.join(plugin.dir, 'zh_CN.json'));

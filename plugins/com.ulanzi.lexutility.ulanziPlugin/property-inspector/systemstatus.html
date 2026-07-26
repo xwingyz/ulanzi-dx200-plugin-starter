@@ -28,6 +28,8 @@
       .frame-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
       .frame-toggle { display: flex; gap: 7px; align-items: center; color: var(--muted); cursor: pointer; }
       .frame-toggle input { width: auto; min-height: 0; }
+      .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
+      .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
       .platform-note { border: 1px solid var(--line); border-radius: 10px; background: rgba(7, 17, 31, 0.8); padding: 10px 12px; color: var(--muted); font-size: 12px; }
       .action-row { display: flex; gap: 10px; margin-top: 4px; }
       .action-row button { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 800; cursor: pointer; }
@@ -41,7 +43,6 @@
     <div class="uspi-wrapper hidden">
       <div class="panel">
         <h1>System Status</h1>
-        <p>选择 1～3 项本机指标。短按可立即刷新，所有数据只在本机读取。</p>
         <form id="property-inspector">
           <div class="field">
             <label>显示指标（按顺序）</label>
@@ -52,15 +53,9 @@
             </div>
             <div class="hint">同一指标不能重复；第二、第三项可设为“不显示”。</div>
           </div>
-          <div class="grid">
-            <div class="field">
-              <label for="pollSec">刷新间隔（秒）</label>
-              <input id="pollSec" name="pollSec" type="number" min="1" max="30" placeholder="由插件载入">
-            </div>
-            <div class="field">
-              <label for="frameSize">安全框</label>
-              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max"><span>最佳显示区</span></label>
-            </div>
+          <div class="field">
+            <label for="pollSec">刷新间隔（秒）</label>
+            <input id="pollSec" name="pollSec" type="number" min="1" max="30" placeholder="由插件载入">
           </div>
           <div class="field">
             <label for="lhmUrl">Windows 高级传感器</label>
@@ -70,15 +65,28 @@
           <div class="platform-note">
             macOS 的 GPU 使用系统 I/O Registry；CPU 温度在系统允许读取时显示。Windows 可用 LibreHardwareMonitor 提供更完整的 GPU 与温度值。不可用的传感器会显示 N/A，不会伪装成 0。
           </div>
-          <div class="field" style="margin-top: 12px">
-            <label for="theme">主题</label>
+          <hr class="pi-divider">
+          <div class="field">
+            <label for="theme">Theme</label>
             <input id="theme" name="theme" type="hidden">
             <div class="theme-row" role="group" aria-label="Theme"></div>
           </div>
           <div class="field">
-            <label>边框</label>
-            <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox"><span>显示通用边框</span></label>
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max"><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox"><span data-localize="Show frame">Show frame</span></label>
+            </div>
           </div>
+          <div class="field">
+            <label for="uiLanguage" data-localize="Language">Language</label>
+            <select id="uiLanguage" name="uiLanguage">
+              <option value="auto" data-localize="Auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh_CN">简体中文</option>
+            </select>
+          </div>
+          <p class="pi-note">选择 1～3 项本机指标。短按可立即刷新，所有数据只在本机读取。</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button">恢复默认</button>
             <button class="save-btn" type="submit">保存</button>

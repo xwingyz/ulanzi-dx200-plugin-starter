@@ -2,15 +2,42 @@
   "Name": "Lex Utility",
   "Description": "Utility starter plugin for Ulanzi DX200.",
   "Actions": [
-    { "Name": "Network Speed", "Tooltip": "Test download and upload speed with an Ookla Speedtest server." },
-    { "Name": "Latency Monitor", "Tooltip": "Monitor one URL and show live latency." },
-    { "Name": "Pomowave", "Tooltip": "Pomodoro timer with sound cues and rhythmic breaks." },
-    { "Name": "Claude Usage", "Tooltip": "Show Claude subscription usage: weekly and 5-hour limits with reset countdowns. macOS only." },
-    { "Name": "ChatGPT Usage", "Tooltip": "Show Codex usage limits and reset countdowns from the Codex CLI." },
-    { "Name": "Bambu P2S Status", "Tooltip": "Show live status, progress, elapsed time and remaining time for one Bambu Lab P2S." },
-    { "Name": "Synology NAS Status", "Tooltip": "Monitor one Synology NAS: online state, system temperature and volume usage." },
-    { "Name": "System Status", "Tooltip": "Show up to three live CPU, RAM, GPU, temperature, upload or download metrics." },
-    { "Name": "Health Break", "Tooltip": "Guide short eye, posture and movement breaks for long computer sessions." }
+    {
+      "Name": "Network Speed",
+      "Tooltip": "Test download and upload speed with an Ookla Speedtest server."
+    },
+    {
+      "Name": "Latency Monitor",
+      "Tooltip": "Monitor one URL and show live latency."
+    },
+    {
+      "Name": "Pomowave",
+      "Tooltip": "Pomodoro timer with sound cues and rhythmic breaks."
+    },
+    {
+      "Name": "Claude Usage",
+      "Tooltip": "Show Claude subscription usage: weekly and 5-hour limits with reset countdowns. macOS only."
+    },
+    {
+      "Name": "ChatGPT Usage",
+      "Tooltip": "Show Codex usage limits and reset countdowns from the Codex CLI."
+    },
+    {
+      "Name": "Bambu P2S Status",
+      "Tooltip": "Show live status, progress, elapsed time and remaining time for one Bambu Lab P2S."
+    },
+    {
+      "Name": "Synology NAS Status",
+      "Tooltip": "Monitor one Synology NAS: online state, system temperature and volume usage."
+    },
+    {
+      "Name": "System Status",
+      "Tooltip": "Show up to three live CPU, RAM, GPU, temperature, upload or download metrics."
+    },
+    {
+      "Name": "Health Break",
+      "Tooltip": "Guide short eye, posture and movement breaks for long computer sessions."
+    }
   ],
   "Localization": {
     "Lex Utility": "Lex Utility",
@@ -27,6 +54,8 @@
     "Skip phase": "Skip phase",
     "Optimal area": "Optimal area",
     "Show frame": "Show frame",
-    "see plugin log": "see plugin log"
+    "see plugin log": "see plugin log",
+    "Language": "Language",
+    "Auto": "Auto"
   }
 }

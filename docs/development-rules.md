@@ -209,14 +209,15 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 ## 7.1 多语言（i18n）规范
 
-对齐官方 `plugin-common-html` 约定，i18n 作为基础层能力，新 action / 新插件默认继承。
+对齐官方 `plugin-common-html` 约定，i18n 作为基础层能力，新 action / 新插件默认继承。**为单个 action 补多语言的执行细则、步骤与完成定义，见 [i18n-guide.md](i18n-guide.md)。**
 
 - **语言文件**：插件根目录下 `<locale>.json`（与 `libs/` 同级），locale 用完整形态（`en.json` / `zh_CN.json` / `zh_HK.json` / `ja_JP.json` …）。**新增语言 = 丢一个语言文件，零改代码**。
 - **文件结构（四段制）**：`Name`、`Description`、`Actions[]`（按 `manifest.json` 的 Actions 顺序对齐，每项 `{Name, Tooltip}`，宿主用它本地化动作列表）、`Localization{}`（key → 译文，配 `data-localize`）。
 - **key 对齐**：所有语言文件的 `Localization` key 集必须与 `en.json` 完全一致；缺 key 会在界面漏出未翻译文案。`en.json` 是回退基准。由 `tests/i18n.test.js` 锁定。
 - **PI 侧**：文案元素加 `data-localize`（缺省 key 时回退元素当前文案）；`localizeUI` 由 `libs/js/ulanzideckApi.js` 统一处理 text/placeholder/title；代码里取译文用 `$UD.t('key')`。语言从宿主 query 参数 `language` 解析，`adaptLanguage` 未知 locale 保留 `xx_YY`。
-- **运行态（Node）侧**：图标文案经 `libs/node/i18n.js` 的 `createI18n({dir}).t(key)` 本地化，与 PI 复用同一份 `<locale>.json`；语言从 OS locale（`LANG` 等）解析，回退英文。避免在 `render` 里硬编码用户可见英文句子（`ERR` 这类通用缩写除外）。
-- **回流模板**：`libs/js/utils.js`、`libs/js/ulanzideckApi.js`、`libs/node/i18n.js` 属基础层，必须与 template 逐字节一致（`tests/i18n.test.js` 校验）。
+- **运行态（Node）侧**：图标文案经 `libs/node/i18n.js` 的 `t(key, uiLanguage)` 本地化，与 PI 复用同一份 `<locale>.json`。`uiLanguage` 为 `'auto'`/空时跟随 OS locale（`LANG` 等），否则用该实例所选语言；均回退英文。`render` 里统一 `t(key, instance.settings.uiLanguage)`，避免硬编码用户可见英文句子（`ERR` 这类通用缩写除外）。
+- **语言覆盖（用户手动设置）**：框架提供 `uiLanguage` 通用设置（`auto`/`en`/`zh_CN`，默认 `auto`），在自动探测之上让用户按键覆盖。`normalizeSettings` 无条件归一化它（不依赖 per-action defaults）；每个 PI 页面必须有一个 `#uiLanguage <select>`（选项 `auto`/`en`/`zh_CN`，`Auto` 与标题 `Language` 走 `data-localize`），由 `inspector-shared.js` 自动纳管：change 时 `$UD.setLanguage()` 即时重定位界面并持久化，运行态图标经该实例 `uiLanguage` 同步切换。作用范围是**每个 action 独立**（与主题/安全框同层）。
+- **回流模板**：`libs/js/utils.js`、`libs/js/ulanzideckApi.js`、`libs/node/i18n.js`、`inspector-shared.js` 属基础层，必须与 template 逐字节一致（`tests/i18n.test.js` 校验）。
 
 ## 8. 新增 Action 的标准步骤
 
@@ -226,8 +227,9 @@ settings 与运行态是两套东西，不得混用同一个存储：
 4. 只在 `plugin/actions/index.js` 导入并加入 `createActionModules(runtime)`；`ACTION_CONFIGS`、`ACTIONS`、`ACTION_KEY_BY_UUID` 由框架自动生成，不手写第二套映射。
 5. 新建 `property-inspector/<action>.html` 和 `<action>.js`，优先从最接近的现有 action 复制。
 6. 补 `assets/icons/action<Something>.svg`。
-7. 新建 `tests/<key>-action.test.js`；`testing` 导出的通用符号加 action 前缀防撞（见 §4「Action 与测试的代码隔离」）。
-8. 用 `npm run dev:desktop -- --plugin <plugin> --mode sync|rebind|restart` 验证。
+7. **一开始就做多语言**：PI 页面文案与运行态图标文案默认写英文并挂 `data-localize` / 走 `t()`，同步把 key 加进 `en.json`（英文）与 `zh_CN.json`（中文），并在两个语言文件的 `Actions[]` 末尾按 manifest 顺序补上本 action 的 `Name`/`Tooltip`。细则见 [i18n-guide.md](i18n-guide.md)；别先写死一种语言再返工。
+8. 新建 `tests/<key>-action.test.js`；`testing` 导出的通用符号加 action 前缀防撞（见 §4「Action 与测试的代码隔离」）。
+9. 用 `npm run dev:desktop -- --plugin <plugin> --mode sync|rebind|restart` 验证；并在宿主中/英切换确认无漏译、无中英混排。
 
 ## 9. 项目结构演进规则
 
@@ -339,6 +341,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - `sync` 或 `restart` 后能在宿主看到正确按钮。
 - Inspector 改值后，按钮能实时或预期地刷新。
 - 删除旧实例并重新拖放后，UUID 绑定正常。
+- **多语言完整**：PI 与运行态无硬编码单语言文案（数据/通用缩写除外），`en.json`/`zh_CN.json` 的 key 两端对齐、`Actions[]` 已含本 action，宿主中/英切换无漏译（细则与完成清单见 [i18n-guide.md](i18n-guide.md) §9）。
 - 没有把业务逻辑塞进桥接库或脚本目录。
 
 改动触及共享层（框架段、`inspector-shared.js`、`libs/`）时，`npm test` 是**合并前的强制门槛**，不是可选项：这套测试正是用来兜住"单 action 改动打穿框架"的回归。测试失败时先查是否真的动了共享语义，不要为了让测试变绿而改测试预期。

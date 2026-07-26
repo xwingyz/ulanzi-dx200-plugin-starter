@@ -38,13 +38,14 @@
       .diag .bad { color: #ef4444; }
       .diag .good { color: #4ade80; }
       .probe-btn { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: rgba(253, 186, 116, 0.14); color: var(--text); font-weight: 700; cursor: pointer; }
+          .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
+      .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     </style>
   </head>
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
         <h1>Claude Usage</h1>
-        <p>显示 Claude 订阅的每周与 5 小时额度及重置倒计时。凭据从 macOS 钥匙串只读读取，不消耗任何额度。仅支持 macOS。</p>
         <form id="property-inspector">
           <div class="grid">
             <div class="field">
@@ -78,19 +79,6 @@
             </div>
           </div>
           <div class="field">
-            <label for="theme">Theme</label>
-            <input id="theme" name="theme" type="hidden" value="ember">
-            <div class="theme-row" role="group" aria-label="Theme">
-            </div>
-          </div>
-          <div class="field">
-            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
-            <div class="frame-row">
-              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
-              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
-            </div>
-          </div>
-          <div class="field">
             <label data-localize="Diagnostics">Diagnostics</label>
             <div class="diag">
               <dl>
@@ -104,6 +92,29 @@
             </div>
             <div class="hint">accessToken 约 1 小时过期，由 Claude Code 自身刷新维持；过期时键面显示上次数值并标记陈旧。</div>
           </div>
+          <hr class="pi-divider">
+          <div class="field">
+            <label for="theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="ember">
+            <div class="theme-row" role="group" aria-label="Theme">
+            </div>
+          </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="uiLanguage" data-localize="Language">Language</label>
+            <select id="uiLanguage" name="uiLanguage">
+              <option value="auto" data-localize="Auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh_CN">简体中文</option>
+            </select>
+          </div>
+          <p class="pi-note">显示 Claude 订阅的每周与 5 小时额度及重置倒计时。凭据从 macOS 钥匙串只读读取，不消耗任何额度。仅支持 macOS。</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button class="save-btn" type="submit" data-localize="Save">Save</button>

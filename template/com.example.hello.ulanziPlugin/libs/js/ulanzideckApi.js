@@ -109,6 +109,21 @@ class UlanziDeck {
     return (this.localization && this.localization[key]) || key;
   }
 
+  // 用户语言覆盖：pref 为 'auto'/空时回到宿主/系统语言，否则用显式 locale。
+  // 变更后清空缓存并重跑 localizeUI，让已本地化的 [data-localize] 元素刷新到新语言。
+  // 依赖每个可本地化元素都带显式 data-localize key（否则二次本地化会以已译文案作 key 查不到）。
+  setLanguage(pref) {
+    const next = (!pref || pref === 'auto')
+      ? Utils.adaptLanguage(Utils.getQueryParams('language') || Utils.getLanguage())
+      : Utils.adaptLanguage(pref);
+    if (next === this.language && this.localization) {
+      return;
+    }
+    this.language = next;
+    this.localization = null;
+    this.localizeUI();
+  }
+
   encodeContext(data) {
     return `${data.uuid}___${data.key}___${data.actionid}`;
   }

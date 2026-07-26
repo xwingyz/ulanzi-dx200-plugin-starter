@@ -10,7 +10,12 @@ const PLUGIN_UUID = '__PLUGIN_UUID__';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 运行态图标文案的本地化：语言文件在插件根目录（与 libs/ 同级）。
 const i18n = createI18n({ dir: path.join(__dirname, '..') });
-const t = (key) => i18n.t(key);
+// t(key) 跟随 OS locale；t(key, instance.settings.uiLanguage) 跟随该实例的语言覆盖
+// （'auto' 回落 OS locale）。运行态图标文案统一走它。
+const t = (key, uiLanguage) => i18n.t(key, uiLanguage);
+// 框架级语言覆盖设置：auto 跟随宿主/系统，其余为显式 locale。
+// 与 inspector-shared.js 的 UI_LANGUAGES 一致；新增语言两处同时加。
+const UI_LANGUAGE_NAMES = ['auto', 'en', 'zh_CN'];
 // 数据目录默认在插件目录下，ULANZI_PLUGIN_DATA_DIR 可覆盖。宿主永远不设它——
 // 这是给测试用的隔离入口，避免测试触发的真实落盘写进仓库（见 tests/setup.mjs）。
 // 覆盖时按 PLUGIN_UUID 分子目录，避免同一测试进程里多个框架共用一份存储互相覆盖。
@@ -174,6 +179,7 @@ const ACTION_MODULES = createActionModules({
   normalizeColor,
   renderMeterRow,
   renderScreenFrame,
+  t,
   themeFor,
   toDataUrl,
 });
@@ -630,7 +636,7 @@ function renderErrorState(instance) {
         ${renderScreenFrame(theme, theme.accent, `
           <text x="128" y="116" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="700" font-family="Arial, Helvetica, sans-serif">ERR</text>
           <text x="128" y="150" text-anchor="middle" fill="${theme.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${escapeXml(actionKey)}</text>
-          <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">${escapeXml(t('see plugin log'))}</text>
+          <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">${escapeXml(t('see plugin log', instance.settings?.uiLanguage))}</text>
         `, frameFor(instance.settings || {}))}
       </svg>
     `));
@@ -861,6 +867,8 @@ function normalizeSettings(actionUuid, settings = {}) {
     title: normalizeText(settings.title, defaults.title, 14),
     subtitle: normalizeText(settings.subtitle, defaults.subtitle, 18),
     theme: normalizeTheme(settings.theme, defaults.theme),
+    // 框架级语言覆盖：所有 action 通用，不依赖 per-action defaults，默认 'auto'。
+    uiLanguage: normalizeChoice(settings.uiLanguage, 'auto', UI_LANGUAGE_NAMES),
     frameSize: typeof defaults.frameSize === 'string' ? normalizeChoice(settings.frameSize, defaults.frameSize, FRAME_SIZE_NAMES) : undefined,
     showFrame: typeof defaults.showFrame === 'string' ? normalizeBooleanString(settings.showFrame, defaults.showFrame) : undefined,
   };
