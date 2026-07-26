@@ -73,6 +73,9 @@ class UlanziDeck {
   }
 
   async localizeUI() {
+    if (document.documentElement) {
+      document.documentElement.lang = this.language.replace('_', '-');
+    }
     const wrapper = document.querySelector('.uspi-wrapper') || document.querySelector('.udpi-wrapper');
     if (!wrapper) {
       return;
@@ -117,11 +120,11 @@ class UlanziDeck {
       ? Utils.adaptLanguage(Utils.getQueryParams('language') || Utils.getLanguage())
       : Utils.adaptLanguage(pref);
     if (next === this.language && this.localization) {
-      return;
+      return Promise.resolve();
     }
     this.language = next;
     this.localization = null;
-    this.localizeUI();
+    return this.localizeUI();
   }
 
   encodeContext(data) {

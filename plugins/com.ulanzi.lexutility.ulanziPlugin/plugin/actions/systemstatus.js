@@ -440,7 +440,7 @@ function platformMark(platform, color) {
 }
 
 function renderSystemStatusIcon(instance, runtime) {
-  const { escapeXml, frameContent, frameFor, renderThemeBackdrop, themeFor, toDataUrl } = runtime;
+  const { escapeXml, frameContent, frameFor, renderThemeBackdrop, t, themeFor, toDataUrl } = runtime;
   const theme = themeFor(instance.settings);
   const frame = frameFor(instance.settings);
   const backdrop = renderThemeBackdrop(theme, theme.accent, frame);
@@ -459,6 +459,7 @@ function renderSystemStatusIcon(instance, runtime) {
   const rows = keys.map((key, index) => {
     const y = top + index * (rowHeight + gap);
     const display = formatMetric(key, values[key]);
+    const displayUnit = display.unit === 'WAIT' ? t('WAIT', instance.settings.uiLanguage) : display.unit;
     const color = metricColor(key, values[key], theme);
     const valueSize = keys.length === 1 ? 42 : keys.length === 2 ? 34 : 29;
     const isNetworkMetric = key === 'upload' || key === 'download';
@@ -472,21 +473,21 @@ function renderSystemStatusIcon(instance, runtime) {
       width: 170,
       height: rowHeight,
     }, color);
-    const unitX = display.unit.length > 3 ? 210 : 212;
+    const unitX = displayUnit.length > 3 ? 210 : 212;
     return `
       <g data-metric="${key}">
         <rect x="44" y="${y.toFixed(1)}" width="170" height="${rowHeight.toFixed(1)}" rx="7" fill="${theme.panel}" opacity="0.64" stroke="${theme.low}" stroke-width="1"/>
         ${chart}
         ${icon}
-        <text x="${display.unit ? 172 : 207}" y="${(y + rowHeight / 2 + valueSize * 0.34).toFixed(1)}" text-anchor="end" fill="${display.value === 'N/A' ? theme.muted : theme.text}" font-size="${valueSize}" font-weight="800" font-family="Arial,Helvetica,sans-serif">${escapeXml(display.value)}</text>
-        ${display.unit ? `<text data-role="unit" data-unit-kind="${isNetworkMetric ? 'network' : 'standard'}" x="${unitX}" y="${(y + rowHeight / 2 + 5).toFixed(1)}" text-anchor="end" fill="${unitColor}" font-size="${unitSize}" font-weight="700" font-family="Arial,Helvetica,sans-serif">${escapeXml(display.unit)}</text>` : ''}
+        <text x="${displayUnit ? 172 : 207}" y="${(y + rowHeight / 2 + valueSize * 0.34).toFixed(1)}" text-anchor="end" fill="${display.value === 'N/A' ? theme.muted : theme.text}" font-size="${valueSize}" font-weight="800" font-family="Arial,Helvetica,sans-serif">${escapeXml(display.value)}</text>
+        ${displayUnit ? `<text data-role="unit" data-unit-kind="${isNetworkMetric ? 'network' : 'standard'}" x="${unitX}" y="${(y + rowHeight / 2 + 5).toFixed(1)}" text-anchor="end" fill="${unitColor}" font-size="${unitSize}" font-weight="700" font-family="Arial,Helvetica,sans-serif">${escapeXml(displayUnit)}</text>` : ''}
       </g>`;
   }).join('');
 
   const inner = `
     ${refreshFeedback}
     ${platformMark(instance.platform, platformColor)}
-    <text x="82" y="59" fill="${backdrop.text}" font-size="20" font-weight="800" font-family="Arial,Helvetica,sans-serif">SYSTEM</text>
+    <text x="82" y="59" fill="${backdrop.text}" font-size="20" font-weight="800" font-family="Arial,Helvetica,sans-serif">${escapeXml(t('SYSTEM', instance.settings.uiLanguage))}</text>
     ${rows}`;
   return toDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="392" height="392" viewBox="0 0 256 256">${backdrop.outer}${frameContent(frame, inner)}</svg>`);
 }

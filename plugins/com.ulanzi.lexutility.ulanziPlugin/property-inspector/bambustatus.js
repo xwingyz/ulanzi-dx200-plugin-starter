@@ -1,4 +1,4 @@
-const BAMBUSTATUS_FIELDS = ['printerName', 'printerIp', 'serialNumber', 'accessCode', 'theme', 'frameSize', 'showFrame'];
+const BAMBUSTATUS_FIELDS = withLanguageField(['printerName', 'printerIp', 'serialNumber', 'accessCode', 'theme', 'frameSize', 'showFrame']);
 const BAMBUSTATUS_DISCOVERY_FIELDS = ['printerName', 'printerIp', 'serialNumber', 'accessCode'];
 const BAMBUSTATUS_SCAN_PARAM = '__bambustatusScan';
 const BAMBUSTATUS_SCAN_RESULT_PARAM = '__bambustatusDiscovery';
@@ -7,6 +7,7 @@ const BAMBUSTATUS_DIAG_PARAM = '__bambustatusDiag';
 function initBambuStatusInspector() {
   let currentContext = '';
   let uiBound = false;
+  let lastStatus = { key: 'Incomplete settings are discovered and saved automatically. You can rescan at any time.', kind: '', replacements: {} };
   const autosave = debounce(() => {
     $UD.sendParamFromPlugin(collectSettings(BAMBUSTATUS_FIELDS), currentContext);
   }, AUTOSAVE_DEBOUNCE_MS);
@@ -23,6 +24,15 @@ function initBambuStatusInspector() {
     element.className = `scan-status ${kind}`.trim();
   }
 
+  function showLocalizedScanStatus(key, kind = '', replacements = {}) {
+    lastStatus = { key, kind, replacements };
+    let text = $UD.t(key);
+    Object.entries(replacements).forEach(([token, value]) => {
+      text = text.replace(token, String(value));
+    });
+    showScanStatus(text, kind);
+  }
+
   function bindUiOnce() {
     if (uiBound) return;
     uiBound = true;
@@ -34,8 +44,9 @@ function initBambuStatusInspector() {
     });
     form.addEventListener('input', () => autosave());
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings, () => showLocalizedScanStatus(lastStatus.key, lastStatus.kind, lastStatus.replacements));
     document.getElementById('scanPrinter').addEventListener('click', () => {
-      showScanStatus('正在读取 Bambu Studio 配置并扫描局域网…');
+      showLocalizedScanStatus('Reading Bambu Studio settings and scanning the local network…');
       $UD.sendParamFromPlugin({
         [BAMBUSTATUS_SCAN_PARAM]: collectSettings(['printerName', 'printerIp', 'serialNumber', 'accessCode']),
       }, currentContext);
@@ -57,23 +68,30 @@ function initBambuStatusInspector() {
     if (result) {
       applySettings(BAMBUSTATUS_DISCOVERY_FIELDS, result.settings || {});
       if (result.status === 'found') {
-        showScanStatus(`已找到${result.model ? ` ${result.model}` : '打印机'}并自动保存，可继续修改。`, 'ok');
+        showLocalizedScanStatus(
+          result.model ? 'Found %s and saved it automatically. You can continue editing.' : 'Found a printer and saved it automatically. You can continue editing.',
+          'ok',
+          result.model ? { '%s': result.model } : {},
+        );
       } else if (result.status === 'partial') {
-        showScanStatus('已保存发现的信息，请补齐其余配置。', 'warn');
+        showLocalizedScanStatus('Discovered information was saved. Complete the remaining settings.', 'warn');
       } else {
-        showScanStatus('未发现可用打印机，请确认同一局域网或手动填写。', 'warn');
+        showLocalizedScanStatus('No available printer was found. Check the local network or enter settings manually.', 'warn');
       }
       return;
     }
     const diagnostic = param[BAMBUSTATUS_DIAG_PARAM];
     if (diagnostic) {
-      showScanStatus(
-        diagnostic.message || '状态已更新',
-        diagnostic.state === 'online' ? 'ok' : 'warn',
-      );
+      const statusKeys = {
+        online: 'Live printer status received.',
+        incompatible: 'The current printer mode does not expose local status.',
+        offline: 'Printer connection is offline.',
+      };
+      showLocalizedScanStatus(statusKeys[diagnostic.state] || 'Status updated.', diagnostic.state === 'online' ? 'ok' : 'warn');
       return;
     }
     applySettings(BAMBUSTATUS_FIELDS, param);
+    void afterLanguageSelection(() => showLocalizedScanStatus(lastStatus.key, lastStatus.kind, lastStatus.replacements));
   }
 
   $UD.connect('com.ulanzi.ulanzistudio.lexutility.bambustatus');

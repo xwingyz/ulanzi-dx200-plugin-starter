@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -42,32 +42,30 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>System Status</h1>
+        <h1 data-localize="System Status">System Status</h1>
         <form id="property-inspector">
           <div class="field">
-            <label>显示指标（按顺序）</label>
+            <label data-localize="Metrics (in display order)">Metrics (in display order)</label>
             <div class="metric-stack">
-              <label class="metric-row"><span>第一项</span><select id="metric1" name="metric1"></select></label>
-              <label class="metric-row"><span>第二项</span><select id="metric2" name="metric2"></select></label>
-              <label class="metric-row"><span>第三项</span><select id="metric3" name="metric3"></select></label>
+              <label class="metric-row"><span data-localize="First">First</span><select id="metric1" name="metric1"></select></label>
+              <label class="metric-row"><span data-localize="Second">Second</span><select id="metric2" name="metric2"></select></label>
+              <label class="metric-row"><span data-localize="Third">Third</span><select id="metric3" name="metric3"></select></label>
             </div>
-            <div class="hint">同一指标不能重复；第二、第三项可设为“不显示”。</div>
+            <div class="hint" data-localize="A metric cannot be repeated. The second and third rows can be hidden.">A metric cannot be repeated. The second and third rows can be hidden.</div>
           </div>
           <div class="field">
-            <label for="pollSec">刷新间隔（秒）</label>
-            <input id="pollSec" name="pollSec" type="number" min="1" max="30" placeholder="由插件载入">
+            <label for="pollSec" data-localize="Refresh interval (s)">Refresh interval (s)</label>
+            <input id="pollSec" name="pollSec" type="number" min="1" max="30" placeholder="Loaded by plugin" data-localize="Loaded by plugin">
           </div>
           <div class="field">
-            <label for="lhmUrl">Windows 高级传感器</label>
-            <input id="lhmUrl" name="lhmUrl" inputmode="url" placeholder="由插件载入">
-            <div class="hint">可选：LibreHardwareMonitor 本机 HTTP API。仅接受 localhost / 127.0.0.1。</div>
+            <label for="lhmUrl" data-localize="Windows advanced sensors">Windows advanced sensors</label>
+            <input id="lhmUrl" name="lhmUrl" inputmode="url" placeholder="Loaded by plugin" data-localize="Loaded by plugin">
+            <div class="hint" data-localize="Optional local LibreHardwareMonitor HTTP API. Only localhost and 127.0.0.1 are accepted.">Optional local LibreHardwareMonitor HTTP API. Only localhost and 127.0.0.1 are accepted.</div>
           </div>
-          <div class="platform-note">
-            macOS 的 GPU 使用系统 I/O Registry；CPU 温度在系统允许读取时显示。Windows 可用 LibreHardwareMonitor 提供更完整的 GPU 与温度值。不可用的传感器会显示 N/A，不会伪装成 0。
-          </div>
+          <div class="platform-note" data-localize="On macOS, GPU data comes from I/O Registry and CPU temperature appears when the system allows it. Windows can use LibreHardwareMonitor. Unavailable sensors show N/A, never 0.">On macOS, GPU data comes from I/O Registry and CPU temperature appears when the system allows it. Windows can use LibreHardwareMonitor. Unavailable sensors show N/A, never 0.</div>
           <hr class="pi-divider">
           <div class="field">
-            <label for="theme">Theme</label>
+            <label for="theme" data-localize="Theme">Theme</label>
             <input id="theme" name="theme" type="hidden">
             <div class="theme-row" role="group" aria-label="Theme"></div>
           </div>
@@ -86,14 +84,14 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note">选择 1～3 项本机指标。短按可立即刷新，所有数据只在本机读取。</p>
+          <p class="pi-note" data-localize="Choose one to three local metrics. Press to refresh immediately. All data is read locally.">Choose one to three local metrics. Press to refresh immediately. All data is read locally.</p>
           <div class="action-row">
-            <button class="ghost-btn" id="resetDefaults" type="button">恢复默认</button>
-            <button class="save-btn" type="submit">保存</button>
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+            <button class="save-btn" type="submit" data-localize="Save">Save</button>
           </div>
           <div class="uspi-feedback" id="inspector-feedback" hidden>
-            <span id="feedback-saved" hidden>已保存</span>
-            <span id="feedback-reset" hidden>已恢复默认</span>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
           </div>
         </form>
       </div>

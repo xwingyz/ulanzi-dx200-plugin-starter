@@ -1,7 +1,7 @@
 # Lex Utility 基座技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-22
+最后代码核对：2026-07-26
 事实源：`manifest.json`、`plugin/app.js`、`plugin/actions/index.js`、`property-inspector/inspector-shared.js`、`tests/`
 
 **变更门槛：修改任何基座或共享层功能/技术实现前，必须先完整阅读本文件；修改完成后，必须在同一次任务中把必要的功能和技术变化同步到本文件，并更新“最后代码核对”日期。若同时影响 action，还必须读写对应 action 规格。**
@@ -136,6 +136,7 @@ Ulanzi Studio :3906 / Simulator :39069
 - `theme`：必须是公共主题 key。
 - `frameSize`：`optimal` 或 `max`。
 - `showFrame`：字符串布尔值 `true` / `false`。
+- `uiLanguage`：`auto`、`en` 或 `zh_CN`，默认 `auto`；由框架无条件归一化，不要求每个 action 在 defaults 重复声明。
 
 ### 5.2 设置存储
 
@@ -216,6 +217,9 @@ Inspector 规则：
 - `onAdd`、`onParamFromApp`、`onParamFromPlugin` 都应用插件回传的权威设置或运行态。
 - Inspector WebSocket 每次连接成功后主动发送一次 `__requestSettings`；该握手兜住 PI 晚于宿主恢复事件加载的竞态，在收到权威回推前不提交 HTML 初始值。
 - 重连不得重复绑定 DOM 事件；pagehide 只 flush 仍待提交的尾值。
+- 每页提供 `#uiLanguage`。通用 `initInspector` 自动收集、切换并持久化；自定义控制器必须复用 `withLanguageField`、`bindLanguageSelection` 和 `applyLanguageSelection` / `afterLanguageSelection`，不得另写语言状态。
+- 浏览器桥的 `setLanguage()` 必须返回语言包加载与 `localizeUI()` 完成后的 Promise；脚本生成的诊断、列表、选项在该 Promise 完成后重绘。同步测试桩或旧桥接返回空值时，共享辅助函数仍保持兼容。
+- `localizeUI()` 同步更新 `<html lang>`；静态节点使用英文原文作为 `data-localize` key，脚本生成文案使用 `$UD.t()`。
 
 ## 9. 基座变更影响矩阵
 

@@ -1,4 +1,4 @@
-const POMOWAVE_FIELDS = [
+const POMOWAVE_FIELDS = withLanguageField([
   'focusMin',
   'shortBreakMin',
   'longBreakMin',
@@ -11,7 +11,7 @@ const POMOWAVE_FIELDS = [
   'repeatManualCue',
   'autoStartBreaks',
   'autoStartFocus',
-];
+]);
 
 function syncPomowaveButtons() {
   const soundInput = document.getElementById('soundStyle');
@@ -56,6 +56,7 @@ function initPomowaveInspector() {
     });
 
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings);
 
     document.querySelectorAll('[data-sound-style]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -94,12 +95,14 @@ function initPomowaveInspector() {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
 
   function apply(message) {
     currentContext = message.context || currentContext;
     applySettings(POMOWAVE_FIELDS, message.param || {});
     syncPomowaveButtons();
+    void applyLanguageSelection();
   }
 
   $UD.onAdd(apply);

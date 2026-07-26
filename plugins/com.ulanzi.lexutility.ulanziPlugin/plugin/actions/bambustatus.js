@@ -18,27 +18,27 @@ const DIAG_PARAM = '__bambustatusDiag';
 const BAMBU_MARK_PATH = 'M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z';
 
 const STAGE_LABELS = {
-  1: '自动调平',
-  2: '热床预热',
-  3: '检测 XY 机构',
-  4: '更换耗材',
-  5: '等待运动完成',
-  6: '耗材用尽暂停',
-  7: '喷嘴加热',
-  8: '校准挤出',
-  9: '扫描打印平台',
-  10: '检查首层',
-  11: '识别打印板',
-  12: '校准微型雷达',
-  13: '工具头归位',
-  14: '清洁喷嘴',
-  15: '检查挤出温度',
-  16: '用户暂停',
-  17: '前盖异常暂停',
-  18: '校准雷达',
-  19: '校准挤出流量',
-  20: '喷嘴温度异常',
-  21: '热床温度异常',
+  1: 'Auto bed leveling',
+  2: 'Heating the bed',
+  3: 'Checking XY mechanics',
+  4: 'Changing filament',
+  5: 'Waiting for motion',
+  6: 'Paused: filament runout',
+  7: 'Heating the nozzle',
+  8: 'Calibrating extrusion',
+  9: 'Scanning the build plate',
+  10: 'Checking the first layer',
+  11: 'Identifying the build plate',
+  12: 'Calibrating micro lidar',
+  13: 'Homing the toolhead',
+  14: 'Cleaning the nozzle',
+  15: 'Checking extrusion temperature',
+  16: 'Paused by user',
+  17: 'Paused: front cover issue',
+  18: 'Calibrating lidar',
+  19: 'Calibrating extrusion flow',
+  20: 'Nozzle temperature issue',
+  21: 'Bed temperature issue',
 };
 
 const MODEL_NAMES = {
@@ -110,7 +110,7 @@ function stageLabel(print = {}) {
   if (raw) {
     return raw;
   }
-  return stage != null && stage > 0 ? `准备阶段 ${stage}` : '准备打印';
+  return stage != null && stage > 0 ? `Preparation stage %s`.replace('%s', String(stage)) : 'Preparing to print';
 }
 
 function resolvePrintState(print = {}) {
@@ -265,12 +265,12 @@ function formatDuration(seconds) {
   return hours ? `${hours}h${String(minutes).padStart(2, '0')}` : `${minutes}m`;
 }
 
-function formatAge(timestamp, now = Date.now()) {
-  if (!Number.isFinite(timestamp)) return '尚无数据';
+function formatAge(timestamp, now = Date.now(), translate = (key) => key) {
+  if (!Number.isFinite(timestamp)) return translate('No data yet');
   const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
-  if (seconds < 60) return `${seconds}s 前`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m 前`;
-  return `${Math.floor(seconds / 3600)}h 前`;
+  if (seconds < 60) return translate('%ss ago').replace('%s', String(seconds));
+  if (seconds < 3600) return translate('%sm ago').replace('%s', String(Math.floor(seconds / 60)));
+  return translate('%sh ago').replace('%s', String(Math.floor(seconds / 3600)));
 }
 
 export function createBambuStatusAction(runtime) {
@@ -288,6 +288,7 @@ export function createBambuStatusAction(runtime) {
     renderThemeBackdrop,
     sendParamFromPlugin,
     setInstanceTimeout,
+    t,
     themeFor,
     toDataUrl,
     writePersistedState,
@@ -415,7 +416,7 @@ export function createBambuStatusAction(runtime) {
     }
   }
 
-  function markOffline(instance, reason = '连接中断') {
+  function markOffline(instance, reason = 'Connection interrupted') {
     instance.connectionState = 'OFFLINE';
     instance.diagnostic = reason;
     instance.reportedOnline = false;
@@ -427,7 +428,7 @@ export function createBambuStatusAction(runtime) {
   function safeNetwork(instance, generation, fn) {
     return (...args) => {
       if (generation !== instance.connectionGeneration || instance.active === false) return;
-      try { fn(...args); } catch { markOffline(instance, '状态解析失败'); }
+      try { fn(...args); } catch { markOffline(instance, 'Status parsing failed'); }
     };
   }
 
@@ -460,19 +461,19 @@ export function createBambuStatusAction(runtime) {
         clientId: `lex-bambu-${process.pid}-${Math.random().toString(16).slice(2, 10)}`,
       });
     } catch {
-      markOffline(instance, '无法建立连接');
+      markOffline(instance, 'Unable to connect');
       return;
     }
     instance.mqttClient = client;
     client.on('connect', safeNetwork(instance, generation, () => {
       instance.reconnectAttempt = 0;
       client.subscribe(topic, { qos: 0 }, safeNetwork(instance, generation, (error) => {
-        if (error) { markOffline(instance, '订阅状态失败'); return; }
+        if (error) { markOffline(instance, 'Status subscription failed'); return; }
         requestCurrentStatus(instance);
         setInstanceTimeout(instance, 'bambustatusStatusTimeout', () => {
           if (!instance.statusReceived) {
             instance.connectionState = 'INCOMPATIBLE';
-            instance.diagnostic = '当前打印机模式未开放本地状态订阅';
+            instance.diagnostic = 'The current printer mode does not expose local status';
             sendParamFromPlugin({
               [DIAG_PARAM]: { state: 'incompatible', message: instance.diagnostic },
             }, instance.context);
@@ -490,16 +491,16 @@ export function createBambuStatusAction(runtime) {
       applyPrintReport(instance, message.print);
       if (!instance.reportedOnline) {
         instance.reportedOnline = true;
-        sendParamFromPlugin({ [DIAG_PARAM]: { state: 'online', message: '已收到实时状态' } }, instance.context);
+        sendParamFromPlugin({ [DIAG_PARAM]: { state: 'online', message: 'Live printer status received' } }, instance.context);
       }
       renderInstance(instance);
     }));
     client.on('error', safeNetwork(instance, generation, () => {
       closeClient(instance);
-      markOffline(instance, '认证或网络连接失败');
+      markOffline(instance, 'Authentication or network connection failed');
     }));
     client.on('close', safeNetwork(instance, generation, () => {
-      if (instance.connectionState !== 'INCOMPATIBLE') markOffline(instance, '连接已断开');
+      if (instance.connectionState !== 'INCOMPATIBLE') markOffline(instance, 'Connection closed');
     }));
   }
 
@@ -605,22 +606,30 @@ export function createBambuStatusAction(runtime) {
     const printerName = clipText(settings.printerName, 12);
     const status = data.status || 'IDLE';
     const progress = data.progress == null ? 0 : data.progress;
+    const language = settings.uiLanguage;
+    const localizeStage = (value, fallback) => {
+      const source = value || fallback;
+      const numbered = /^Preparation stage (\d+)$/.exec(source);
+      return numbered
+        ? t('Preparation stage %s', language).replace('%s', numbered[1])
+        : t(source, language);
+    };
     const labels = {
-      IDLE: ['空闲', '等待新任务'],
-      PREPARING: ['准备中', data.stage || '准备打印'],
-      PAUSED: ['已暂停', data.stage || '打印暂停'],
-      FINISHED: ['已完成', data.taskName || '打印任务'],
-      FAILED: ['打印失败', data.stage || '请检查打印机'],
+      IDLE: [t('Idle', language), t('Waiting for a new task', language)],
+      PREPARING: [t('Preparing', language), localizeStage(data.stage, 'Preparing to print')],
+      PAUSED: [t('Paused', language), localizeStage(data.stage, 'Print paused')],
+      FINISHED: [t('Finished', language), data.taskName || t('Print job', language)],
+      FAILED: [t('Print failed', language), localizeStage(data.stage, 'Check the printer')],
     };
     let body = '';
     if (instance.connectionState === 'CONFIG_REQUIRED') {
-      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">待配置</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">打开属性面板自动扫描</text>`;
+      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">${escapeXml(t('Setup required', language))}</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Open the Inspector to scan', language))}</text>`;
     } else if (instance.connectionState === 'CONNECTING') {
-      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">连接中</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">正在读取打印机状态</text>`;
+      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">${escapeXml(t('Connecting', language))}</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Reading printer status', language))}</text>`;
     } else if (instance.connectionState === 'INCOMPATIBLE') {
-      body = `<text x="128" y="137" text-anchor="middle" fill="${theme.warn}" font-size="27" font-weight="750">本地状态不可用</text><text x="128" y="174" text-anchor="middle" fill="${theme.muted}" font-size="16">保留云端模式</text><text x="128" y="198" text-anchor="middle" fill="${theme.muted}" font-size="16">不自动切换</text>`;
+      body = `<text x="128" y="137" text-anchor="middle" fill="${theme.warn}" font-size="27" font-weight="750">${escapeXml(t('Local status unavailable', language))}</text><text x="128" y="174" text-anchor="middle" fill="${theme.muted}" font-size="16">${escapeXml(t('Keep cloud mode', language))}</text><text x="128" y="198" text-anchor="middle" fill="${theme.muted}" font-size="16">${escapeXml(t('No automatic mode change', language))}</text>`;
     } else if (instance.connectionState === 'OFFLINE') {
-      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.crit}" font-size="36" font-weight="800">未连接</text><text x="128" y="181" text-anchor="middle" fill="${theme.muted}" font-size="17">上次更新 ${escapeXml(formatAge(instance.lastSeenAt))}</text>`;
+      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.crit}" font-size="36" font-weight="800">${escapeXml(t('Disconnected', language))}</text><text x="128" y="181" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Last update', language))} ${escapeXml(formatAge(instance.lastSeenAt, Date.now(), (key) => t(key, language)))}</text>`;
     } else if (status === 'RUNNING') {
       body = `
         ${renderMeterRow(
@@ -635,8 +644,8 @@ export function createBambuStatusAction(runtime) {
       body = `
         <text x="128" y="137" text-anchor="middle" fill="${status === 'FAILED' ? theme.crit : theme.text}" font-size="36" font-weight="800">${escapeXml(primary)}</text>
         <text x="128" y="172" text-anchor="middle" fill="${theme.muted}" font-size="18" font-weight="600">${escapeXml(clipText(secondary, 14))}</text>
-        ${['PREPARING', 'PAUSED'].includes(status) ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="17" font-weight="650">${progress}% · 用 ${formatDuration(data.elapsedSec)} · 余 ${formatDuration(data.remainingSec)}</text>` : ''}
-        ${status === 'FINISHED' ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="17" font-weight="650">100% · 用 ${formatDuration(data.elapsedSec)}</text>` : ''}`;
+        ${['PREPARING', 'PAUSED'].includes(status) ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="17" font-weight="650">${progress}% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)} · ${escapeXml(t('Left', language))} ${formatDuration(data.remainingSec)}</text>` : ''}
+        ${status === 'FINISHED' ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="17" font-weight="650">100% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)}</text>` : ''}`;
     }
     const highlightColor = instance.connectionState === 'OFFLINE' || status === 'FAILED'
       ? theme.crit

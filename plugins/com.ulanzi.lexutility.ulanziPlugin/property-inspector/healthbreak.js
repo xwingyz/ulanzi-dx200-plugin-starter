@@ -1,4 +1,4 @@
-const HEALTHBREAK_FIELDS = [
+const HEALTHBREAK_FIELDS = withLanguageField([
   'groups',
   'intervalMin',
   'dailyGoal',
@@ -10,7 +10,7 @@ const HEALTHBREAK_FIELDS = [
   'theme',
   'frameSize',
   'showFrame',
-];
+]);
 
 const HEALTHBREAK_GROUPS = ['eyes', 'neck', 'hands', 'stand', 'breathe', 'pelvic'];
 const HEALTHBREAK_GROUP_SECONDS = { eyes: 30, neck: 65, hands: 50, stand: 70, breathe: 50, pelvic: 50 };
@@ -37,6 +37,7 @@ function escapeHealthBreakHtml(value) {
 function initHealthBreakInspector() {
   let currentContext = '';
   let uiBound = false;
+  let lastStats = null;
   let selectedGroups = ['eyes', 'neck'];
   let selectedDays = ['0', '1', '2', '3', '4', '5', '6'];
 
@@ -63,7 +64,10 @@ function initHealthBreakInspector() {
       row.querySelector('[data-move="down"]').disabled = index < 0 || index >= selectedGroups.length - 1;
     });
     const seconds = selectedGroups.reduce((total, key) => total + (HEALTHBREAK_GROUP_SECONDS[key] || 0), 0);
-    document.getElementById('durationHint').textContent = `已选 ${selectedGroups.length} 组，预计 ${Math.floor(seconds / 60)}分${seconds % 60}秒。`;
+    document.getElementById('durationHint').textContent = $UD.t('%s groups selected · about %s min %s sec')
+      .replace('%s', String(selectedGroups.length))
+      .replace('%s', String(Math.floor(seconds / 60)))
+      .replace('%s', String(seconds % 60));
   }
 
   function syncDayUi() {
@@ -77,13 +81,14 @@ function initHealthBreakInspector() {
     let stats;
     try { stats = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return; }
     if (!stats || typeof stats !== 'object') return;
+    lastStats = stats;
     document.getElementById('todayCompleted').textContent = String(stats.today?.completed || 0);
     document.getElementById('todayBonus').textContent = String(stats.today?.bonus || 0);
     document.getElementById('streak').textContent = String(stats.streak || 0);
     const history = Array.isArray(stats.history) ? [...stats.history].reverse() : [];
     document.getElementById('history').innerHTML = history.length
       ? history.map((entry) => `<div class="history-row"><span>${escapeHealthBreakHtml(entry.dayKey)}</span><span>✓${Number(entry.completed) || 0}</span><span>+${Number(entry.bonus) || 0}</span><span>↷${Number(entry.skipped) || 0}</span><span>×${Number(entry.cancelled) || 0}</span></div>`).join('')
-      : '<div class="history-row"><span>暂无记录</span></div>';
+      : `<div class="history-row"><span>${$UD.t('No records yet')}</span></div>`;
   }
 
   function pushSettings() {
@@ -105,6 +110,10 @@ function initHealthBreakInspector() {
     });
     form.addEventListener('input', () => autosave());
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings, () => {
+      syncGroupUi();
+      renderStats(lastStats);
+    });
 
     document.querySelectorAll('[data-group-key]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -115,7 +124,7 @@ function initHealthBreakInspector() {
           selectedGroups.splice(index, 1);
         } else {
           if (selectedGroups.length >= 4) return;
-          if (key === 'pelvic' && typeof window.confirm === 'function' && !window.confirm('盆底肌并非越紧越好。确认已阅读安全提示，并在不适时立即停止？')) return;
+          if (key === 'pelvic' && typeof window.confirm === 'function' && !window.confirm($UD.t('A tighter pelvic floor is not always better. Confirm that you read the safety note and will stop if you feel discomfort.'))) return;
           selectedGroups.push(key);
         }
         syncGroupUi();
@@ -163,13 +172,13 @@ function initHealthBreakInspector() {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
     $UD.sendParamFromPlugin({ __requestHealthStats: 'true' }, currentContext);
   });
 
   function apply(message) {
     currentContext = message.context || currentContext;
     const param = message.param || {};
-    if (param.healthStats) renderStats(param.healthStats);
     applySettings(HEALTHBREAK_FIELDS, param);
     const groups = parseUniqueList(param.groups ?? document.getElementById('groups').value, HEALTHBREAK_GROUPS);
     if (groups.length) selectedGroups = groups.slice(0, 4);
@@ -177,6 +186,11 @@ function initHealthBreakInspector() {
     if (days.length) selectedDays = days;
     syncGroupUi();
     syncDayUi();
+    if (param.healthStats) lastStats = typeof param.healthStats === 'string' ? param.healthStats : param.healthStats;
+    void afterLanguageSelection(() => {
+      syncGroupUi();
+      renderStats(lastStats);
+    });
   }
 
   $UD.onAdd(apply);

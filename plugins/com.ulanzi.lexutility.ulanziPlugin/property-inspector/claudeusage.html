@@ -45,56 +45,56 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>Claude Usage</h1>
+        <h1 data-localize="Claude Usage">Claude Usage</h1>
         <form id="property-inspector">
           <div class="grid">
             <div class="field">
-              <label for="pollSec">Poll (s)</label>
+              <label for="pollSec" data-localize="Poll (s)">Poll (s)</label>
               <input id="pollSec" name="pollSec" type="number" min="60" max="3600" value="300">
             </div>
             <div class="field">
-              <label for="redrawSec">Redraw (s)</label>
+              <label for="redrawSec" data-localize="Redraw (s)">Redraw (s)</label>
               <input id="redrawSec" name="redrawSec" type="number" min="10" max="300" value="30">
             </div>
           </div>
           <div class="field">
-            <label for="usageUrl">长按打开</label>
+            <label for="usageUrl" data-localize="Open on hold">Open on hold</label>
             <input id="usageUrl" name="usageUrl" maxlength="160" value="https://claude.ai/settings/usage">
-            <div class="hint">拉取间隔下限 60 秒：该接口对请求频率敏感，过密会被限流。</div>
+            <div class="hint" data-localize="Minimum polling interval is 60 seconds. More frequent requests may be rate limited.">Minimum polling interval is 60 seconds. More frequent requests may be rate limited.</div>
           </div>
           <div class="field">
             <label data-localize="Rows">Rows</label>
             <div class="frame-row">
-              <label class="frame-toggle"><input id="showWeekly" name="showWeekly" type="checkbox" checked><span>每周</span></label>
-              <label class="frame-toggle"><input id="showFiveHour" name="showFiveHour" type="checkbox" checked><span>5 小时</span></label>
-              <label class="frame-toggle"><input id="showScoped" name="showScoped" type="checkbox" checked><span>模型周限</span></label>
+              <label class="frame-toggle"><input id="showWeekly" name="showWeekly" type="checkbox" checked><span data-localize="Weekly">Weekly</span></label>
+              <label class="frame-toggle"><input id="showFiveHour" name="showFiveHour" type="checkbox" checked><span data-localize="5-hour">5-hour</span></label>
+              <label class="frame-toggle"><input id="showScoped" name="showScoped" type="checkbox" checked><span data-localize="Model weekly limit">Model weekly limit</span></label>
             </div>
-            <div class="hint">模型周限额只在接口返回该条目时才占一行。</div>
+            <div class="hint" data-localize="The model weekly limit takes a row only when the API returns it.">The model weekly limit takes a row only when the API returns it.</div>
           </div>
           <div class="field">
             <label data-localize="Appearance">Appearance</label>
             <div class="frame-row">
-              <label class="frame-toggle"><input id="showBarBackground" name="showBarBackground" type="checkbox" checked><span>进度条背景</span></label>
-              <label class="frame-toggle"><input id="severityColors" name="severityColors" type="checkbox" checked><span>分级配色</span></label>
+              <label class="frame-toggle"><input id="showBarBackground" name="showBarBackground" type="checkbox" checked><span data-localize="Bar background">Bar background</span></label>
+              <label class="frame-toggle"><input id="severityColors" name="severityColors" type="checkbox" checked><span data-localize="Severity colors">Severity colors</span></label>
             </div>
           </div>
           <div class="field">
             <label data-localize="Diagnostics">Diagnostics</label>
             <div class="diag">
               <dl>
-                <dt>平台</dt><dd id="diag-platform">—</dd>
-                <dt>钥匙串凭据</dt><dd id="diag-token">—</dd>
-                <dt>当前状态</dt><dd id="diag-state">—</dd>
-                <dt>上次拉取</dt><dd id="diag-fetched">—</dd>
-                <dt>上次错误</dt><dd id="diag-error">—</dd>
+                <dt data-localize="Platform">Platform</dt><dd id="diag-platform">—</dd>
+                <dt data-localize="Keychain credential">Keychain credential</dt><dd id="diag-token">—</dd>
+                <dt data-localize="Current status">Current status</dt><dd id="diag-state">—</dd>
+                <dt data-localize="Last fetch">Last fetch</dt><dd id="diag-fetched">—</dd>
+                <dt data-localize="Last error">Last error</dt><dd id="diag-error">—</dd>
               </dl>
-              <button class="probe-btn" id="probe" type="button">立即测试</button>
+              <button class="probe-btn" id="probe" type="button" data-localize="Test now">Test now</button>
             </div>
-            <div class="hint">accessToken 约 1 小时过期，由 Claude Code 自身刷新维持；过期时键面显示上次数值并标记陈旧。</div>
+            <div class="hint" data-localize="The access token expires in about one hour and is refreshed by Claude Code. Stale values remain visible when it expires.">The access token expires in about one hour and is refreshed by Claude Code. Stale values remain visible when it expires.</div>
           </div>
           <hr class="pi-divider">
           <div class="field">
-            <label for="theme">Theme</label>
+            <label for="theme" data-localize="Theme">Theme</label>
             <input id="theme" name="theme" type="hidden" value="ember">
             <div class="theme-row" role="group" aria-label="Theme">
             </div>
@@ -114,7 +114,7 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note">显示 Claude 订阅的每周与 5 小时额度及重置倒计时。凭据从 macOS 钥匙串只读读取，不消耗任何额度。仅支持 macOS。</p>
+          <p class="pi-note" data-localize="Show Claude weekly and 5-hour limits with reset countdowns. Credentials are read-only from macOS Keychain. macOS only.">Show Claude weekly and 5-hour limits with reset countdowns. Credentials are read-only from macOS Keychain. macOS only.</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button class="save-btn" type="submit" data-localize="Save">Save</button>

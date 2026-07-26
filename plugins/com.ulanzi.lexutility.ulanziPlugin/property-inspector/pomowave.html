@@ -51,65 +51,65 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>Pomowave</h1>
+        <h1 data-localize="Pomowave">Pomowave</h1>
         <form id="property-inspector">
           <div class="grid">
             <div class="field">
-              <label for="focusMin">Focus (min)</label>
+              <label for="focusMin" data-localize="Focus (min)">Focus (min)</label>
               <input id="focusMin" name="focusMin" type="number" min="1" max="180" value="25">
             </div>
             <div class="field">
-              <label for="shortBreakMin">Short break</label>
+              <label for="shortBreakMin" data-localize="Short break">Short break</label>
               <input id="shortBreakMin" name="shortBreakMin" type="number" min="1" max="60" value="5">
             </div>
           </div>
           <div class="grid">
             <div class="field">
-              <label for="longBreakMin">Long break</label>
+              <label for="longBreakMin" data-localize="Long break">Long break</label>
               <input id="longBreakMin" name="longBreakMin" type="number" min="1" max="120" value="15">
             </div>
             <div class="field">
-              <label for="roundsBeforeLongBreak">Rounds</label>
+              <label for="roundsBeforeLongBreak" data-localize="Rounds">Rounds</label>
               <input id="roundsBeforeLongBreak" name="roundsBeforeLongBreak" type="number" min="2" max="8" value="4">
             </div>
           </div>
           <div class="field">
-            <label for="soundStyle">Sound</label>
+            <label for="soundStyle" data-localize="Sound">Sound</label>
             <input id="soundStyle" name="soundStyle" type="hidden" value="glass">
             <div class="seg-row" role="group" aria-label="Sound">
-              <button class="seg-btn" type="button" data-sound-style="glass">Glass</button>
-              <button class="seg-btn" type="button" data-sound-style="hero">Hero</button>
-              <button class="seg-btn" type="button" data-sound-style="purr">Purr</button>
-              <button class="seg-btn" type="button" data-sound-style="submarine">Sub</button>
+              <button class="seg-btn" type="button" data-sound-style="glass" data-localize="Glass">Glass</button>
+              <button class="seg-btn" type="button" data-sound-style="hero" data-localize="Hero">Hero</button>
+              <button class="seg-btn" type="button" data-sound-style="purr" data-localize="Purr">Purr</button>
+              <button class="seg-btn" type="button" data-sound-style="submarine" data-localize="Sub">Sub</button>
             </div>
-            <div class="hint">点按即可试听该提示音。</div>
+            <div class="hint" data-localize="Select a sound to preview it.">Select a sound to preview it.</div>
           </div>
           <div class="toggle-row">
             <label class="toggle" for="soundEnabled">
               <div>
-                <strong>Sound cue</strong>
-                <span>阶段切换时播放提示音</span>
+                <strong data-localize="Sound cue">Sound cue</strong>
+                <span data-localize="Play a cue when the phase changes">Play a cue when the phase changes</span>
               </div>
               <input id="soundEnabled" name="soundEnabled" type="checkbox" checked>
             </label>
             <label class="toggle" for="repeatManualCue">
               <div>
-                <strong>Continuous cue</strong>
-                <span>手动进入下一阶段时循环播放，按键开始后停止</span>
+                <strong data-localize="Continuous cue">Continuous cue</strong>
+                <span data-localize="Repeat while waiting for manual start; stop when the key is pressed">Repeat while waiting for manual start; stop when the key is pressed</span>
               </div>
               <input id="repeatManualCue" name="repeatManualCue" type="checkbox">
             </label>
             <label class="toggle" for="autoStartBreaks">
               <div>
-                <strong>Auto break</strong>
-                <span>专注结束后自动进入休息</span>
+                <strong data-localize="Auto break">Auto break</strong>
+                <span data-localize="Start the break automatically after focus">Start the break automatically after focus</span>
               </div>
               <input id="autoStartBreaks" name="autoStartBreaks" type="checkbox" checked>
             </label>
             <label class="toggle" for="autoStartFocus">
               <div>
-                <strong>Auto focus</strong>
-                <span>休息结束后自动开始下一轮</span>
+                <strong data-localize="Auto focus">Auto focus</strong>
+                <span data-localize="Start the next focus round automatically after a break">Start the next focus round automatically after a break</span>
               </div>
               <input id="autoStartFocus" name="autoStartFocus" type="checkbox" checked>
             </label>
@@ -120,7 +120,7 @@
           </div>
           <hr class="pi-divider">
           <div class="field">
-            <label for="theme">Theme</label>
+            <label for="theme" data-localize="Theme">Theme</label>
             <input id="theme" name="theme" type="hidden" value="ember">
             <div class="theme-row" role="group" aria-label="Theme">
             </div>
@@ -140,7 +140,7 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note">把番茄钟放进 Lex Utility。短按开始/暂停，长按重启当前专注（被打断时用），完成阶段时播放提示音。</p>
+          <p class="pi-note" data-localize="A Pomodoro timer for Lex Utility. Press to start or pause; hold to restart the current focus after an interruption.">A Pomodoro timer for Lex Utility. Press to start or pause; hold to restart the current focus after an interruption.</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
           </div>

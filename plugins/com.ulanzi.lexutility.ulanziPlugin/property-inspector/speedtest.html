@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -62,101 +62,101 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>Network Speed</h1>
+        <h1 data-localize="Network Speed">Network Speed</h1>
         <form id="property-inspector">
-          <div id="runtime" class="runtime">等待插件状态…</div>
+          <div id="runtime" class="runtime" data-localize="Waiting for plugin status…">Waiting for plugin status…</div>
 
-          <h2>概览与计划</h2>
+          <h2 data-localize="Overview &amp; schedule">Overview &amp; schedule</h2>
           <div class="grid">
             <div class="field">
-              <label for="scope">节点区域</label>
+              <label for="scope" data-localize="Server region">Server region</label>
               <select id="scope" name="scope">
-                <option value="any">不限</option>
-                <option value="mainland" selected>中国大陆</option>
-                <option value="overseas">海外（含港澳台）</option>
+                <option value="any" data-localize="Any">Any</option>
+                <option value="mainland" selected data-localize="Mainland China">Mainland China</option>
+                <option value="overseas" data-localize="Overseas (including Hong Kong, Macao &amp; Taiwan)">Overseas (including Hong Kong, Macao &amp; Taiwan)</option>
               </select>
             </div>
             <div class="field">
-              <label for="intervalMin">自动测速</label>
+              <label for="intervalMin" data-localize="Automatic test">Automatic test</label>
               <select id="intervalMin" name="intervalMin">
-                <option value="15">每 15 分钟</option>
-                <option value="30" selected>每 30 分钟</option>
-                <option value="60">每 60 分钟</option>
-                <option value="manual">仅手动</option>
+                <option value="15" data-localize="Every 15 minutes">Every 15 minutes</option>
+                <option value="30" selected data-localize="Every 30 minutes">Every 30 minutes</option>
+                <option value="60" data-localize="Every 60 minutes">Every 60 minutes</option>
+                <option value="manual" data-localize="Manual only">Manual only</option>
               </select>
             </div>
           </div>
           <div class="grid">
             <div class="field">
-              <label for="activeStart">开始</label>
+              <label for="activeStart" data-localize="Start">Start</label>
               <input id="activeStart" name="activeStart" type="time" value="08:00">
             </div>
             <div class="field">
-              <label for="activeEnd">结束</label>
+              <label for="activeEnd" data-localize="End">End</label>
               <input id="activeEnd" name="activeEnd" type="time" value="23:00">
             </div>
           </div>
           <div class="field">
-            <label for="timeoutSec">单次超时</label>
+            <label for="timeoutSec" data-localize="Single-test timeout">Single-test timeout</label>
             <select id="timeoutSec" name="timeoutSec">
-              <option value="120">120 秒</option>
-              <option value="180" selected>180 秒</option>
-              <option value="240">240 秒</option>
-              <option value="300">300 秒</option>
+              <option value="120" data-localize="120 seconds">120 seconds</option>
+              <option value="180" selected data-localize="180 seconds">180 seconds</option>
+              <option value="240" data-localize="240 seconds">240 seconds</option>
+              <option value="300" data-localize="300 seconds">300 seconds</option>
             </select>
           </div>
 
-          <h2>节点选择</h2>
+          <h2 data-localize="Server selection">Server selection</h2>
           <div class="field">
-            <label for="serverSearch">筛选自动获取的节点</label>
-            <input id="serverSearch" type="search" placeholder="城市、运营商、IP、Server ID">
+            <label for="serverSearch" data-localize="Filter discovered servers">Filter discovered servers</label>
+            <input id="serverSearch" type="search" data-localize="City, ISP, IP, Server ID" placeholder="City, ISP, IP, Server ID">
           </div>
-          <div id="selectionSummary" class="hint">不勾选：在当前区域的全部节点里每日随机。</div>
-          <div id="serverList" class="server-list"><div class="server">正在获取节点…</div></div>
+          <div id="selectionSummary" class="hint" data-localize="No selection: choose daily from all servers in this region.">No selection: choose daily from all servers in this region.</div>
+          <div id="serverList" class="server-list"><div class="server" data-localize="Fetching servers…">Fetching servers…</div></div>
           <input id="candidateServers" name="candidateServers" type="hidden" value="[]">
           <div class="action-row">
-            <button class="ghost-btn" id="refreshServers" type="button">重新获取节点</button>
+            <button class="ghost-btn" id="refreshServers" type="button" data-localize="Refresh servers">Refresh servers</button>
           </div>
 
-          <h2>图表与外观</h2>
+          <h2 data-localize="Chart &amp; appearance">Chart &amp; appearance</h2>
           <div class="field">
-            <label for="chartType">最近 12 次</label>
+            <label for="chartType" data-localize="Last 12 results">Last 12 results</label>
             <input id="chartType" name="chartType" type="hidden" value="line">
             <div class="seg-row" role="group" aria-label="Chart">
-              <button class="seg-btn" type="button" data-chart-type="line">折线图</button>
-              <button class="seg-btn" type="button" data-chart-type="bar">柱状图</button>
+              <button class="seg-btn" type="button" data-chart-type="line" data-localize="Line chart">Line chart</button>
+              <button class="seg-btn" type="button" data-chart-type="bar" data-localize="Bar chart">Bar chart</button>
             </div>
           </div>
           <div class="toggle-row">
             <label class="toggle" for="activeAllDay">
               <div>
-                <strong>全天活跃</strong>
-                <span>忽略上面的时间段，任何时刻都自动测速</span>
+                <strong data-localize="Active all day">Active all day</strong>
+                <span data-localize="Ignore the schedule and run automatic tests at any time">Ignore the schedule and run automatic tests at any time</span>
               </div>
               <input id="activeAllDay" name="activeAllDay" type="checkbox">
             </label>
             <label class="toggle" for="geoIpEnabled">
               <div>
-                <strong>IP 位置校验</strong>
-                <span>用 IPWhois 校验节点 IP 位置（服务方可见请求公网 IP）</span>
+                <strong data-localize="IP location check">IP location check</strong>
+                <span data-localize="Verify server IP location with IPWhois (the service can see your public IP)">Verify server IP location with IPWhois (the service can see your public IP)</span>
               </div>
               <input id="geoIpEnabled" name="geoIpEnabled" type="checkbox" checked>
             </label>
           </div>
 
-          <h2>诊断</h2>
+          <h2 data-localize="Diagnostics">Diagnostics</h2>
           <div class="field">
-            <label for="cliPath">Ookla CLI 路径（可留空自动查找）</label>
+            <label for="cliPath" data-localize="Ookla CLI path (leave blank for auto-detection)">Ookla CLI path (leave blank for auto-detection)</label>
             <input id="cliPath" name="cliPath" placeholder="/opt/homebrew/bin/speedtest">
-            <div class="hint">插件不会下载 CLI，也不会代为接受 Ookla 条款。</div>
+            <div class="hint" data-localize="The plugin does not download the CLI or accept the Ookla terms for you.">The plugin does not download the CLI or accept the Ookla terms for you.</div>
           </div>
           <div class="action-row">
-            <button class="ghost-btn" id="testSelected" type="button">立即测速</button>
-            <button class="danger-btn" id="clearHistory" type="button">清除历史</button>
+            <button class="ghost-btn" id="testSelected" type="button" data-localize="Test now">Test now</button>
+            <button class="danger-btn" id="clearHistory" type="button" data-localize="Clear history">Clear history</button>
           </div>
           <hr class="pi-divider">
           <div class="field">
-            <label for="theme">Theme</label>
+            <label for="theme" data-localize="Theme">Theme</label>
             <input id="theme" name="theme" type="hidden" value="signal">
             <div class="theme-row" role="group" aria-label="Theme">
             </div>
@@ -176,7 +176,7 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note">一个 action 可放置多个实例；每个实例独立选择节点区域：不限、中国大陆或海外。</p>
+          <p class="pi-note" data-localize="Each action instance independently selects any, mainland China, or overseas servers.">Each action instance independently selects any, mainland China, or overseas servers.</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button type="submit" data-localize="Save">Save</button>

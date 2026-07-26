@@ -15,6 +15,54 @@ const PLUGINS = [
   { name: 'template', dir: path.join(ROOT, 'template/com.example.hello.ulanziPlugin') },
 ];
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+const LEX_ACTION_KEYS = [
+  'speedtest',
+  'latency',
+  'pomowave',
+  'claudeusage',
+  'chatgptusage',
+  'bambustatus',
+  'nasstatus',
+  'systemstatus',
+  'healthbreak',
+];
+const LEX_DYNAMIC_LOCALIZATION_KEYS = [
+  // Speed Test Inspector 运行阶段与范围。
+  'Idle', 'Queued', 'Running', 'Discovering servers', 'Error',
+  'GLOBAL', 'OVERSEAS', 'MAINLAND', 'CLI', 'LICENSE', 'NODE', 'TIMEOUT', 'NET',
+  // PomoWave 阶段。
+  'READY', 'FOCUS', 'PAUSED', 'SHORT', 'LONG', 'DONE',
+  // Claude / ChatGPT 诊断映射与键面错误文案。
+  'Stale (showing last values)', 'No Keychain credential', 'Credential expired',
+  'Network failure', 'Rate limited', 'Not fetched yet', 'Unsupported platform',
+  'No Claude Code credential in Keychain. Sign in from Terminal.',
+  'The access token expired. Use Claude Code once to refresh it.',
+  'The request failed or the API response changed.',
+  'Requests are rate limited. Increase the polling interval.',
+  'Sign in', 'Re-auth', 'Offline', 'Slow down', 'macOS only',
+  'Codex executable not found', 'Not signed in', 'App server timed out', 'API call failed',
+  'Install Codex CLI or enter its absolute path above.', 'Run codex login in Terminal.',
+  'The app server did not respond in time. Increase Timeout.',
+  'The API returned an error or an unrecognized response.',
+  'No codex', 'codex login', 'Timeout',
+  // Bambu 准备阶段。
+  'Auto bed leveling', 'Heating the bed', 'Checking XY mechanics', 'Changing filament',
+  'Waiting for motion', 'Paused: filament runout', 'Heating the nozzle',
+  'Calibrating extrusion', 'Scanning the build plate', 'Checking the first layer',
+  'Identifying the build plate', 'Calibrating micro lidar', 'Homing the toolhead',
+  'Cleaning the nozzle', 'Checking extrusion temperature', 'Paused by user',
+  'Paused: front cover issue', 'Calibrating lidar', 'Calibrating extrusion flow',
+  'Nozzle temperature issue', 'Bed temperature issue', 'Preparation stage %s',
+  // NAS 错误类型。
+  'Authentication failed', 'Permission denied', 'API error',
+  // System Status 动态生成的指标选项。
+  'CPU usage', 'RAM usage', 'GPU usage', 'CPU temperature', 'Upload speed', 'Download speed',
+  // Health Break 运行计划。
+  'Eyes', 'Look far', 'Blink', 'Neck and shoulders', 'Chin tuck', 'Turn left', 'Turn right',
+  'Shoulder blades', 'Wrists', 'Open and close', 'Left wrist', 'Right wrist', 'Stand',
+  'Stand up', 'Heel raises', 'Walk', 'Breathing', 'Inhale', 'Exhale', 'Pelvic floor',
+  'Contract', 'Relax',
+];
 
 test('adaptLocale keeps unknown locales as xx_YY so a language is a data-only add', () => {
   assert.equal(adaptLocale('en_US.UTF-8'), 'en');
@@ -100,5 +148,50 @@ test('browser i18n libs stay byte-identical between plugin and template', () => 
       fs.readFileSync(path.join(PLUGINS[1].dir, file), 'utf8'),
       `shared i18n lib drifted between plugin and template: ${file}`,
     );
+  }
+});
+
+test('all Lex Utility action inspectors expose the shared language contract', () => {
+  const dir = PLUGINS[0].dir;
+  const localization = readJson(path.join(dir, 'en.json')).Localization;
+
+  for (const actionKey of LEX_ACTION_KEYS) {
+    const html = fs.readFileSync(path.join(dir, `property-inspector/${actionKey}.html`), 'utf8');
+    const script = fs.readFileSync(path.join(dir, `property-inspector/${actionKey}.js`), 'utf8');
+
+    assert.match(html, /<html lang="en">/, `${actionKey}: HTML default language must be English`);
+    assert.match(html, /id="uiLanguage"/, `${actionKey}: missing #uiLanguage selector`);
+    assert.match(script, /withLanguageField\(/, `${actionKey}: uiLanguage is not collected`);
+    assert.match(script, /bindLanguageSelection\(/, `${actionKey}: language changes are not persisted`);
+    assert.match(script, /REQUEST_SETTINGS_PARAM/, `${actionKey}: panel does not request authoritative settings`);
+
+    for (const [, , rawKey] of html.matchAll(/data-localize=(["'])(.*?)\1/g)) {
+      const key = rawKey.replaceAll('&amp;', '&');
+      assert.ok(key in localization, `${actionKey}: missing HTML localization key: ${key}`);
+    }
+  }
+});
+
+test('all explicit and mapped Lex Utility action copy exists in both language tables', () => {
+  const dir = PLUGINS[0].dir;
+  const en = readJson(path.join(dir, 'en.json')).Localization;
+  const zh = readJson(path.join(dir, 'zh_CN.json')).Localization;
+  const referenced = new Set(LEX_DYNAMIC_LOCALIZATION_KEYS);
+
+  for (const actionKey of LEX_ACTION_KEYS) {
+    for (const relative of [
+      `property-inspector/${actionKey}.js`,
+      `plugin/actions/${actionKey}.js`,
+    ]) {
+      const source = fs.readFileSync(path.join(dir, relative), 'utf8');
+      for (const match of source.matchAll(/(?:\$UD\.)?\bt\(\s*(["'])(.*?)\1/g)) {
+        referenced.add(match[2]);
+      }
+    }
+  }
+
+  for (const key of referenced) {
+    assert.ok(key in en, `en missing referenced localization key: ${key}`);
+    assert.ok(key in zh, `zh_CN missing referenced localization key: ${key}`);
   }
 });

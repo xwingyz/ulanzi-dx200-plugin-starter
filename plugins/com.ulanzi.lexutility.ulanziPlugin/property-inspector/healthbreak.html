@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -58,59 +58,59 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>Health Break · 健康微休息</h1>
+        <h1 data-localize="Health Break">Health Break</h1>
         <form id="property-inspector">
           <div class="field">
-            <span class="field-label">动作组（1～4 个，按此顺序执行）</span>
+            <span class="field-label" data-localize="Exercise groups (1–4, performed in this order)">Exercise groups (1–4, performed in this order)</span>
             <input id="groups" name="groups" type="hidden">
             <div class="group-list" id="groupList">
-              <div class="group-row" data-group-row="eyes"><button class="group-toggle" type="button" data-group-key="eyes">◉ 护眼 · 远眺与眨眼</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
-              <div class="group-row" data-group-row="neck"><button class="group-toggle" type="button" data-group-key="neck">↔ 颈肩 · 微收与转动</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
-              <div class="group-row" data-group-row="hands"><button class="group-toggle" type="button" data-group-key="hands">✋ 手腕手指 · 张合与伸展</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
-              <div class="group-row" data-group-row="stand"><button class="group-toggle" type="button" data-group-key="stand">↥ 起身活动 · 提踵与走动</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
-              <div class="group-row" data-group-row="breathe"><button class="group-toggle" type="button" data-group-key="breathe">≈ 呼吸复位 · 缓慢吸气呼气</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
-              <div class="group-row" data-group-row="pelvic"><button class="group-toggle" type="button" data-group-key="pelvic">◇ 盆底肌 · 收缩与充分放松</button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="eyes"><button class="group-toggle" type="button" data-group-key="eyes"><span aria-hidden="true">◉</span> <span data-localize="Eyes · Look far and blink">Eyes · Look far and blink</span></button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="neck"><button class="group-toggle" type="button" data-group-key="neck"><span aria-hidden="true">↔</span> <span data-localize="Neck and shoulders · Retract and turn">Neck and shoulders · Retract and turn</span></button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="hands"><button class="group-toggle" type="button" data-group-key="hands"><span aria-hidden="true">✋</span> <span data-localize="Wrists and fingers · Open and stretch">Wrists and fingers · Open and stretch</span></button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="stand"><button class="group-toggle" type="button" data-group-key="stand"><span aria-hidden="true">↥</span> <span data-localize="Stand and move · Heel raises and walking">Stand and move · Heel raises and walking</span></button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="breathe"><button class="group-toggle" type="button" data-group-key="breathe"><span aria-hidden="true">≈</span> <span data-localize="Breathing reset · Slow inhale and exhale">Breathing reset · Slow inhale and exhale</span></button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
+              <div class="group-row" data-group-row="pelvic"><button class="group-toggle" type="button" data-group-key="pelvic"><span aria-hidden="true">◇</span> <span data-localize="Pelvic floor · Contract and fully relax">Pelvic floor · Contract and fully relax</span></button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
             </div>
             <div class="hint" id="durationHint"></div>
-            <div class="safety">盆底肌并非越紧越好。如有盆腔疼痛、排尿排便困难、术后或孕产期问题，请先咨询专业人士；出现疼痛、眩晕或麻木应立即停止。</div>
+            <div class="safety" data-localize="A tighter pelvic floor is not always better. Consult a professional for pelvic pain, elimination difficulty, post-surgery, pregnancy, or postpartum concerns. Stop immediately if you feel pain, dizziness, or numbness.">A tighter pelvic floor is not always better. Consult a professional for pelvic pain, elimination difficulty, post-surgery, pregnancy, or postpartum concerns. Stop immediately if you feel pain, dizziness, or numbness.</div>
           </div>
 
           <div class="grid">
-            <div class="field"><label for="intervalMin">活动周期（分钟）</label><input id="intervalMin" name="intervalMin" type="number" min="5" max="240"></div>
-            <div class="field"><label for="dailyGoal">每日目标（次）</label><input id="dailyGoal" name="dailyGoal" type="number" min="1" max="12"></div>
+            <div class="field"><label for="intervalMin" data-localize="Activity interval (min)">Activity interval (min)</label><input id="intervalMin" name="intervalMin" type="number" min="5" max="240"></div>
+            <div class="field"><label for="dailyGoal" data-localize="Daily goal">Daily goal</label><input id="dailyGoal" name="dailyGoal" type="number" min="1" max="12"></div>
           </div>
           <div class="grid">
-            <div class="field"><label for="activeStart">有效时段开始</label><input id="activeStart" name="activeStart" type="time"></div>
-            <div class="field"><label for="activeEnd">有效时段结束</label><input id="activeEnd" name="activeEnd" type="time"></div>
+            <div class="field"><label for="activeStart" data-localize="Active period starts">Active period starts</label><input id="activeStart" name="activeStart" type="time"></div>
+            <div class="field"><label for="activeEnd" data-localize="Active period ends">Active period ends</label><input id="activeEnd" name="activeEnd" type="time"></div>
           </div>
           <div class="field">
-            <span class="field-label">有效星期</span>
+            <span class="field-label" data-localize="Active days">Active days</span>
             <input id="activeDays" name="activeDays" type="hidden">
             <div class="day-row">
-              <button class="day-btn" type="button" data-day="1">一</button><button class="day-btn" type="button" data-day="2">二</button><button class="day-btn" type="button" data-day="3">三</button><button class="day-btn" type="button" data-day="4">四</button><button class="day-btn" type="button" data-day="5">五</button><button class="day-btn" type="button" data-day="6">六</button><button class="day-btn" type="button" data-day="0">日</button>
+              <button class="day-btn" type="button" data-day="1" data-localize="Mon">Mon</button><button class="day-btn" type="button" data-day="2" data-localize="Tue">Tue</button><button class="day-btn" type="button" data-day="3" data-localize="Wed">Wed</button><button class="day-btn" type="button" data-day="4" data-localize="Thu">Thu</button><button class="day-btn" type="button" data-day="5" data-localize="Fri">Fri</button><button class="day-btn" type="button" data-day="6" data-localize="Sat">Sat</button><button class="day-btn" type="button" data-day="0" data-localize="Sun">Sun</button>
             </div>
-            <div class="hint">结束时间早于开始时间时按跨夜班次处理。</div>
+            <div class="hint" data-localize="When the end time is earlier than the start time, the period spans midnight.">When the end time is earlier than the start time, the period spans midnight.</div>
           </div>
           <div class="grid">
-            <div class="field"><label for="repeatReminderMin">增强提醒间隔（分钟）</label><input id="repeatReminderMin" name="repeatReminderMin" type="number" min="0" max="30"></div>
-            <div class="field"><label>声音</label><label class="toggle" for="soundEnabled"><span>阶段提示音</span><input id="soundEnabled" name="soundEnabled" type="checkbox"></label></div>
+            <div class="field"><label for="repeatReminderMin" data-localize="Escalated reminder interval (min)">Escalated reminder interval (min)</label><input id="repeatReminderMin" name="repeatReminderMin" type="number" min="0" max="30"></div>
+            <div class="field"><label data-localize="Sound">Sound</label><label class="toggle" for="soundEnabled"><span data-localize="Phase sound cue">Phase sound cue</span><input id="soundEnabled" name="soundEnabled" type="checkbox"></label></div>
           </div>
 
-          <h2>最近 30 个健康日</h2>
+          <h2 data-localize="Last 30 health days">Last 30 health days</h2>
           <div class="stats">
-            <div class="stats-summary"><div><strong id="todayCompleted">0</strong>今日完成</div><div><strong id="todayBonus">0</strong>今日加练</div><div><strong id="streak">0</strong>连续达标</div></div>
-            <div class="history" id="history"><div class="history-row"><span>暂无记录</span></div></div>
+            <div class="stats-summary"><div><strong id="todayCompleted">0</strong><span data-localize="Completed today">Completed today</span></div><div><strong id="todayBonus">0</strong><span data-localize="Bonus today">Bonus today</span></div><div><strong id="streak">0</strong><span data-localize="Goal streak">Goal streak</span></div></div>
+            <div class="history" id="history"><div class="history-row"><span data-localize="No records yet">No records yet</span></div></div>
           </div>
 
           <hr class="pi-divider">
           <div class="field">
-            <label for="theme">主题</label><input id="theme" name="theme" type="hidden"><div class="theme-row" role="group" aria-label="Theme"></div>
+            <label for="theme" data-localize="Theme">Theme</label><input id="theme" name="theme" type="hidden"><div class="theme-row" role="group" aria-label="Theme"></div>
           </div>
           <div class="field">
-            <span class="field-label">安全框</span>
+            <span class="field-label" data-localize="Safe frame">Safe frame</span>
             <div class="frame-row">
-              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max"><span>最佳显示区</span></label>
-              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox"><span>显示通用边框</span></label>
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max"><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox"><span data-localize="Show frame">Show frame</span></label>
             </div>
           </div>
           <div class="field">
@@ -121,9 +121,9 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note">短按开始或暂停，长按跳过到期提醒；练习中长按取消。完整跟完引导记为完成一次。</p>
-          <div class="action-row"><button class="ghost-btn" id="resetDefaults" type="button">恢复默认</button><button class="save-btn" type="submit">保存</button></div>
-          <div class="uspi-feedback" id="inspector-feedback" hidden><span id="feedback-saved" hidden>已保存</span><span id="feedback-reset" hidden>已恢复默认</span></div>
+          <p class="pi-note" data-localize="Press to start or pause. Hold to skip a due reminder; hold during exercise to cancel. Completing the full guide counts once.">Press to start or pause. Hold to skip a due reminder; hold during exercise to cancel. Completing the full guide counts once.</p>
+          <div class="action-row"><button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button><button class="save-btn" type="submit" data-localize="Save">Save</button></div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden><span id="feedback-saved" data-localize="Saved" hidden>Saved</span><span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span></div>
         </form>
       </div>
     </div>

@@ -17,6 +17,7 @@ export function createHealthBreakAction(runtime) {
     renderThemeBackdrop,
     sendParamFromPlugin,
     setInstanceTimeout,
+    t,
     themeFor,
     toDataUrl,
     writePersistedState,
@@ -37,49 +38,49 @@ export function createHealthBreakAction(runtime) {
 
   const GROUPS = Object.freeze({
     eyes: {
-      label: '护眼',
+      label: 'Eyes',
       stages: [
-        { id: 'far', label: '远眺', seconds: 20, cue: 'soft' },
-        { id: 'blink', label: '眨眼', seconds: 10, reps: 10, cue: 'bright' },
+        { id: 'far', label: 'Look far', seconds: 20, cue: 'soft' },
+        { id: 'blink', label: 'Blink', seconds: 10, reps: 10, cue: 'bright' },
       ],
     },
     neck: {
-      label: '颈肩',
+      label: 'Neck and shoulders',
       stages: [
-        { id: 'chin', label: '微收', seconds: 15, cue: 'soft' },
-        { id: 'left', label: '左转', seconds: 15, cue: 'low' },
-        { id: 'right', label: '右转', seconds: 15, cue: 'high' },
-        { id: 'scapula', label: '肩胛', seconds: 20, reps: 10, cue: 'bright' },
+        { id: 'chin', label: 'Chin tuck', seconds: 15, cue: 'soft' },
+        { id: 'left', label: 'Turn left', seconds: 15, cue: 'low' },
+        { id: 'right', label: 'Turn right', seconds: 15, cue: 'high' },
+        { id: 'scapula', label: 'Shoulder blades', seconds: 20, reps: 10, cue: 'bright' },
       ],
     },
     hands: {
-      label: '手腕',
+      label: 'Wrists',
       stages: [
-        { id: 'open', label: '张合', seconds: 20, reps: 10, cue: 'bright' },
-        { id: 'wristLeft', label: '左腕', seconds: 15, cue: 'low' },
-        { id: 'wristRight', label: '右腕', seconds: 15, cue: 'high' },
+        { id: 'open', label: 'Open and close', seconds: 20, reps: 10, cue: 'bright' },
+        { id: 'wristLeft', label: 'Left wrist', seconds: 15, cue: 'low' },
+        { id: 'wristRight', label: 'Right wrist', seconds: 15, cue: 'high' },
       ],
     },
     stand: {
-      label: '起身',
+      label: 'Stand',
       stages: [
-        { id: 'rise', label: '站起', seconds: 10, cue: 'bright' },
-        { id: 'calf', label: '提踵', seconds: 30, reps: 10, cue: 'high' },
-        { id: 'march', label: '走动', seconds: 30, cue: 'bright' },
+        { id: 'rise', label: 'Stand up', seconds: 10, cue: 'bright' },
+        { id: 'calf', label: 'Heel raises', seconds: 30, reps: 10, cue: 'high' },
+        { id: 'march', label: 'Walk', seconds: 30, cue: 'bright' },
       ],
     },
     breathe: {
-      label: '呼吸',
+      label: 'Breathing',
       stages: Array.from({ length: 5 }, () => [
-        { id: 'inhale', label: '吸气', seconds: 4, cue: 'high' },
-        { id: 'exhale', label: '呼气', seconds: 6, cue: 'low' },
+        { id: 'inhale', label: 'Inhale', seconds: 4, cue: 'high' },
+        { id: 'exhale', label: 'Exhale', seconds: 6, cue: 'low' },
       ]).flat(),
     },
     pelvic: {
-      label: '盆底',
+      label: 'Pelvic floor',
       stages: Array.from({ length: 5 }, () => [
-        { id: 'contract', label: '收缩', seconds: 5, cue: 'high' },
-        { id: 'release', label: '放松', seconds: 5, cue: 'low' },
+        { id: 'contract', label: 'Contract', seconds: 5, cue: 'high' },
+        { id: 'release', label: 'Relax', seconds: 5, cue: 'low' },
       ]).flat(),
     },
   });
@@ -729,22 +730,24 @@ export function createHealthBreakAction(runtime) {
   }
 
   function renderWaitingContent(instance, theme, window) {
+    const language = instance.settings.uiLanguage;
     const groups = selectedGroups(instance.settings);
     const icons = groupLayout(groups).map((position, index) => groupGlyph(
       groups[index], position.x, position.y, position.size, theme.accent, theme.muted, instance.animFrame,
     )).join('');
     const goal = Number.parseInt(instance.settings.dailyGoal, 10) || 6;
     const progress = `${instance.today?.completed || 0}/${goal}`;
-    let label = window.active ? compactRemaining(instance.intervalRemainingMs) : 'OFF';
-    if (instance.healthStatus === 'queued') label = instance.queueKind === 'manual' ? '随后' : '等待';
-    if (instance.healthStatus === 'done') label = '完成';
+    let label = window.active ? compactRemaining(instance.intervalRemainingMs) : t('OFF', language);
+    if (instance.healthStatus === 'queued') label = t(instance.queueKind === 'manual' ? 'Later' : 'Waiting', language);
+    if (instance.healthStatus === 'done') label = t('Done', language);
     return `${icons}
       <text x="128" y="174" text-anchor="middle" fill="${theme.text}" font-size="31" font-weight="800" font-family="Arial, sans-serif">${escapeXml(label)}</text>
-      <text x="128" y="202" text-anchor="middle" fill="${theme.muted}" font-size="18" font-weight="700" font-family="Arial, sans-serif">今日 ${escapeXml(progress)}</text>`;
+      <text x="128" y="202" text-anchor="middle" fill="${theme.muted}" font-size="18" font-weight="700" font-family="Arial, sans-serif">${escapeXml(t('Today', language))} ${escapeXml(progress)}</text>`;
   }
 
   function renderRunningContent(instance, theme) {
-    const stage = stageFor(instance) || { groupKey: selectedGroups(instance.settings)[0], label: '开始', seconds: 1, durationMs: 1_000 };
+    const language = instance.settings.uiLanguage;
+    const stage = stageFor(instance) || { groupKey: selectedGroups(instance.settings)[0], label: 'Start', seconds: 1, durationMs: 1_000 };
     const seconds = Math.max(0, Math.ceil(instance.stageRemainingMs / 1000));
     const elapsedRatio = Math.max(0, Math.min(1, 1 - instance.stageRemainingMs / Math.max(1, stage.durationMs)));
     const value = stage.reps
@@ -755,26 +758,28 @@ export function createHealthBreakAction(runtime) {
       : '';
     return `${groupGlyph(stage.groupKey, 92, 48, 72, theme.accent, theme.muted, instance.animFrame)}
       ${pause}
-      <text x="128" y="155" text-anchor="middle" fill="${theme.text}" font-size="28" font-weight="800" font-family="Arial, sans-serif">${escapeXml(instance.healthStatus === 'paused' ? '暂停' : stage.label)}</text>
+      <text x="128" y="155" text-anchor="middle" fill="${theme.text}" font-size="28" font-weight="800" font-family="Arial, sans-serif">${escapeXml(t(instance.healthStatus === 'paused' ? 'Paused' : stage.label, language))}</text>
       <text x="128" y="198" text-anchor="middle" fill="${theme.accent}" font-size="36" font-weight="800" font-family="Arial, sans-serif">${escapeXml(value)}</text>`;
   }
 
   function renderDueContent(instance, theme, now = Date.now()) {
+    const language = instance.settings.uiLanguage;
     const key = selectedGroups(instance.settings)[0];
     const visible = reminderFlashStrong(instance, now) ? instance.animFrame % 2 === 0 : instance.animFrame === 0;
     return `<g opacity="${visible ? 1 : 0.3}">
       ${groupGlyph(key, 80, 45, 96, theme.warn, theme.muted, instance.animFrame)}
-      <text x="128" y="185" text-anchor="middle" fill="${theme.warn}" font-size="32" font-weight="800" font-family="Arial, sans-serif">开始</text>
-      <text x="128" y="207" text-anchor="middle" fill="${theme.muted}" font-size="14" font-weight="700" font-family="Arial, sans-serif">长按跳过</text>
+      <text x="128" y="185" text-anchor="middle" fill="${theme.warn}" font-size="32" font-weight="800" font-family="Arial, sans-serif">${escapeXml(t('Start', language))}</text>
+      <text x="128" y="207" text-anchor="middle" fill="${theme.muted}" font-size="14" font-weight="700" font-family="Arial, sans-serif">${escapeXml(t('Hold to skip', language))}</text>
     </g>`;
   }
 
   function renderDoneContent(instance, theme) {
+    const language = instance.settings.uiLanguage;
     const bonus = instance.today?.bonus || 0;
     return `<circle cx="128" cy="112" r="58" fill="${theme.ok}" opacity="0.2"/>
       <path d="M92 112l24 24 49-55" fill="none" stroke="${theme.ok}" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="128" y="191" text-anchor="middle" fill="${theme.text}" font-size="27" font-weight="800" font-family="Arial, sans-serif">今日完成</text>
-      ${bonus ? `<text x="128" y="211" text-anchor="middle" fill="${theme.muted}" font-size="15" font-weight="700" font-family="Arial, sans-serif">加练 +${bonus}</text>` : ''}`;
+      <text x="128" y="191" text-anchor="middle" fill="${theme.text}" font-size="27" font-weight="800" font-family="Arial, sans-serif">${escapeXml(t('Completed today', language))}</text>
+      ${bonus ? `<text x="128" y="211" text-anchor="middle" fill="${theme.muted}" font-size="15" font-weight="700" font-family="Arial, sans-serif">${escapeXml(t('Bonus', language))} +${bonus}</text>` : ''}`;
   }
 
   function renderHealthBreakIcon(instance, options = {}) {

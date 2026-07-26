@@ -46,71 +46,71 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>ChatGPT Usage</h1>
+        <h1 data-localize="ChatGPT Usage">ChatGPT Usage</h1>
         <form id="property-inspector">
           <div class="field">
-            <label for="codexCommand">Codex 命令</label>
+            <label for="codexCommand" data-localize="Codex command">Codex command</label>
             <input id="codexCommand" name="codexCommand" maxlength="200" value="codex">
-            <div class="hint">默认按 PATH 查找。插件由 Ulanzi Studio 拉起，PATH 可能不含 homebrew 等前缀；找不到时请填绝对路径。</div>
+            <div class="hint" data-localize="Codex is resolved from PATH by default. Enter an absolute path if Ulanzi Studio cannot find it.">Codex is resolved from PATH by default. Enter an absolute path if Ulanzi Studio cannot find it.</div>
           </div>
           <div class="grid-3">
             <div class="field">
-              <label for="pollSec">Poll (s)</label>
+              <label for="pollSec" data-localize="Poll (s)">Poll (s)</label>
               <input id="pollSec" name="pollSec" type="number" min="60" max="3600" value="300">
             </div>
             <div class="field">
-              <label for="redrawSec">Redraw (s)</label>
+              <label for="redrawSec" data-localize="Redraw (s)">Redraw (s)</label>
               <input id="redrawSec" name="redrawSec" type="number" min="10" max="300" value="30">
             </div>
             <div class="field">
-              <label for="timeoutSec">Timeout (s)</label>
+              <label for="timeoutSec" data-localize="Timeout (s)">Timeout (s)</label>
               <input id="timeoutSec" name="timeoutSec" type="number" min="3" max="60" value="12">
             </div>
           </div>
           <div class="grid">
             <div class="field">
-              <label for="limitId">Limit ID</label>
+              <label for="limitId" data-localize="Limit ID">Limit ID</label>
               <input id="limitId" name="limitId" maxlength="60" value="codex">
             </div>
             <div class="field">
-              <label for="usageUrl">长按打开</label>
+              <label for="usageUrl" data-localize="Open on hold">Open on hold</label>
               <input id="usageUrl" name="usageUrl" maxlength="160" value="https://chatgpt.com/#settings/Usage">
             </div>
           </div>
           <div class="field">
             <label data-localize="Rows">Rows</label>
             <div class="frame-row">
-              <label class="frame-toggle"><input id="showSecondary" name="showSecondary" type="checkbox" checked><span>次要窗口</span></label>
-              <label class="frame-toggle"><input id="showResetCredits" name="showResetCredits" type="checkbox" checked><span>重置券</span></label>
+              <label class="frame-toggle"><input id="showSecondary" name="showSecondary" type="checkbox" checked><span data-localize="Secondary window">Secondary window</span></label>
+              <label class="frame-toggle"><input id="showResetCredits" name="showResetCredits" type="checkbox" checked><span data-localize="Reset credits">Reset credits</span></label>
             </div>
-            <div class="hint">次要窗口只在接口返回该条目时才占一行。</div>
+            <div class="hint" data-localize="The secondary window takes a row only when the API returns it.">The secondary window takes a row only when the API returns it.</div>
           </div>
           <div class="field">
             <label data-localize="Appearance">Appearance</label>
             <div class="frame-row">
-              <label class="frame-toggle"><input id="showBarBackground" name="showBarBackground" type="checkbox" checked><span>进度条背景</span></label>
-              <label class="frame-toggle"><input id="severityColors" name="severityColors" type="checkbox" checked><span>分级配色</span></label>
+              <label class="frame-toggle"><input id="showBarBackground" name="showBarBackground" type="checkbox" checked><span data-localize="Bar background">Bar background</span></label>
+              <label class="frame-toggle"><input id="severityColors" name="severityColors" type="checkbox" checked><span data-localize="Severity colors">Severity colors</span></label>
             </div>
-            <div class="hint">分级阈值：已用 ≥75% 转黄、≥90% 转红，与 Claude Usage 一致。</div>
+            <div class="hint" data-localize="Severity thresholds: yellow at 75% used and red at 90%, matching Claude Usage.">Severity thresholds: yellow at 75% used and red at 90%, matching Claude Usage.</div>
           </div>
           <div class="field">
             <label data-localize="Diagnostics">Diagnostics</label>
             <div class="diag">
               <dl>
-                <dt>平台</dt><dd id="diag-platform">—</dd>
-                <dt>Codex 路径</dt><dd id="diag-path">—</dd>
-                <dt>登录状态</dt><dd id="diag-login">—</dd>
-                <dt>套餐</dt><dd id="diag-plan">—</dd>
-                <dt>当前状态</dt><dd id="diag-state">—</dd>
-                <dt>上次拉取</dt><dd id="diag-fetched">—</dd>
-                <dt>上次错误</dt><dd id="diag-error">—</dd>
+                <dt data-localize="Platform">Platform</dt><dd id="diag-platform">—</dd>
+                <dt data-localize="Codex path">Codex path</dt><dd id="diag-path">—</dd>
+                <dt data-localize="Login status">Login status</dt><dd id="diag-login">—</dd>
+                <dt data-localize="Plan">Plan</dt><dd id="diag-plan">—</dd>
+                <dt data-localize="Current status">Current status</dt><dd id="diag-state">—</dd>
+                <dt data-localize="Last fetch">Last fetch</dt><dd id="diag-fetched">—</dd>
+                <dt data-localize="Last error">Last error</dt><dd id="diag-error">—</dd>
               </dl>
-              <button class="probe-btn" id="probe" type="button">立即测试</button>
+              <button class="probe-btn" id="probe" type="button" data-localize="Test now">Test now</button>
             </div>
           </div>
           <hr class="pi-divider">
           <div class="field">
-            <label for="theme">Theme</label>
+            <label for="theme" data-localize="Theme">Theme</label>
             <input id="theme" name="theme" type="hidden" value="mono">
             <div class="theme-row" role="group" aria-label="Theme">
             </div>
@@ -130,7 +130,7 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note">通过 Codex CLI 读取限额用量与重置倒计时。需要先安装 Codex CLI 并运行 <code>codex login</code>。显示的是 Codex 限额，不是整个 ChatGPT 账户的用量。</p>
+          <p class="pi-note" data-localize="Read Codex limits and reset countdowns through Codex CLI. Install Codex CLI and run codex login first. These are Codex limits, not total ChatGPT account usage.">Read Codex limits and reset countdowns through Codex CLI. Install Codex CLI and run <code>codex login</code> first. These are Codex limits, not total ChatGPT account usage.</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button class="save-btn" type="submit" data-localize="Save">Save</button>

@@ -1,7 +1,7 @@
 # Synology NAS Status 功能与技术规范
 
 状态：首版已实现；API 链路已在 DS923+（DSM 7.3.2-86009）真机验证在线态，键面三态待实机复核  
-最后代码核对：2026-07-22  
+最后代码核对：2026-07-26
 action key：`nasstatus`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.nasstatus`
 
@@ -134,3 +134,9 @@ DSM 7.3.2 实机事实（DS923+，非管理员账号）：`SYNO.DSM.Info` 与点
 - 专项测试 `tests/nasstatus-action.test.js` 覆盖：API 响应解析（info/login/dsm/storage）、错误分类三态、卷选择、容量格式化、退避序列、短按冷却、长按 URL 拼装、各显示态渲染结构；`testing` 导出全部加 `nas` 前缀防撞。
 - 根目录 `npm test` 全绿。
 - `restart` 同步宿主后实机验证：在线渲染、拔线/停 DSM 的离线态、错密码的异常态、测试连接回填卷下拉。
+
+## 多语言契约
+
+- Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
+- 配置、测试连接、在线、离线和异常状态按实例 `uiLanguage` 翻译；NAS 名称、卷 ID、容量和 DSM 返回详情保持原始数据。
+- 探针返回稳定的结构化数据和英文机器消息，翻译只发生在 Inspector 和 render 边界；新增键由 `tests/i18n.test.js` 锁定覆盖。

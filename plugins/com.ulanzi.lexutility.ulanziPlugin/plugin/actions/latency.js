@@ -20,6 +20,7 @@ export function createLatencyAction(runtime) {
     renderInstance,
     renderThemeBackdrop,
     setInstanceTimeout,
+    t,
     themeFor,
     toDataUrl,
     writePersistedState,
@@ -307,6 +308,7 @@ function renderLatencyIcon(instance) {
   const frame = frameFor(instance.settings);
   const background = renderThemeBackdrop(theme, theme.accent, frame);
   const host = hostFromUrl(instance.settings.url);
+  const language = instance.settings.uiLanguage;
   const warnMs = Number.parseInt(instance.settings.warnMs, 10) || 400;
   const status = instance.paused ? 'paused' : instance.status || 'checking';
   const accent =
@@ -315,17 +317,17 @@ function renderLatencyIcon(instance) {
     : status === 'up' ? theme.accent
     : theme.muted;
   const bigText =
-    status === 'paused' ? 'Pause'
-    : status === 'down' ? 'DOWN'
+    status === 'paused' ? t('Pause', language)
+    : status === 'down' ? t('DOWN', language)
     : status === 'checking' ? '...'
     : instance.lastMs == null ? '...'
     : String(instance.lastMs);
   const headerText =
-    status === 'paused' ? '暂停'
-    : status === 'down' ? '离线'
-    : status === 'slow' ? '偏高'
-    : status === 'up' ? '延迟'
-    : '检查';
+    status === 'paused' ? t('Paused', language)
+    : status === 'down' ? t('Offline', language)
+    : status === 'slow' ? t('Slow', language)
+    : status === 'up' ? t('Latency', language)
+    : t('Checking', language);
   const stats = latencyStats(instance);
   const hostLabel = clipHostMiddle(host, 19);
   // 图表基色固定用主题 accent：历史柱描述的是各自当时的延迟，不随「当前状态」整体染色

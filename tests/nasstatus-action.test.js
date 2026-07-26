@@ -410,11 +410,11 @@ test('nasstatus probe replies volume options and never echoes credentials', asyn
   const payload = await nasRunProbe(target, {}, { send, fetchImpl });
   assert.equal(payload.status, 'ok');
   assert.equal(payload.volumes.length, 1);
-  assert.match(payload.volumes[0].label, /^卷 1 · /);
+  assert.deepEqual(payload.volumes[0], { id: 'volume_1', used: '450.0G', total: '1000.0G' });
   assert.equal(JSON.stringify(payload).includes('secret'), false, '诊断回传不得包含密码');
 
   const authFail = await nasRunProbe(target, {}, { send, fetchImpl: async () => ({ state: 'ERROR', kind: 'AUTH' }) });
-  assert.match(authFail.message, /认证失败/);
+  assert.match(authFail.message, /Authentication failed/);
 });
 
 // ---- 渲染 ----
@@ -433,22 +433,27 @@ test('nasstatus renders online face with name, temperature and capacity row', ()
 });
 
 test('nasstatus renders distinct offline, error and config states', () => {
-  const offline = decode(ACTION_CONFIGS.nasstatus.render(instance({}, { connectionState: 'OFFLINE' })));
+  const zh = { uiLanguage: 'zh_CN' };
+  const offline = decode(ACTION_CONFIGS.nasstatus.render(instance(zh, { connectionState: 'OFFLINE' })));
   assert.match(offline, /离线/);
-  assert.match(offline, /上次在线/);
+  assert.match(offline, /最近在线/);
 
-  const error = decode(ACTION_CONFIGS.nasstatus.render(instance({}, { connectionState: 'ERROR', errorKind: 'AUTH' })));
-  assert.match(error, /异常/);
+  const error = decode(ACTION_CONFIGS.nasstatus.render(instance(zh, { connectionState: 'ERROR', errorKind: 'AUTH' })));
+  assert.match(error, /错误/);
   assert.match(error, /认证失败/);
 
-  const perm = decode(ACTION_CONFIGS.nasstatus.render(instance({}, { connectionState: 'ERROR', errorKind: 'PERMISSION' })));
+  const perm = decode(ACTION_CONFIGS.nasstatus.render(instance(zh, { connectionState: 'ERROR', errorKind: 'PERMISSION' })));
   assert.match(perm, /权限不足/);
 
-  const config = decode(ACTION_CONFIGS.nasstatus.render(instance({ nasHost: '' }, { connectionState: 'CONFIG_REQUIRED' })));
-  assert.match(config, /待配置/);
+  const config = decode(ACTION_CONFIGS.nasstatus.render(instance({ ...zh, nasHost: '' }, { connectionState: 'CONFIG_REQUIRED' })));
+  assert.match(config, /需要配置/);
 
-  const pending = decode(ACTION_CONFIGS.nasstatus.render(instance({}, { connectionState: 'PENDING' })));
+  const pending = decode(ACTION_CONFIGS.nasstatus.render(instance(zh, { connectionState: 'PENDING' })));
   assert.match(pending, /连接中/);
+
+  const english = decode(ACTION_CONFIGS.nasstatus.render(instance({ uiLanguage: 'en' }, { connectionState: 'OFFLINE' })));
+  assert.match(english, /Offline/);
+  assert.match(english, /Last online/);
 });
 
 test('nasstatus temperature above 75 renders the value in warning color', () => {

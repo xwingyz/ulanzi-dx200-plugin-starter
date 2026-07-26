@@ -17,6 +17,7 @@ export function createPomowaveAction(runtime) {
     renderInstance,
     renderThemeBackdrop,
     setInstanceTimeout,
+    t,
     themeFor,
     toDataUrl,
     writePersistedState,
@@ -548,7 +549,7 @@ function renderPomodoroIcon(instance) {
     : isBreak ? mixHex(phaseColor, background.text, 0.3) : background.text;
   const displayText = instance.phase === 'done' ? '✓' : formatPomodoroTime(remainingSec);
   const displaySize = instance.phase === 'done' ? 88 : 40;
-  const label = pomodoroPhaseLabel(instance);
+  const label = t(pomodoroPhaseLabel(instance), instance.settings.uiLanguage);
   const roundsGoal = pomodoroRoundsGoal(instance.settings);
   const completedInCycle = instance.phase === 'longBreak' || instance.phase === 'done'
     ? roundsGoal

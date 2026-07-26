@@ -1,7 +1,7 @@
 # System Status Action 规格
 
 状态：已实现
-最后代码核对：2026-07-22
+最后代码核对：2026-07-26
 action key：`systemstatus`
 UUID：`com.ulanzi.ulanzistudio.lexutility.systemstatus`
 
@@ -68,3 +68,9 @@ Inspector 以三个有序下拉槽位表达“最多 3 项”；第二、第三�
 - 手动刷新测试覆盖立即高亮、采样完成后恢复、轮询重新调度，以及与自动采样重叠时排队补刷。
 - manifest、action 注册、Inspector、静态图标与本规格保持一致。
 - 完整 `npm test` 通过；因新增 action identity 和主进程模块，桌面验收使用 `restart`。
+
+## 多语言契约
+
+- Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
+- 指标选项、等待状态和键面固定标签按实例 `uiLanguage` 翻译；CPU、RAM、GPU 等通用缩写、采样值和单位保持稳定数据。
+- `en.json` 与 `zh_CN.json` 的 action 名称/说明顺序必须与 manifest 一致，动态指标键由 `tests/i18n.test.js` 显式锁定。

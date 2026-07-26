@@ -1,4 +1,4 @@
-const SYSTEMSTATUS_FIELDS = [
+const SYSTEMSTATUS_FIELDS = withLanguageField([
   'metric1',
   'metric2',
   'metric3',
@@ -7,27 +7,31 @@ const SYSTEMSTATUS_FIELDS = [
   'theme',
   'frameSize',
   'showFrame',
-];
+]);
 
 const SYSTEMSTATUS_METRICS = [
-  ['cpu', 'CPU 占用'],
-  ['ram', 'RAM 占用'],
-  ['gpu', 'GPU 占用'],
-  ['temperature', 'CPU 温度'],
-  ['upload', '上传网速'],
-  ['download', '下载网速'],
+  ['cpu', 'CPU usage'],
+  ['ram', 'RAM usage'],
+  ['gpu', 'GPU usage'],
+  ['temperature', 'CPU temperature'],
+  ['upload', 'Upload speed'],
+  ['download', 'Download speed'],
 ];
 
 function populateMetricSelects() {
-  for (const id of ['metric1', 'metric2', 'metric3']) {
+  const ids = ['metric1', 'metric2', 'metric3'];
+  const currentValues = ids.map((id) => document.getElementById(id)?.value || '');
+  for (const id of ids) {
     const select = document.getElementById(id);
     select.replaceChildren();
     if (id !== 'metric1') {
-      select.add(new Option('不显示', 'none'));
+      select.add(new Option($UD.t('Do not show'), 'none'));
     }
     for (const [value, label] of SYSTEMSTATUS_METRICS) {
-      select.add(new Option(label, value));
+      select.add(new Option($UD.t(label), value));
     }
+    const previous = currentValues[ids.indexOf(id)];
+    if (previous) select.value = previous;
   }
 }
 
@@ -80,6 +84,10 @@ function initSystemStatusInspector() {
       autosave();
     });
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings, () => {
+      populateMetricSelects();
+      updateMetricAvailability();
+    });
     bindResetDefaults(() => {
       autosave.cancel();
       $UD.sendParamFromPlugin({ [RESET_DEFAULTS_PARAM]: 'true' }, currentContext);
@@ -94,12 +102,17 @@ function initSystemStatusInspector() {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
 
   function apply(message) {
     currentContext = message.context || currentContext;
     applySettings(SYSTEMSTATUS_FIELDS, message.param || {});
     updateMetricAvailability();
+    void afterLanguageSelection(() => {
+      populateMetricSelects();
+      updateMetricAvailability();
+    });
   }
 
   $UD.onAdd(apply);

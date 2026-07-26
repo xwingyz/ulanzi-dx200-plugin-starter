@@ -20,6 +20,7 @@ export function createClaudeUsageAction(runtime) {
     renderThemeBackdrop,
     sendParamFromPlugin,
     setInstanceTimeout,
+    t,
     themeFor,
     toDataUrl,
     writePersistedState,
@@ -436,6 +437,7 @@ export function createClaudeUsageAction(runtime) {
     const background = renderThemeBackdrop(theme, theme.accent, frame);
     const rows = visibleRows(instance);
     const state = instance.displayState || 'PENDING';
+    const language = instance.settings.uiLanguage;
     const hasData = rows.length > 0;
     const severityColors = normalizeBooleanString(instance.settings.severityColors, 'true') === 'true';
     const showBar = normalizeBooleanString(instance.settings.showBarBackground, 'true') === 'true';
@@ -474,7 +476,7 @@ export function createClaudeUsageAction(runtime) {
       const color = state === 'PENDING' ? theme.muted : theme.warn;
       body = `
         ${renderErrorGlyph(copy.glyph, 128, 140, color)}
-        <text x="128" y="188" text-anchor="middle" fill="${color}" font-size="22" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(copy.text)}</text>`;
+        <text x="128" y="188" text-anchor="middle" fill="${color}" font-size="22" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(t(copy.text, language))}</text>`;
     }
 
     // 刷新中角标优先于 STALE：一旦用户按下、正在跑 claude 刷新，就换成循环箭头，

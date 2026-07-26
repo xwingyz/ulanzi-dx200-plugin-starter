@@ -1,4 +1,4 @@
-const SPEEDTEST_FIELDS = [
+const SPEEDTEST_FIELDS = withLanguageField([
   'scope',
   'intervalMin',
   'activeAllDay',
@@ -12,7 +12,7 @@ const SPEEDTEST_FIELDS = [
   'frameSize',
   'showFrame',
   'cliPath',
-];
+]);
 
 // 只驱动本地筛选，不属于实例设置，不能触发自动保存。
 const LOCAL_ONLY_INPUTS = ['serverSearch'];
@@ -83,39 +83,48 @@ function initSpeedtestInspector() {
   function renderSelectionSummary() {
     const count = readCandidates().length;
     document.getElementById('selectionSummary').textContent = count === 0
-      ? '不勾选：在当前区域的全部节点里每日随机。'
+      ? $UD.t('No selection: choose daily from all servers in this region.')
       : count === 1
-        ? '已勾选 1 个：固定使用该节点。'
-        : `已勾选 ${count} 个：每天在这些节点里随机选一个。`;
+        ? $UD.t('One server selected: always use this server.')
+        : $UD.t('%s servers selected: choose one daily.').replace('%s', String(count));
   }
 
   function renderServers() {
     const list = document.getElementById('serverList');
     if (!(runtime.servers || []).length) {
-      list.innerHTML = '<div class="server">正在获取节点…如果长时间没有结果，可点「重新获取节点」。</div>';
+      list.innerHTML = `<div class="server">${$UD.t('Fetching servers… If this takes too long, select Refresh servers.')}</div>`;
       renderSelectionSummary();
       return;
     }
     const checkedIds = new Set(readCandidates().map((server) => String(server.id)));
     const candidates = filteredServers();
     list.innerHTML = candidates.length ? candidates.map((server) => {
-      const official = `${server.city || '未知城市'} · ${server.country || server.countryCode || '未知地区'}`;
+      const official = `${server.city || $UD.t('Unknown city')} · ${server.country || server.countryCode || $UD.t('Unknown region')}`;
       const ipLocation = server.ip
         ? `<br>IP ${server.ip}${server.ipCity || server.ipCountry ? ` · ${server.ipCity || ''} ${server.ipCountry || server.ipCountryCode || ''}` : ''}`
         : `<br>${server.host || ''}`;
       const checked = checkedIds.has(String(server.id));
-      return `<label class="server${checked ? ' checked' : ''}"><input type="checkbox" data-server-id="${server.id}"${checked ? ' checked' : ''}><span><b>#${server.id} ${server.name || server.city || 'Unknown'}</b><br>节点 ${official}${ipLocation}</span></label>`;
-    }).join('') : '<div class="server">当前筛选没有节点；可换个区域或重新获取。</div>';
+      return `<label class="server${checked ? ' checked' : ''}"><input type="checkbox" data-server-id="${server.id}"${checked ? ' checked' : ''}><span><b>#${server.id} ${server.name || server.city || $UD.t('Unknown')}</b><br>${$UD.t('Server')} ${official}${ipLocation}</span></label>`;
+    }).join('') : `<div class="server">${$UD.t('No servers match this filter. Change the region or refresh the list.')}</div>`;
     renderSelectionSummary();
   }
 
   function renderRuntime() {
     const last = runtime.lastResult;
-    const status = runtime.cliFound ? (runtime.phase || 'idle') : '未找到 Ookla CLI';
+    const phaseLabels = {
+      idle: 'Idle',
+      queued: 'Queued',
+      running: 'Running',
+      discovering: 'Discovering servers',
+      error: 'Error',
+    };
+    const status = runtime.cliFound
+      ? $UD.t(phaseLabels[runtime.phase] || runtime.phase || 'Idle')
+      : $UD.t('Ookla CLI not found');
     const discovered = runtime.serverCacheUpdatedAt
-      ? `<br>节点库 ${new Date(runtime.serverCacheUpdatedAt).toLocaleString()} · ${(runtime.servers || []).length} 个`
-      : '<br>节点库正在自动获取…';
-    document.getElementById('runtime').innerHTML = `<strong>${status}</strong>${discovered}${last ? `<br>↓ ${Math.round(last.downloadMbps)} Mbps · ↑ ${Math.round(last.uploadMbps)} Mbps · ${Math.round(last.pingMs || 0)} ms<br>#${last.server?.id || '—'} ${last.server?.city || ''} ${last.server?.ip || ''}` : '<br>暂无测速结果'}${runtime.errorCode ? `<br><span class="danger">${runtime.errorCode}</span>` : ''}`;
+      ? `<br>${$UD.t('Server catalog')} ${new Date(runtime.serverCacheUpdatedAt).toLocaleString()} · ${(runtime.servers || []).length} ${$UD.t('servers')}`
+      : `<br>${$UD.t('Fetching server catalog…')}`;
+    document.getElementById('runtime').innerHTML = `<strong>${status}</strong>${discovered}${last ? `<br>↓ ${Math.round(last.downloadMbps)} Mbps · ↑ ${Math.round(last.uploadMbps)} Mbps · ${Math.round(last.pingMs || 0)} ms<br>#${last.server?.id || '—'} ${last.server?.city || ''} ${last.server?.ip || ''}` : `<br>${$UD.t('No test results yet')}`}${runtime.errorCode ? `<br><span class="danger">${runtime.errorCode}</span>` : ''}`;
     renderServers();
     requestServersIfEmpty();
   }
@@ -149,6 +158,7 @@ function initSpeedtestInspector() {
     });
 
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings, renderRuntime);
 
     document.querySelectorAll('[data-chart-type]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -179,7 +189,7 @@ function initSpeedtestInspector() {
       $UD.sendParamFromPlugin({ testSelected: 'true' }, currentContext);
     });
     document.getElementById('clearHistory').addEventListener('click', () => {
-      if (window.confirm('清除该实例的测速历史？')) {
+      if (window.confirm($UD.t('Clear the test history for this action instance?'))) {
         $UD.sendParamFromPlugin({ clearSpeedtestHistory: 'true' }, currentContext);
       }
     });
@@ -205,7 +215,7 @@ function initSpeedtestInspector() {
         runtime = JSON.parse(param.speedtestRuntime);
       }
     } catch {}
-    renderRuntime();
+    void afterLanguageSelection(renderRuntime);
   }
 
   $UD.connect('com.ulanzi.ulanzistudio.lexutility.speedtest');
@@ -213,6 +223,7 @@ function initSpeedtestInspector() {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
 
   $UD.onAdd(apply);

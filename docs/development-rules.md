@@ -216,7 +216,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - **key 对齐**：所有语言文件的 `Localization` key 集必须与 `en.json` 完全一致；缺 key 会在界面漏出未翻译文案。`en.json` 是回退基准。由 `tests/i18n.test.js` 锁定。
 - **PI 侧**：文案元素加 `data-localize`（缺省 key 时回退元素当前文案）；`localizeUI` 由 `libs/js/ulanzideckApi.js` 统一处理 text/placeholder/title；代码里取译文用 `$UD.t('key')`。语言从宿主 query 参数 `language` 解析，`adaptLanguage` 未知 locale 保留 `xx_YY`。
 - **运行态（Node）侧**：图标文案经 `libs/node/i18n.js` 的 `t(key, uiLanguage)` 本地化，与 PI 复用同一份 `<locale>.json`。`uiLanguage` 为 `'auto'`/空时跟随 OS locale（`LANG` 等），否则用该实例所选语言；均回退英文。`render` 里统一 `t(key, instance.settings.uiLanguage)`，避免硬编码用户可见英文句子（`ERR` 这类通用缩写除外）。
-- **语言覆盖（用户手动设置）**：框架提供 `uiLanguage` 通用设置（`auto`/`en`/`zh_CN`，默认 `auto`），在自动探测之上让用户按键覆盖。`normalizeSettings` 无条件归一化它（不依赖 per-action defaults）；每个 PI 页面必须有一个 `#uiLanguage <select>`（选项 `auto`/`en`/`zh_CN`，`Auto` 与标题 `Language` 走 `data-localize`），由 `inspector-shared.js` 自动纳管：change 时 `$UD.setLanguage()` 即时重定位界面并持久化，运行态图标经该实例 `uiLanguage` 同步切换。作用范围是**每个 action 独立**（与主题/安全框同层）。
+- **语言覆盖（用户手动设置）**：框架提供 `uiLanguage` 通用设置（`auto`/`en`/`zh_CN`，默认 `auto`），在自动探测之上让用户按键覆盖。`normalizeSettings` 无条件归一化它（不依赖 per-action defaults）；每个 PI 页面必须有一个 `#uiLanguage <select>`（选项 `auto`/`en`/`zh_CN`，`Auto` 与标题 `Language` 走 `data-localize`）。使用通用 `initInspector` 的页面由共享层自动纳管；自定义控制器必须以 `withLanguageField(fields)` 收集字段、用 `bindLanguageSelection(commitSettings, onLocalized?)` 绑定切换，并在权威设置到达后调用 `applyLanguageSelection()` / `afterLanguageSelection()`。脚本动态生成的诊断、列表、选项必须在语言包加载完成后重绘。每次 WebSocket 连接仍需发送 `__requestSettings`，避免 HTML 默认语言覆盖实例设置。运行态图标经该实例 `uiLanguage` 同步切换，作用范围是**每个 action 独立**（与主题/安全框同层）。
 - **回流模板**：`libs/js/utils.js`、`libs/js/ulanzideckApi.js`、`libs/node/i18n.js`、`inspector-shared.js` 属基础层，必须与 template 逐字节一致（`tests/i18n.test.js` 校验）。
 
 ## 8. 新增 Action 的标准步骤

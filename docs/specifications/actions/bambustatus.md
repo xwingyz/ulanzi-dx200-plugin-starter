@@ -1,7 +1,7 @@
 # Bambu P2S Status 功能与技术规范
 
 状态：首版已实现，等待真实 P2S 状态订阅验收  
-最后代码核对：2026-07-19  
+最后代码核对：2026-07-26
 action key：`bambustatus`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.bambustatus`
 
@@ -171,3 +171,9 @@ suppressFinishedUntilNextTask: boolean
 - 使用 `restart` 同步到 Ulanzi Studio，删除旧实例后重新拖入验证 UUID。
 - Inspector 扫描、保存、手动覆盖和重新扫描符合契约。
 - 必须在保持云端绑定且不开 LAN Only/Developer Mode 的真实 P2S 上收到状态数据，才可宣告 action 完成；否则交付兼容性报告，状态保持“受阻”，不改走云端。
+
+## 多语言契约
+
+- Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
+- 扫描、连接、打印阶段和设备状态按实例 `uiLanguage` 翻译；打印机名称、序列号、进度、温度和 MQTT 原始详情保持原始数据。
+- 业务层保存稳定的英文阶段标识，翻译只发生在 Inspector 和 render 边界；新增键由 `tests/i18n.test.js` 锁定覆盖。

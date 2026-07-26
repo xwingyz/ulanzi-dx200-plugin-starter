@@ -21,6 +21,7 @@ export function createChatGptUsageAction(runtime) {
     renderThemeBackdrop,
     sendParamFromPlugin,
     setInstanceTimeout,
+    t,
     themeFor,
     toDataUrl,
     writePersistedState,
@@ -395,6 +396,7 @@ export function createChatGptUsageAction(runtime) {
     const background = renderThemeBackdrop(theme, theme.accent, frame);
     const rows = visibleRows(instance);
     const state = instance.displayState || 'PENDING';
+    const language = instance.settings.uiLanguage;
     const hasData = rows.length > 0;
     const severityColors = normalizeBooleanString(instance.settings.severityColors, 'true') === 'true';
     const showBar = normalizeBooleanString(instance.settings.showBarBackground, 'true') === 'true';
@@ -439,7 +441,7 @@ export function createChatGptUsageAction(runtime) {
           return renderMeterRow(geometry, theme, {
             percent: null,
             color: theme.muted,
-            label: 'RESET',
+            label: t('RESET', language),
             value: String(band.credits),
             tail: '',
             showBar,
@@ -460,7 +462,7 @@ export function createChatGptUsageAction(runtime) {
       const color = state === 'PENDING' ? theme.muted : theme.warn;
       body = `
         ${renderErrorGlyph(copy.glyph, 128, 140, color)}
-        <text x="128" y="188" text-anchor="middle" fill="${color}" font-size="22" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(copy.text)}</text>`;
+        <text x="128" y="188" text-anchor="middle" fill="${color}" font-size="22" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(t(copy.text, language))}</text>`;
     }
 
     // STALE 徽章：画对应失败原因的错误图标（缩小版），与 claudeusage 同构。

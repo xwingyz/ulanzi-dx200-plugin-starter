@@ -145,6 +145,7 @@ function createHarness(entryFile) {
     onParamFromPlugin: (callback) => callbacks.plugin.push(callback),
     sendParamFromPlugin: (settings, context) => sends.push({ settings, context }),
     setLanguage: (lang) => languageCalls.push(lang),
+    t: (key) => key,
   };
 
   const context = vm.createContext({
@@ -332,7 +333,9 @@ test('pomowave reset defaults sends the framework control param once', () => {
   harness.elements.get('resetDefaults').dispatchEvent({ type: 'click' });
 
   assert.deepEqual(
-    harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
+    harness.sends
+      .filter(({ settings }) => !settings.__requestSettings)
+      .map(({ settings }) => JSON.parse(JSON.stringify(settings))),
     [{ __resetDefaults: 'true' }],
   );
 });
@@ -344,8 +347,9 @@ test('latency mode button sends once after reconnect', () => {
 
   harness.selectors.get('[data-graph-mode]')[0].dispatchEvent({ type: 'click' });
 
-  assert.equal(harness.sends.length, 1);
-  assert.equal(harness.sends[0].settings.graphMode, 'line');
+  const settingsSends = harness.sends.filter(({ settings }) => !settings.__requestSettings);
+  assert.equal(settingsSends.length, 1);
+  assert.equal(settingsSends[0].settings.graphMode, 'line');
 });
 
 test('pomowave reset sends once after reconnect without an extra settings send', () => {
@@ -356,7 +360,9 @@ test('pomowave reset sends once after reconnect without an extra settings send',
   harness.elements.get('resetTimer').dispatchEvent({ type: 'click' });
 
   assert.deepEqual(
-    harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
+    harness.sends
+      .filter(({ settings }) => !settings.__requestSettings)
+      .map(({ settings }) => JSON.parse(JSON.stringify(settings))),
     [{ resetTimer: 'true' }],
   );
 });
@@ -368,7 +374,9 @@ test('pomowave skip phase sends the control param once', () => {
   harness.elements.get('skipPhase').dispatchEvent({ type: 'click' });
 
   assert.deepEqual(
-    harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
+    harness.sends
+      .filter(({ settings }) => !settings.__requestSettings)
+      .map(({ settings }) => JSON.parse(JSON.stringify(settings))),
     [{ skipPhase: 'true' }],
   );
 });
@@ -501,7 +509,7 @@ test('speedtest node list renders checkboxes and derives the mode from how many 
   const list = harness.elements.get('serverList');
   assert.equal((list.innerHTML.match(/type="checkbox"/g) || []).length, 2);
   assert.ok(!list.innerHTML.includes('checked'), '未勾选时不应有 checked 属性');
-  assert.equal(harness.elements.get('selectionSummary').textContent, '不勾选：在当前区域的全部节点里每日随机。');
+  assert.equal(harness.elements.get('selectionSummary').textContent, 'No selection: choose daily from all servers in this region.');
 
   // 勾第一个：写入候选池，文案切到「固定」。
   const check = (id, checked) => list.dispatchEvent({
@@ -513,7 +521,7 @@ test('speedtest node list renders checkboxes and derives the mode from how many 
     JSON.parse(harness.elements.get('candidateServers').value).map((server) => server.id),
     ['3633'],
   );
-  assert.equal(harness.elements.get('selectionSummary').textContent, '已勾选 1 个：固定使用该节点。');
+  assert.equal(harness.elements.get('selectionSummary').textContent, 'One server selected: always use this server.');
 
   // 再勾一个：变成在两个节点里随机。
   check('5083', true);
@@ -521,7 +529,7 @@ test('speedtest node list renders checkboxes and derives the mode from how many 
     JSON.parse(harness.elements.get('candidateServers').value).map((server) => server.id),
     ['3633', '5083'],
   );
-  assert.equal(harness.elements.get('selectionSummary').textContent, '已勾选 2 个：每天在这些节点里随机选一个。');
+  assert.equal(harness.elements.get('selectionSummary').textContent, '2 servers selected: choose one daily.');
 
   // 取消勾选会从候选池里移除，且发出去的设置里带的是新值。
   check('3633', false);

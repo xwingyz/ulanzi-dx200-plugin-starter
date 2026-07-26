@@ -1,7 +1,7 @@
 # Network Speed 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-18  
+最后代码核对：2026-07-26
 action key：`speedtest`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.speedtest`
 
@@ -143,3 +143,9 @@ CLI JSON 转换为：
 - Inspector 的调度、节点选择、图表、即时测速和空列表请求。
 
 修改 CLI 参数、错误分类、节点数据模型、调度/队列或状态版本时，应同步本文件并扩充 `tests/speedtest-action.test.js`；修改 Inspector runtime 或控制命令时还应更新 `tests/inspector-lifecycle.test.js`。
+
+## 多语言契约
+
+- Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
+- 测速阶段、调度范围、节点模式、即时测速状态和键面运行态文案按实例 `uiLanguage` 翻译；测速值、服务器名称、地区代码和外部错误详情保持原始数据。
+- `en.json` 与 `zh_CN.json` 的 action 名称/说明顺序必须与 manifest 一致，新增键由 `tests/i18n.test.js` 锁定覆盖。

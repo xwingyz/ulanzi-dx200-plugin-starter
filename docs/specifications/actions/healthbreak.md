@@ -1,7 +1,7 @@
 # Health Break 功能与技术规范
 
 状态：已实现，持续维护
-最后代码核对：2026-07-22
+最后代码核对：2026-07-26
 action key：`healthbreak`
 UUID：`com.ulanzi.ulanzistudio.lexutility.healthbreak`
 
@@ -146,3 +146,9 @@ done -> running -> done                主动加练
 - 覆盖状态序列化/水合、30 天裁剪、损坏状态降级与重启转暂停。
 - 覆盖声音关闭与平台能力失败降级。
 - `npm test` 全绿后以桌面 `restart` 验证：拖入多个实例、Inspector 保存/回填、短按/长按、闪烁、暂停/取消、声音和删除重拖 UUID 绑定。
+
+## 多语言契约
+
+- Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
+- 动作组、动作阶段、提醒和运行状态按实例 `uiLanguage` 翻译；持续时间、完成次数和健康日数据保持原始语义。
+- 方向字形与文案分离，字形不进入翻译资源；新增键由 `tests/i18n.test.js` 锁定覆盖。

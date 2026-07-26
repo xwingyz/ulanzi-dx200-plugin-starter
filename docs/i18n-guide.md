@@ -3,12 +3,12 @@
 > 面向：处理**单个 action** 多语言的执行 agent。**两种场景都适用**——
 > 给已有 action 补齐多语言（返工），以及开发**新 action** 时从一开始就做对（推荐）。
 > 新 action 的总流程见 [development-rules.md](development-rules.md) §8，i18n 是其中一步；本手册是那一步的细则。
-> 前置：基础层已就绪（见 [development-rules.md](development-rules.md) §7.1）。**本手册只讲 action 层怎么做，不要改基础层。**
+> 前置：基础层已就绪（见 [development-rules.md](development-rules.md) §7.1）。单个 action 的常规接入不改基础层；若确认共享层缺少通用能力或存在协议缺陷，必须先读 `docs/specifications/base.md`，同步修改业务插件与 template 两份副本，并补共享回归测试和基座规格。
 > 首发语言：`en`（英文，回退基准）+ `zh_CN`（简体中文）。
 
 > **新 action 请正向落地，别先写死一种语言再返工**：写 HTML/render 时默认文案直接用英文并挂 `data-localize`，同步把 key 加进两个语言文件。下面的"改造前/后"示例，"改造后"就是新 action 应有的样子。
 
-> **语言选择器是框架自带的**：每个 PI 页面必须包含一个 `#uiLanguage <select>`（选项 `auto`/`en`/`zh_CN`，`Auto` 与标题 `Language` 走 `data-localize`），从任一现有页面复制即可；其行为（即时重定位 + 持久化 + 运行态同步）由 `inspector-shared.js` 自动接管，你**不用写任何绑定代码**。运行态 `render` 里取译文统一用 `t(key, instance.settings.uiLanguage)`，让按键图标跟随该实例所选语言。
+> **语言选择器由共享层提供协议，不代表所有页面都能零代码接入**：每个 PI 页面必须包含一个 `#uiLanguage <select>`（选项 `auto`/`en`/`zh_CN`，`Auto` 与标题 `Language` 走 `data-localize`）。只调用通用 `initInspector` 的页面会自动接管；自行维护连接、诊断或动态列表的控制器还必须复用 `withLanguageField`、`bindLanguageSelection` 和 `applyLanguageSelection` / `afterLanguageSelection`。运行态 `render` 统一使用 `t(key, instance.settings.uiLanguage)`，让按键图标跟随该实例所选语言。
 
 ---
 
@@ -30,7 +30,7 @@
 1. **默认文案 = 英文 = key**。HTML 里元素的默认文字（或 placeholder）必须是英文，且 `data-localize` 的值就是这句英文。原因：`en.json` 是回退基准；遇到没有语言文件的 locale（如 `ja_JP`），界面直接保留英文默认值，不会漏出中文。
 2. **key 两端对齐**。凡加进 `en.json` 的 key，必须同时加进 `zh_CN.json`（值为中文译文）。缺一边测试直接红。
 3. **只翻 UI 文字，不翻数据**。数字、主机名、URL、IP、时间戳、用户输入回显、`ERR` 这类通用缩写——不要本地化。
-4. **不碰基础层**。`libs/js/*`、`libs/node/i18n.js`、`inspector-shared.js`、`utils.js` 是框架，已冻结。你只改：本 action 的 `property-inspector/<action>.html`、`plugin/actions/<action>.js`、以及两个语言文件里属于你的 key。
+4. **常规接入不碰基础层**。`libs/js/*`、`libs/node/i18n.js`、`inspector-shared.js`、`utils.js` 是共享框架。单 action 接入只改本 action 的 Inspector、业务模块、规格和语言文件；只有经基座规格核对确认是共享缺陷时，才按“业务插件 + template + 测试 + 基座规格”整套修复。
 5. **不新增语言文件**。首发只有 `en` + `zh_CN`，别加 `ja_JP.json` 之类。
 6. **图标字形与文字分离**。当一个控件里既有图标字形（`◉ ↑ ✋` 等）又有文字时，把字形留在本地化节点**之外**，只给文字节点加 `data-localize`（见 §6 反例）。
 
@@ -64,6 +64,27 @@
        placeholder="City, ISP, IP, Server ID">
 ```
 
+页面 `<html>` 默认写 `lang="en"`；共享桥会在语言确定后把它更新为实际 locale。
+
+若 Inspector 入口只调用 `initInspector(actionUuid, fields)`，共享层会自动加入 `uiLanguage`。若该 action 有自定义控制器，必须满足：
+
+```js
+const FIELDS = withLanguageField(['actionField', 'theme', 'frameSize', 'showFrame']);
+
+bindLanguageSelection(commitSettings, () => renderDynamicContent());
+
+function applyIncomingSettings(param) {
+  applySettings(FIELDS, param);
+  void afterLanguageSelection(() => renderDynamicContent());
+}
+
+$UD.onConnected(() => {
+  $UD.sendParamFromPlugin({ __requestSettings: 'true' }, currentContext);
+});
+```
+
+`onLocalized` 只重绘脚本生成的诊断、列表和 `<option>`；静态 `[data-localize]` 已由浏览器桥处理。不得在语言包尚未加载时先重绘，也不得把 `__requestSettings` 当作普通设置写盘。
+
 ### Step 2 — 语言文件：加 key
 
 在 `en.json` 和 `zh_CN.json` 的 `Localization` 段各加同一批 key：
@@ -93,13 +114,13 @@
 // 改造前
 <text ...>今日完成</text>
 // 改造后（key 用英文，翻译进语言文件）
-<text ...>${escapeXml(t('Done today'))}</text>
+<text ...>${escapeXml(t('Done today', instance.settings.uiLanguage))}</text>
 ```
 `t` 已通过工厂 `runtime` 注入。在你的 action 工厂里从 `runtime` 解构即可，和 `escapeXml` / `frameFor` 用法一样：
 ```js
 export function createHealthBreakAction(runtime) {
   const { t, escapeXml, frameFor, /* ... */ } = runtime;
-  // render 里：${escapeXml(t('Done today'))}
+  // render 里：${escapeXml(t('Done today', instance.settings.uiLanguage))}
 }
 ```
 不要在 action 里自己 import 语言文件或 `libs/node/i18n.js`。运行态 key 同样要进 `en.json` / `zh_CN.json`。
@@ -156,7 +177,7 @@ export function createHealthBreakAction(runtime) {
 ```bash
 npm test
 ```
-`tests/i18n.test.js` 会校验：en↔zh_CN 的 `Localization` key 完全对齐、`Actions[]` 与 manifest 数量一致、四段结构完整。**key 不对齐会直接红。**
+`tests/i18n.test.js` 会校验：en↔zh_CN 的 `Localization` key 完全对齐、`Actions[]` 与 manifest 数量一致、四段结构完整；Lex Utility 的全部 action 还会校验 `#uiLanguage`、自定义控制器共享协议、HTML `data-localize` key、显式 `$UD.t()` / `t()` key 和动态映射 key。**key 不对齐或引用缺失会直接红。**
 
 同步到宿主实机看效果：
 ```bash
@@ -170,12 +191,13 @@ npm run dev:desktop -- --plugin com.ulanzi.lexutility.ulanziPlugin --mode restar
 你负责的 action 满足全部才算完成：
 
 - [ ] PI 页面所有用户可见文字都走 `data-localize`，默认文案为英文。
+- [ ] PI 页面默认 `lang="en"`，包含 `#uiLanguage`；自定义控制器完成收集、持久化、权威设置请求和动态文案重绘。
 - [ ] 运行态 `render` 无硬编码英文/中文句子（数据/缩写除外），需要的都走 `t()`。
 - [ ] 新增 key 已同时进 `en.json`（英文）与 `zh_CN.json`（中文），两端对齐。
 - [ ] `Actions[]` 里本 action 的 `Name`/`Tooltip` 正确。
 - [ ] `npm test` 全绿。
 - [ ] `restart` 后实机中/英切换验证通过，无漏译、无中英混排。
-- [ ] 没有改动基础层文件（`libs/*`、`inspector-shared.js` 等）。
+- [ ] 常规 action 接入未改基础层；若修复了共享缺陷，业务插件与 template 两份一致，基座规格和共享测试已同步。
 
 ## 10. 多 agent 协作（重要）
 
@@ -188,4 +210,4 @@ npm run dev:desktop -- --plugin com.ulanzi.lexutility.ulanziPlugin --mode restar
 
 ---
 
-**参考落地例**：`property-inspector/latency.html` + `plugin/actions/latency.js` 是已接入共享控件的样板；`chatgptusage.html` 展示了"部分本地化"的中间态（可作为"还差哪些"的对照）。反面完整例：`healthbreak.html`、`systemstatus.html`（当前 0 覆盖，适合作为练手对象）。
+**参考落地例**：`property-inspector/latency.html` + `latency.js` 展示较小的自定义控制器；`speedtest.html` + `speedtest.js` 展示动态节点列表和运行诊断重绘；`healthbreak.html` 展示“图标字形与本地化文字分离”。运行态参考对应的 `plugin/actions/*.js`。

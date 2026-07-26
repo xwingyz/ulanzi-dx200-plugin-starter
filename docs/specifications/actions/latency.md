@@ -1,7 +1,7 @@
 # Latency Monitor 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-18  
+最后代码核对：2026-07-26
 action key：`latency`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.latency`
 
@@ -111,3 +111,9 @@ certExpiresAt
 - 安全框背景与告警高亮。
 
 修改探测口径、状态字段、桶宽/窗口、交互或显示时，应同步本文件并扩充 `tests/app-framework.test.js` 的 latency 用例；涉及真实 socket 时序的修改还应做本地 HTTP/HTTPS 冒烟验证。
+
+## 多语言契约
+
+- Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
+- 暂停、等待、正常和异常等键面状态按实例 `uiLanguage` 翻译；目标地址、证书日期、延迟值和探测结果保持原始数据。
+- `en.json` 与 `zh_CN.json` 的 action 名称/说明顺序必须与 manifest 一致，新增键由 `tests/i18n.test.js` 锁定覆盖。

@@ -41,47 +41,47 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>Latency Monitor</h1>
+        <h1 data-localize="Latency Monitor">Latency Monitor</h1>
         <form id="property-inspector">
           <div class="field">
-            <label for="url">URL</label>
+            <label for="url" data-localize="URL">URL</label>
             <input id="url" name="url" maxlength="120" value="https://example.com" placeholder="https://example.com">
           </div>
           <div class="grid">
             <div class="field">
-              <label for="intervalSec">Interval (s)</label>
+              <label for="intervalSec" data-localize="Interval (s)">Interval (s)</label>
               <input id="intervalSec" name="intervalSec" type="number" min="3" max="3600" value="30">
             </div>
             <div class="field">
-              <label for="warnMs">Warn (ms)</label>
+              <label for="warnMs" data-localize="Warn (ms)">Warn (ms)</label>
               <input id="warnMs" name="warnMs" type="number" min="50" max="10000" value="800">
             </div>
           </div>
           <div class="grid">
             <div class="field">
-              <label for="timeoutMs">Timeout (ms)</label>
+              <label for="timeoutMs" data-localize="Timeout (ms)">Timeout (ms)</label>
               <input id="timeoutMs" name="timeoutMs" type="number" min="500" max="30000" value="8000">
             </div>
             <div class="field">
-              <label for="sslWarnDays">SSL Warn (days)</label>
+              <label for="sslWarnDays" data-localize="SSL Warn (days)">SSL Warn (days)</label>
               <input id="sslWarnDays" name="sslWarnDays" type="number" min="1" max="365" value="30">
             </div>
           </div>
           <div class="field">
-            <label for="graphMode">Chart</label>
+            <label for="graphMode" data-localize="Chart">Chart</label>
             <input id="graphMode" name="graphMode" type="hidden" value="bars">
             <div class="seg-row" role="group" aria-label="Chart Mode">
-              <button class="seg-btn" type="button" data-graph-mode="bars">柱状图</button>
-              <button class="seg-btn" type="button" data-graph-mode="line">折线图</button>
+              <button class="seg-btn" type="button" data-graph-mode="bars" data-localize="Bar chart">Bar chart</button>
+              <button class="seg-btn" type="button" data-graph-mode="line" data-localize="Line chart">Line chart</button>
             </div>
           </div>
           <hr class="pi-divider">
           <div class="field">
-            <label for="theme">Theme</label>
+            <label for="theme" data-localize="Theme">Theme</label>
             <input id="theme" name="theme" type="hidden" value="signal">
             <div class="theme-row" role="group" aria-label="Theme">
             </div>
-            <div class="hint">每个 action 只监控一个网址，配置会保存在该按键实例里。</div>
+            <div class="hint" data-localize="Each action monitors one URL. Settings are saved to this key instance.">Each action monitors one URL. Settings are saved to this key instance.</div>
           </div>
           <div class="field">
             <label for="frameSize" data-localize="Safe frame">Safe frame</label>
@@ -98,7 +98,7 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note">输入一个网址，按固定间隔检测延迟。按键按下时立即重测。</p>
+          <p class="pi-note" data-localize="Monitor one URL at a fixed interval. Press the key to test immediately.">Monitor one URL at a fixed interval. Press the key to test immediately.</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button class="save-btn" type="submit" data-localize="Save">Save</button>

@@ -1,4 +1,4 @@
-const CLAUDEUSAGE_FIELDS = [
+const CLAUDEUSAGE_FIELDS = withLanguageField([
   'pollSec',
   'redrawSec',
   'showWeekly',
@@ -10,28 +10,28 @@ const CLAUDEUSAGE_FIELDS = [
   'theme',
   'frameSize',
   'showFrame',
-];
+]);
 
 // 控制命令，与设置提交分开发送：探测是副作用，不该混进设置写盘链路。
 const CLAUDEUSAGE_PROBE_PARAM = '__claudeusageProbe';
 const CLAUDEUSAGE_DIAG_PARAM = '__claudeusageDiag';
 
 const DIAG_STATE_TEXT = {
-  OK: '正常',
-  STALE: '陈旧（保留上次数值）',
-  NO_TOKEN: '钥匙串无凭据',
-  AUTH: '凭据已过期',
-  NETWORK: '网络失败',
-  RATE_LIMITED: '被限流',
-  PENDING: '尚未拉取',
-  UNSUPPORTED: '当前平台不支持',
+  OK: 'OK',
+  STALE: 'Stale (showing last values)',
+  NO_TOKEN: 'No Keychain credential',
+  AUTH: 'Credential expired',
+  NETWORK: 'Network failure',
+  RATE_LIMITED: 'Rate limited',
+  PENDING: 'Not fetched yet',
+  UNSUPPORTED: 'Unsupported platform',
 };
 
 const DIAG_ERROR_TEXT = {
-  NO_TOKEN: '钥匙串里没有 Claude Code 凭据，请在终端登录',
-  AUTH: 'accessToken 已过期，用一次 Claude Code 即可刷新',
-  NETWORK: '请求失败或接口结构变化',
-  RATE_LIMITED: '请求过密被限流，请调大拉取间隔',
+  NO_TOKEN: 'No Claude Code credential in Keychain. Sign in from Terminal.',
+  AUTH: 'The access token expired. Use Claude Code once to refresh it.',
+  NETWORK: 'The request failed or the API response changed.',
+  RATE_LIMITED: 'Requests are rate limited. Increase the polling interval.',
 };
 
 function formatDiagTime(value) {
@@ -42,12 +42,12 @@ function formatDiagTime(value) {
   const diffSec = Math.round((Date.now() - value) / 1000);
   const stamp = date.toLocaleTimeString();
   if (diffSec < 60) {
-    return `${stamp}（${diffSec}s 前）`;
+    return `${stamp} (${$UD.t('%ss ago').replace('%s', String(diffSec))})`;
   }
   if (diffSec < 3600) {
-    return `${stamp}（${Math.round(diffSec / 60)}m 前）`;
+    return `${stamp} (${$UD.t('%sm ago').replace('%s', String(Math.round(diffSec / 60)))})`;
   }
-  return `${stamp}（${Math.round(diffSec / 3600)}h 前）`;
+  return `${stamp} (${$UD.t('%sh ago').replace('%s', String(Math.round(diffSec / 3600)))})`;
 }
 
 function setDiagField(id, text, tone) {
@@ -65,19 +65,19 @@ function renderDiagnostics(diag) {
     return;
   }
   const mac = diag.platform === 'darwin';
-  setDiagField('diag-platform', mac ? 'macOS' : `${diag.platform}（不支持）`, mac ? 'good' : 'bad');
-  setDiagField('diag-token', diag.hasToken ? '已找到' : '未找到', diag.hasToken ? 'good' : 'bad');
+  setDiagField('diag-platform', mac ? 'macOS' : `${diag.platform} (${$UD.t('unsupported')})`, mac ? 'good' : 'bad');
+  setDiagField('diag-token', $UD.t(diag.hasToken ? 'Found' : 'Not found'), diag.hasToken ? 'good' : 'bad');
 
   const state = diag.displayState || 'PENDING';
   setDiagField(
     'diag-state',
-    DIAG_STATE_TEXT[state] || state,
+    $UD.t(DIAG_STATE_TEXT[state] || state),
     state === 'OK' ? 'good' : state === 'STALE' || state === 'PENDING' ? '' : 'bad',
   );
   setDiagField('diag-fetched', formatDiagTime(diag.fetchedAt));
   setDiagField(
     'diag-error',
-    diag.lastErrorKind ? (DIAG_ERROR_TEXT[diag.lastErrorKind] || diag.lastErrorKind) : '无',
+    diag.lastErrorKind ? $UD.t(DIAG_ERROR_TEXT[diag.lastErrorKind] || diag.lastErrorKind) : $UD.t('None'),
     diag.lastErrorKind ? 'bad' : 'good',
   );
 }
@@ -85,6 +85,7 @@ function renderDiagnostics(diag) {
 function initClaudeUsageInspector() {
   let currentContext = '';
   let uiBound = false;
+  let lastDiagnostics = null;
 
   function pushSettings() {
     $UD.sendParamFromPlugin(collectSettings(CLAUDEUSAGE_FIELDS), currentContext);
@@ -115,6 +116,7 @@ function initClaudeUsageInspector() {
     });
 
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings, () => renderDiagnostics(lastDiagnostics));
 
     document.getElementById('probe')?.addEventListener('click', () => {
       // 先 flush 待提交的设置，否则探测跑的是旧间隔/旧 URL。
@@ -137,13 +139,15 @@ function initClaudeUsageInspector() {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
 
   function apply(message) {
     currentContext = message.context || currentContext;
     const param = message.param || {};
     applySettings(CLAUDEUSAGE_FIELDS, param);
-    renderDiagnostics(param[CLAUDEUSAGE_DIAG_PARAM]);
+    lastDiagnostics = param[CLAUDEUSAGE_DIAG_PARAM] || lastDiagnostics;
+    void afterLanguageSelection(() => renderDiagnostics(lastDiagnostics));
   }
 
   $UD.onAdd(apply);

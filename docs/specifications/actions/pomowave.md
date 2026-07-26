@@ -1,7 +1,7 @@
 # PomoWave 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-18  
+最后代码核对：2026-07-26
 action key：`pomowave`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.pomowave`
 
@@ -116,3 +116,9 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 - 各主题阶段色、进度方向、awaiting 闪烁和末段告警。
 
 修改阶段图、长按语义、计时事实源、运行态字段或提示音生命周期时，应同步本文件并扩充 `tests/app-framework.test.js`；修改 Inspector 控制命令时还应更新 `tests/inspector-lifecycle.test.js`。
+
+## 多语言契约
+
+- Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
+- 工作、短休、长休、暂停和等待确认等阶段文案按实例 `uiLanguage` 翻译；计时数值、阶段状态机与提示音数据不因语言改变。
+- `en.json` 与 `zh_CN.json` 的 action 名称/说明顺序必须与 manifest 一致，新增键由 `tests/i18n.test.js` 锁定覆盖。

@@ -1,4 +1,4 @@
-const LATENCY_FIELDS = [
+const LATENCY_FIELDS = withLanguageField([
   'url',
   'intervalSec',
   'warnMs',
@@ -8,7 +8,7 @@ const LATENCY_FIELDS = [
   'frameSize',
   'showFrame',
   'graphMode',
-];
+]);
 
 function syncModeButtons() {
   const graphInput = document.getElementById('graphMode');
@@ -53,6 +53,7 @@ function initLatencyInspector() {
     });
 
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings);
 
     document.querySelectorAll('[data-graph-mode]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -78,12 +79,14 @@ function initLatencyInspector() {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
 
   function apply(message) {
     currentContext = message.context || currentContext;
     applySettings(LATENCY_FIELDS, message.param || {});
     syncModeButtons();
+    void applyLanguageSelection();
   }
 
   $UD.onAdd(apply);

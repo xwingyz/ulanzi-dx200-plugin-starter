@@ -1,4 +1,4 @@
-const CHATGPTUSAGE_FIELDS = [
+const CHATGPTUSAGE_FIELDS = withLanguageField([
   'codexCommand',
   'limitId',
   'pollSec',
@@ -12,27 +12,27 @@ const CHATGPTUSAGE_FIELDS = [
   'theme',
   'frameSize',
   'showFrame',
-];
+]);
 
 // 控制命令，与设置提交分开发送：探测是副作用，不该混进设置写盘链路。
 const CHATGPTUSAGE_PROBE_PARAM = '__chatgptusageProbe';
 const CHATGPTUSAGE_DIAG_PARAM = '__chatgptusageDiag';
 
 const CHATGPT_DIAG_STATE_TEXT = {
-  OK: '正常',
-  STALE: '陈旧（保留上次数值）',
-  NO_CLI: '找不到 codex 可执行文件',
-  NOT_LOGGED_IN: '未登录',
-  TIMEOUT: 'app-server 超时',
-  RPC_ERROR: '接口调用失败',
-  PENDING: '尚未拉取',
+  OK: 'OK',
+  STALE: 'Stale (showing last values)',
+  NO_CLI: 'Codex executable not found',
+  NOT_LOGGED_IN: 'Not signed in',
+  TIMEOUT: 'App server timed out',
+  RPC_ERROR: 'API call failed',
+  PENDING: 'Not fetched yet',
 };
 
 const CHATGPT_DIAG_ERROR_TEXT = {
-  NO_CLI: '请安装 Codex CLI，或在上方填写绝对路径',
-  NOT_LOGGED_IN: '请在终端运行 codex login',
-  TIMEOUT: 'app-server 未在超时内返回，可调大 Timeout',
-  RPC_ERROR: '调用返回错误或结构无法解析（app-server 是实验接口，可能已变更）',
+  NO_CLI: 'Install Codex CLI or enter its absolute path above.',
+  NOT_LOGGED_IN: 'Run codex login in Terminal.',
+  TIMEOUT: 'The app server did not respond in time. Increase Timeout.',
+  RPC_ERROR: 'The API returned an error or an unrecognized response.',
 };
 
 function formatChatGptDiagTime(value) {
@@ -42,12 +42,12 @@ function formatChatGptDiagTime(value) {
   const stamp = new Date(value).toLocaleTimeString();
   const diffSec = Math.round((Date.now() - value) / 1000);
   if (diffSec < 60) {
-    return `${stamp}（${diffSec}s 前）`;
+    return `${stamp} (${$UD.t('%ss ago').replace('%s', String(diffSec))})`;
   }
   if (diffSec < 3600) {
-    return `${stamp}（${Math.round(diffSec / 60)}m 前）`;
+    return `${stamp} (${$UD.t('%sm ago').replace('%s', String(Math.round(diffSec / 60)))})`;
   }
-  return `${stamp}（${Math.round(diffSec / 3600)}h 前）`;
+  return `${stamp} (${$UD.t('%sh ago').replace('%s', String(Math.round(diffSec / 3600)))})`;
 }
 
 function setChatGptDiagField(id, text, tone) {
@@ -67,22 +67,22 @@ function renderChatGptDiagnostics(diag) {
   setChatGptDiagField('diag-platform', diag.platform || '—');
   setChatGptDiagField(
     'diag-path',
-    diag.codexPath || '未找到',
+    diag.codexPath || $UD.t('Not found'),
     diag.codexPath ? 'good' : 'bad',
   );
-  setChatGptDiagField('diag-login', diag.loggedIn ? '已登录' : '未登录', diag.loggedIn ? 'good' : 'bad');
+  setChatGptDiagField('diag-login', $UD.t(diag.loggedIn ? 'Signed in' : 'Not signed in'), diag.loggedIn ? 'good' : 'bad');
   setChatGptDiagField('diag-plan', diag.planType || '—');
 
   const state = diag.displayState || 'PENDING';
   setChatGptDiagField(
     'diag-state',
-    CHATGPT_DIAG_STATE_TEXT[state] || state,
+    $UD.t(CHATGPT_DIAG_STATE_TEXT[state] || state),
     state === 'OK' ? 'good' : state === 'STALE' || state === 'PENDING' ? '' : 'bad',
   );
   setChatGptDiagField('diag-fetched', formatChatGptDiagTime(diag.fetchedAt));
   setChatGptDiagField(
     'diag-error',
-    diag.lastErrorKind ? (CHATGPT_DIAG_ERROR_TEXT[diag.lastErrorKind] || diag.lastErrorKind) : '无',
+    diag.lastErrorKind ? $UD.t(CHATGPT_DIAG_ERROR_TEXT[diag.lastErrorKind] || diag.lastErrorKind) : $UD.t('None'),
     diag.lastErrorKind ? 'bad' : 'good',
   );
 }
@@ -90,6 +90,7 @@ function renderChatGptDiagnostics(diag) {
 function initChatGptUsageInspector() {
   let currentContext = '';
   let uiBound = false;
+  let lastDiagnostics = null;
 
   function pushSettings() {
     $UD.sendParamFromPlugin(collectSettings(CHATGPTUSAGE_FIELDS), currentContext);
@@ -120,6 +121,7 @@ function initChatGptUsageInspector() {
     });
 
     bindThemeButtons(commitSettings);
+    bindLanguageSelection(commitSettings, () => renderChatGptDiagnostics(lastDiagnostics));
 
     document.getElementById('probe')?.addEventListener('click', () => {
       // 先 flush 待提交的设置，否则探测跑的是旧路径/旧超时。
@@ -142,13 +144,15 @@ function initChatGptUsageInspector() {
   $UD.onConnected(() => {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
+    $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
 
   function apply(message) {
     currentContext = message.context || currentContext;
     const param = message.param || {};
     applySettings(CHATGPTUSAGE_FIELDS, param);
-    renderChatGptDiagnostics(param[CHATGPTUSAGE_DIAG_PARAM]);
+    lastDiagnostics = param[CHATGPTUSAGE_DIAG_PARAM] || lastDiagnostics;
+    void afterLanguageSelection(() => renderChatGptDiagnostics(lastDiagnostics));
   }
 
   $UD.onAdd(apply);

@@ -197,8 +197,41 @@ function withLanguageField(fields) {
 function applyLanguageSelection() {
   const select = document.getElementById('uiLanguage');
   if (select && select.value) {
-    $UD.setLanguage(select.value);
+    return $UD.setLanguage(select.value);
   }
+  return Promise.resolve();
+}
+
+// SDK 会返回 Promise；测试桩或旧桥接可能同步完成并返回 undefined。
+// 回调必须在真实语言包加载完成后执行，同时不强迫同步实现进入微任务队列。
+function afterLanguageSelection(onLocalized) {
+  const result = applyLanguageSelection();
+  if (result && typeof result.then === 'function') {
+    return result.then(() => onLocalized?.());
+  }
+  onLocalized?.();
+  return Promise.resolve();
+}
+
+// 自定义 Inspector 控制器也必须复用这条绑定，避免页面有语言下拉框却不持久化。
+// onLocalized 用于在语言文件加载完成后重绘脚本动态生成的诊断、列表等文案。
+function bindLanguageSelection(commitSettings, onLocalized) {
+  const languageSelect = document.getElementById('uiLanguage');
+  if (!languageSelect) {
+    return;
+  }
+  languageSelect.addEventListener('change', () => {
+    const finish = () => {
+      onLocalized?.();
+      commitSettings();
+    };
+    const result = $UD.setLanguage(languageSelect.value);
+    if (result && typeof result.then === 'function') {
+      void result.then(finish);
+      return;
+    }
+    finish();
+  });
 }
 
 function initInspector(actionUuid, fields) {
@@ -242,13 +275,7 @@ function initInspector(actionUuid, fields) {
     });
 
     // 语言选择器：立即重定位界面并提交（持久化 + 回推运行态图标语言）。
-    const languageSelect = document.getElementById('uiLanguage');
-    if (languageSelect) {
-      languageSelect.addEventListener('change', () => {
-        $UD.setLanguage(languageSelect.value);
-        commitSettings();
-      });
-    }
+    bindLanguageSelection(commitSettings);
     window.addEventListener('pagehide', () => {
       autosave.flush();
       autosave.cancel();

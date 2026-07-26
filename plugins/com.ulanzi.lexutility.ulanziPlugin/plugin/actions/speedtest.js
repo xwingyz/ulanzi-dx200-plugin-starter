@@ -20,6 +20,7 @@ export function createSpeedtestAction(runtime) {
     sanitizeServerList,
     sendParamFromPlugin,
     setInstanceTimeout,
+    t,
     themeFor,
     toDataUrl,
     writePersistedState,
@@ -722,7 +723,12 @@ function relativeAge(at, now) {
 function statusPill(label, theme, isError) {
   const fontSize = 20;
   const spacing = 2;
-  const width = label.length * (fontSize * 0.66 + spacing) + 22;
+  const glyphs = [...label];
+  const glyphWidth = glyphs.reduce(
+    (sum, character) => sum + (/^[\x00-\x7F]$/.test(character) ? 0.66 : 1),
+    0,
+  );
+  const width = glyphWidth * fontSize + Math.max(0, glyphs.length - 1) * spacing + 22;
   // 错误用 latency action 同一支红（#ef4444）：theme.low 在多数主题里
   // 和 accent 是同色系，错误块和"正在测速"块看起来会是同一个东西。
   return `
@@ -736,11 +742,13 @@ function renderSpeedtestIcon(instance, now = Date.now()) {
   const frame = frameFor(instance.settings);
   const background = renderThemeBackdrop(theme, theme.accent, frame);
   const last = instance.lastResult;
-  const phaseLabel = instance.phase === 'queued' ? `QUEUE ${Math.max(1, instance.queuePosition || 1)}`
-    : instance.phase === 'running' ? 'TESTING'
-      : instance.phase === 'discovering' ? 'NODES'
-        : instance.phase === 'error' ? (instance.errorCode || 'ERROR') : '';
-  const scope = { any: 'GLOBAL', overseas: 'OVERSEAS' }[instance.settings.scope] || 'MAINLAND';
+  const language = instance.settings.uiLanguage;
+  const phaseLabel = instance.phase === 'queued' ? `${t('QUEUE', language)} ${Math.max(1, instance.queuePosition || 1)}`
+    : instance.phase === 'running' ? t('TESTING', language)
+      : instance.phase === 'discovering' ? t('NODES', language)
+        : instance.phase === 'error' ? t(instance.errorCode || 'ERROR', language) : '';
+  const scopeKey = { any: 'GLOBAL', overseas: 'OVERSEAS' }[instance.settings.scope] || 'MAINLAND';
+  const scope = t(scopeKey, language);
   const history = instance.history || [];
   // 标题行两个槽位：左边是区域或当前状态，右边是上次测速距今多久。
   // 状态直接顶掉区域而不是挤在右边——TESTING / QUEUE 1 这种长度会和
@@ -748,7 +756,8 @@ function renderSpeedtestIcon(instance, now = Date.now()) {
   // 出状态时右边的时间也一起让位，否则色块会盖住它。
   // 也不用居中浮层：浮层正好压住下行速度，那是这个键存在的意义。
   const dim = phaseLabel ? 0.5 : 1;
-  const age = last && !phaseLabel ? relativeAge(instance.lastCompletedAt || last.at, now) : '';
+  const rawAge = last && !phaseLabel ? relativeAge(instance.lastCompletedAt || last.at, now) : '';
+  const age = rawAge === 'now' ? t('now', language) : rawAge;
   const headline = phaseLabel ? statusPill(phaseLabel, theme, instance.phase === 'error') : `
     <text x="44" y="60" fill="${theme.muted}" font-size="18" font-weight="800" letter-spacing="1.5" font-family="Arial, sans-serif">${scope}</text>
     ${age ? `<text x="214" y="60" text-anchor="end" fill="${theme.muted}" font-size="16" font-weight="700" font-family="Arial, sans-serif">${escapeXml(age)}</text>` : ''}

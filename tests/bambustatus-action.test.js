@@ -3,10 +3,10 @@ import { test } from 'node:test';
 
 import { __testing as testing } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
 
-test('bambustatus maps detailed preparation stages with a raw fallback', () => {
-  assert.equal(testing.stageLabel({ mc_print_stage: 1 }), '自动调平');
-  assert.equal(testing.stageLabel({ mc_print_stage: 14 }), '清洁喷嘴');
-  assert.equal(testing.stageLabel({ mc_print_stage: 99 }), '准备阶段 99');
+test('bambustatus maps detailed preparation stages to stable localization keys with a raw fallback', () => {
+  assert.equal(testing.stageLabel({ mc_print_stage: 1 }), 'Auto bed leveling');
+  assert.equal(testing.stageLabel({ mc_print_stage: 14 }), 'Cleaning the nozzle');
+  assert.equal(testing.stageLabel({ mc_print_stage: 99 }), 'Preparation stage 99');
   assert.equal(testing.stageLabel({ stg_cur_name: 'Custom calibration' }), 'Custom calibration');
 });
 
