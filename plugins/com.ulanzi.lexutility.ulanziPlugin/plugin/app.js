@@ -848,6 +848,9 @@ const FRAME_SIZE_NAMES = Object.keys(FRAME_PRESETS);
 // 但比例按 DX200 实体键角实测收小为 42/256 ≈ 16.41%（256 全幅时圆角 42）——
 // Apple 的 22.37% 对本硬件偏大。squircle 在键面尺寸下差异可忽略，用圆弧近似。
 const FRAME_RADIUS_RATIO = 42 / 256;
+// 安全边框主描边（shell 边线）用主题强调色，但满亮度贴边过于刺眼；统一按此
+// 不透明度淡化，只降边线、不动 shell 填充，亮/暗主题都一致地收敛。
+const FRAME_ACCENT_OPACITY = 0.6;
 
 function frameFor(settings = {}) {
   const preset = FRAME_PRESETS[normalizeChoice(settings.frameSize, 'optimal', FRAME_SIZE_NAMES)];
@@ -987,8 +990,8 @@ function renderScreenFrame(theme, accent, innerSvg, frame = frameFor()) {
   const chrome = frame.show
     ? `
     ${frameRect(frame.ring, frame.ringRadius, `fill="none" stroke="${theme.low}" stroke-width="2" opacity="0.4"`)}
-    ${frameRect(frame.shell, frame.shellRadius, `fill="${theme.shell}" stroke="${accent}" stroke-width="4"`)}
-    ${frameRect(frame.panel, frame.panelRadius, `fill="${theme.panel}" stroke="${accent}" stroke-width="1.5" opacity="0.98"`)}
+    ${frameRect(frame.shell, frame.shellRadius, `fill="${theme.shell}" stroke="${accent}" stroke-width="4" stroke-opacity="${FRAME_ACCENT_OPACITY}"`)}
+    ${frameRect(frame.panel, frame.panelRadius, `fill="${theme.panel}" stroke="${accent}" stroke-width="1.5" opacity="0.98" stroke-opacity="${FRAME_ACCENT_OPACITY}"`)}
   `
     : '';
   return `
@@ -1021,7 +1024,7 @@ function renderThemeBackdrop(theme, accent, frame = frameFor()) {
   const chrome = frame.show
     ? `
       ${frameRect(frame.ring, frame.ringRadius, `fill="none" stroke="${accent}" stroke-width="2.2" opacity="0.34"`)}
-      ${frameRect(frame.shell, frame.shellRadius, `fill="${theme.shell}" stroke="${accent}" stroke-width="4.5"`)}
+      ${frameRect(frame.shell, frame.shellRadius, `fill="${theme.shell}" stroke="${accent}" stroke-width="4.5" stroke-opacity="${FRAME_ACCENT_OPACITY}"`)}
       ${frameRect(frame.panel, frame.panelRadius, `fill="${theme.panel}" opacity="0.985"`)}
     `
     : '';
