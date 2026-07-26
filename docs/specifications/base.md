@@ -80,6 +80,8 @@ Ulanzi Studio :3906 / Simulator :39069
     normalizeSettings?,
     createState,
     onRun,
+    onDoublePress?,
+    doublePressMs?,
     onLongPress?,
     longPressMs?,
     onReady?,
@@ -115,8 +117,9 @@ Ulanzi Studio :3906 / Simulator :39069
 | `onAdd` / `onParamFromApp` | 以本地持久化设置为权威合并，归一化、必要时回写存储、渲染、调用 `onReady`，并无条件把完整权威设置回推新打开的 Inspector |
 | `onParamFromPlugin` | 以 Inspector incoming 为权威；恢复默认由框架拦截，其余来件在合并后分发给 `onParamFromPlugin` |
 | `onKeyDown` | 标记真实 key 事件，不提交插件缩放帧；声明 `onLongPress` 时登记默认 600ms 的实例定时器 |
-| `onKeyUp` | 取消长按定时器并清除反馈；未达到阈值则调用短按业务 `onRun`，已达到阈值则在此时调用 `onLongPress` 并抑制 `onRun` |
-| `onRun` | 只为不提供 keydown/keyup 的旧宿主执行短按兼容回退；当前实例观察到真实 key 事件后忽略该事件，避免重复执行 |
+| `onKeyUp` | 取消长按定时器并清除反馈；已达到阈值则调用 `onLongPress`；否则立即调用首次短按 `onRun`，声明双击能力时默认 300ms 内第二次短按改派 `onDoublePress` |
+| `onRun` | 只为不提供 keydown/keyup 的旧宿主执行按键兼容回退；当前实例观察到真实 key 事件后忽略该事件，避免重复执行 |
+| 双击分派 | 第一次短按不等待窗口并立即执行 `onRun`；仅声明 `onDoublePress` 的 action 在窗口内抑制第二次 `onRun` 并调用 `onDoublePress`，其他 action 行为不变 |
 | 按压视觉 | 由 Studio / 设备宿主原生处理；`keydown` 不提交插件缩放帧，`keyup` 只绘制最新业务状态 |
 | 长按反馈 | 达到阈值时只标记长按成立，并由基座提交一次同尺寸反色图保持到 `keyup`；实际长按业务在 `keyup` 执行，不得改变 `viewBox` 或几何 transform |
 | `onSetActive` | 更新 `active`；重新激活时补一次渲染，非 active 实例禁止推送图标 |
@@ -166,7 +169,7 @@ Ulanzi Studio :3906 / Simulator :39069
 - 定时器回调自动经过 action 错误边界，实例销毁时统一取消。
 - 排他资源使用 `createExclusiveTaskQueue()`。当前 `speedtest` 用资源名 `network-bandwidth` 串行测速和节点发现。
 - 队列提供同实例去重、排队位置、运行/排队取消和 `AbortSignal`；action 不另建模块级 busy 标志。
-- 异步 `onRun` / `onLongPress` 必须返回 Promise，使 rejection 留在框架错误边界内。
+- 异步 `onRun` / `onDoublePress` / `onLongPress` 必须返回 Promise，使 rejection 留在框架错误边界内。
 
 ## 7. 主题、画布与公共渲染
 

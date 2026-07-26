@@ -341,7 +341,7 @@ npm test
 仓库内的业务插件 `plugins/com.ulanzi.lexutility.ulanziPlugin` 不携带上述模板测试 action，只保留实际使用的工具（当前 9 个）：
 
 - `Network Speed`（key `speedtest`）：用 Ookla Speedtest 服务器测下载/上传速度（需单独安装并接受其条款的 Speedtest CLI）
-- `Latency Monitor`（key `latency`）：监控单个 URL，实时显示延迟
+- `Web Latency Monitor`（key `latency`）：监控单个 HTTP/HTTPS URL，实时显示响应延迟
 - `Pomowave`（key `pomowave`）：番茄钟，带声音提示与节奏性休息
 - `Claude Usage`（key `claudeusage`）：显示 Claude 订阅额度（每周 + 5 小时窗口）及重置倒计时；凭据从 macOS 钥匙串只读读取，仅 macOS
 - `ChatGPT Usage`（key `chatgptusage`）：从 Codex CLI 读取用量额度与重置倒计时

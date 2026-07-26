@@ -176,6 +176,41 @@ for (const framework of frameworks) {
     assert.deepEqual(renders, [false]);
   });
 
+  test(`${framework.name}: double press fires after an immediate first short press`, () => {
+    let shortPresses = 0;
+    let doublePresses = 0;
+    let renders = 0;
+    const instance = { context: 'double-press', active: true };
+    const config = {
+      onRun: () => { shortPresses += 1; },
+      onDoublePress: () => { doublePresses += 1; },
+    };
+    const runtime = {
+      now: 1_000,
+      render: () => { renders += 1; },
+      clearTimeout: () => {},
+    };
+    const tapAt = (now) => {
+      runtime.now = now;
+      framework.beginPress(instance, config, runtime);
+      framework.endPress(instance, config, runtime);
+    };
+
+    tapAt(1_000);
+    assert.equal(shortPresses, 1, 'the first tap remains immediate');
+    assert.equal(doublePresses, 0);
+
+    tapAt(1_300);
+    assert.equal(shortPresses, 1, 'the second tap does not repeat the short action');
+    assert.equal(doublePresses, 1);
+    assert.equal(instance.lastShortPressAt, null, 'a completed pair cannot leak into the next tap');
+
+    tapAt(1_601);
+    assert.equal(shortPresses, 2);
+    assert.equal(doublePresses, 1);
+    assert.equal(renders, 3, 'each release renders exactly once');
+  });
+
   test(`${framework.name}: long-press feedback inverts color without changing geometry`, () => {
     const sourceSvg = '<svg width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" fill="#123456"/></svg>';
     const source = `data:image/svg+xml;base64,${Buffer.from(sourceSvg).toString('base64')}`;
@@ -1580,10 +1615,10 @@ test('lex utility: latency renders ssl as a dot when healthy and as a countdown 
   assert.ok(!late.includes('SSL 45d'), 'no countdown outside the configured window');
 });
 
-test('lex utility: latency shows Pause instead of a stale number while paused', () => {
+test('lex utility: latency shows compact PAUSE instead of a stale number while paused', () => {
   const decode = (icon) => Buffer.from(icon.split(',')[1], 'base64').toString('utf8');
   const svg = decode(lexActionConfigs.latency.render({
-    settings: { ...lexActionConfigs.latency.defaults },
+    settings: { ...lexActionConfigs.latency.defaults, uiLanguage: 'en' },
     recent: [{ t: Date.now(), ok: true, ms: 42 }],
     buckets: [],
     lastMs: 42,
@@ -1592,8 +1627,43 @@ test('lex utility: latency shows Pause instead of a stale number while paused', 
     checking: false,
     requestId: 1,
   }));
-  assert.ok(svg.includes('Pause'));
+  assert.ok(svg.includes('PAUSE'));
   assert.ok(!svg.includes('>42<'), 'a paused button must not keep showing the last latency as if it were live');
+});
+
+test('lex utility: latency status labels stay compact in English and Chinese', () => {
+  const decode = (icon) => Buffer.from(icon.split(',')[1], 'base64').toString('utf8');
+  const render = lexActionConfigs.latency.render;
+  const base = {
+    recent: [{ t: Date.now(), ok: true, ms: 42 }],
+    buckets: [],
+    lastMs: 42,
+    checking: false,
+    requestId: 1,
+  };
+  const states = [
+    { status: 'up', english: 'UP', chinese: '正常' },
+    { status: 'slow', english: 'SLOW', chinese: '偏高' },
+    { status: 'down', english: 'DOWN', chinese: '离线' },
+    { status: 'checking', lastMs: null, english: 'CHECK', chinese: '检测' },
+    { status: 'paused', paused: true, english: 'PAUSE', chinese: '暂停' },
+  ];
+
+  for (const state of states) {
+    const english = decode(render({
+      ...base,
+      ...state,
+      settings: { ...lexActionConfigs.latency.defaults, uiLanguage: 'en' },
+    }));
+    const chinese = decode(render({
+      ...base,
+      ...state,
+      settings: { ...lexActionConfigs.latency.defaults, uiLanguage: 'zh_CN' },
+    }));
+    assert.ok(english.includes(`>${state.english}<`), `English ${state.status} label`);
+    assert.ok(chinese.includes(`>${state.chinese}<`), `Chinese ${state.status} label`);
+    assert.ok(state.english.length <= 5, `${state.english} fits the status slot`);
+  }
 });
 
 test('lex utility: a short press refreshes immediately', () => {
@@ -1608,7 +1678,7 @@ test('lex utility: a short press refreshes immediately', () => {
   assert.equal(instance.paused, false);
 });
 
-test('lex utility: a long press cancels an in-flight refresh and enters Pause', () => {
+test('lex utility: a double press cancels an in-flight refresh and enters Pause', () => {
   const runs = [];
   const flushes = [];
   const instance = latencyInstance({ requestId: 0, paused: false, checking: true });
@@ -1617,7 +1687,7 @@ test('lex utility: a long press cancels an in-flight refresh and enters Pause', 
     render: () => {},
     flush: (i) => { flushes.push(i.paused); },
   };
-  lexTesting.handleLatencyLongPress(instance, opts);
+  lexTesting.handleLatencyDoublePress(instance, opts);
 
   assert.equal(runs.length, 0, 'entering Pause must not fire another probe');
   assert.equal(instance.paused, true);
@@ -1627,7 +1697,7 @@ test('lex utility: a long press cancels an in-flight refresh and enters Pause', 
   assert.deepEqual(flushes, [true], 'pause is user intent and must reach disk immediately');
 });
 
-test('lex utility: short pressing a paused button refreshes and resumes', () => {
+test('lex utility: short pressing a paused button checks once without resuming', () => {
   const runs = [];
   const instance = latencyInstance({ requestId: 0, paused: true, status: 'paused' });
   lexTesting.handleLatencyShortPress(instance, {
@@ -1635,23 +1705,122 @@ test('lex utility: short pressing a paused button refreshes and resumes', () => 
     render: () => {},
     flush: () => {},
   });
-  assert.equal(instance.paused, false);
+  assert.equal(instance.paused, true);
   assert.equal(runs.length, 1);
 });
 
-test('lex utility: long pressing a paused button resumes and probes immediately', () => {
+test('lex utility: double pressing a paused idle button resumes and probes immediately', () => {
   const runs = [];
   const flushes = [];
   const instance = latencyInstance({ requestId: 2, paused: true, status: 'paused' });
-  lexTesting.handleLatencyLongPress(instance, {
+  lexTesting.handleLatencyDoublePress(instance, {
     run: (_i, options) => { runs.push(options); },
     render: () => {},
     flush: (current) => { flushes.push(current.paused); },
   });
   assert.equal(instance.paused, false);
-  assert.equal(instance.requestId, 3);
+  assert.equal(instance.requestId, 2);
   assert.equal(runs.length, 1);
   assert.deepEqual(flushes, [false]);
+});
+
+test('lex utility: double pressing a paused button reuses the first tap probe', () => {
+  const runs = [];
+  const instance = latencyInstance({ requestId: 4, paused: true, status: 'checking', checking: true });
+  lexTesting.handleLatencyDoublePress(instance, {
+    run: (_i, options) => { runs.push(options); },
+    flush: () => {},
+  });
+  assert.equal(instance.paused, false);
+  assert.equal(instance.requestId, 4);
+  assert.equal(instance.checking, true);
+  assert.equal(runs.length, 0, 'the in-flight manual probe becomes the resumed probe');
+});
+
+test('lex utility: a paused manual result never schedules automatic polling', () => {
+  const instance = latencyInstance({
+    context: 'paused-manual',
+    requestId: 7,
+    paused: true,
+    checking: true,
+    settings: { ...lexActionConfigs.latency.defaults },
+  });
+  const instances = new Map([[instance.context, instance]]);
+  let schedules = 0;
+  const committed = lexTesting.commitLatencyResult(instance, { ok: true, ms: 42, cert: null }, {
+    requestId: 7,
+    feedbackCompleted: true,
+    instances,
+    render: () => {},
+    schedule: () => { schedules += 1; },
+    flush: () => {},
+    now: 1_700_000_000_000,
+  });
+  assert.equal(committed, true);
+  assert.equal(instance.paused, true);
+  assert.equal(schedules, 0);
+});
+
+test('lex utility: long press opens the configured original URL without changing monitor state', async () => {
+  const opened = [];
+  const instance = latencyInstance({
+    paused: true,
+    status: 'paused',
+    requestId: 8,
+    settings: { ...lexActionConfigs.latency.defaults, url: 'example.com' },
+  });
+  await lexTesting.handleLatencyLongPress(instance, {
+    open: async (url) => { opened.push(url); return 'https://example.com/'; },
+    clearTimeout: () => {},
+  });
+  assert.deepEqual(opened, ['example.com']);
+  assert.equal(instance.paused, true);
+  assert.equal(instance.status, 'paused');
+  assert.equal(instance.requestId, 8);
+});
+
+test('lex utility: browser launch failure schedules a 1.2s recovery and rejects for framework logging', async () => {
+  const instance = latencyInstance({ settings: { ...lexActionConfigs.latency.defaults } });
+  let recovery;
+  let renders = 0;
+  await assert.rejects(
+    lexTesting.handleLatencyLongPress(instance, {
+      open: async () => { throw new Error('browser failed'); },
+      clearTimeout: () => {},
+      setTimeout: (_instance, slot, fn, ms) => { recovery = { slot, fn, ms }; },
+      render: () => { renders += 1; },
+    }),
+    /browser failed/,
+  );
+  assert.equal(recovery.slot, 'latencyOpenError');
+  assert.equal(recovery.ms, 1200);
+  recovery.fn();
+  assert.equal(renders, 1);
+});
+
+test('lex utility: browser launcher normalizes HTTP targets and uses platform-safe commands', async () => {
+  const calls = [];
+  const fakeExecFile = (command, args, options, callback) => {
+    calls.push({ command, args, options });
+    callback(null);
+  };
+
+  assert.equal(
+    await lexTesting.openLatencyUrl('example.com', { platform: 'darwin', execFile: fakeExecFile }),
+    'https://example.com/',
+  );
+  assert.equal(
+    await lexTesting.openLatencyUrl('http://example.org/path', { platform: 'win32', execFile: fakeExecFile }),
+    'http://example.org/path',
+  );
+  assert.deepEqual(calls.map(({ command, args }) => ({ command, args })), [
+    { command: '/usr/bin/open', args: ['https://example.com/'] },
+    { command: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', 'http://example.org/path'] },
+  ]);
+  await assert.rejects(
+    lexTesting.openLatencyUrl('ftp://example.com', { platform: 'darwin', execFile: fakeExecFile }),
+    /protocol is not supported/,
+  );
 });
 
 test('lex utility: repeated short presses are independent refreshes', () => {

@@ -11,7 +11,7 @@
 | 文档 | 范围 |
 | --- | --- |
 | [`base.md`](base.md) | 插件基座：模块边界、实例生命周期、设置/状态持久化、隔离、渲染、Inspector 与部署 |
-| [`actions/latency.md`](actions/latency.md) | Latency Monitor：URL 探测、24 小时统计、SSL、交互与显示 |
+| [`actions/latency.md`](actions/latency.md) | Web Latency Monitor：URL 探测、24 小时统计、SSL、交互与显示 |
 | [`actions/pomowave.md`](actions/pomowave.md) | PomoWave：阶段状态机、无漂移计时、提示音、交互与显示 |
 | [`actions/speedtest.md`](actions/speedtest.md) | Network Speed：Ookla CLI、节点发现、调度、排队、历史与显示 |
 | [`actions/claudeusage.md`](actions/claudeusage.md) | Claude Usage：钥匙串 OAuth 只读取数、限额分级、手动刷新与 STALE 徽章 |

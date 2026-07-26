@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Latency Monitor</title>
+    <title>Web Latency Monitor</title>
     <style>
       :root { color-scheme: dark; --bg: #0f172a; --panel: #111c30; --text: #e2e8f0; --muted: #94a3b8; --line: #23314f; --accent: #60a5fa; }
       * { box-sizing: border-box; }
@@ -41,7 +41,7 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1 data-localize="Latency Monitor">Latency Monitor</h1>
+        <h1 data-localize="Web Latency Monitor">Web Latency Monitor</h1>
         <form id="property-inspector">
           <div class="field">
             <label for="url" data-localize="URL">URL</label>
@@ -84,9 +84,9 @@
             <div class="hint" data-localize="Each action monitors one URL. Settings are saved to this key instance.">Each action monitors one URL. Settings are saved to this key instance.</div>
           </div>
           <div class="field">
-            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <label for="frameSize" data-localize="Display range">Display range</label>
             <div class="frame-row">
-              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Keep margins">Keep margins</span></label>
               <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
             </div>
           </div>

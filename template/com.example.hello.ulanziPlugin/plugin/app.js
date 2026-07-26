@@ -28,6 +28,7 @@ const SETTINGS_STORE_PATH = path.join(DATA_DIR, 'action-settings.json');
 // 运行态与设置分开存：设置由框架自动落盘，运行态由 action 自己按语义边界批量写。
 const STATE_STORE_PATH = path.join(DATA_DIR, 'action-state.json');
 const LONG_PRESS_MS = 600;
+const DOUBLE_PRESS_MS = 300;
 // keydown/keyup 之后宿主补发 run 的容忍窗口，超过即认为按键事件通路已断，回落到 run。
 const RUN_AFTER_KEY_EVENT_MS = 1500;
 const LONG_PRESS_TIMER_SLOT = 'baseLongPress';
@@ -925,7 +926,24 @@ function renderInstance(instance) {
   $UD.setBaseDataIcon(instance.context, longPressFeedbackIcon(icon, instance.longPressFeedback === true));
 }
 
-function dispatchShortPress(instance, config = configFromUuid(instance.actionUuid), render = renderInstance) {
+function dispatchShortPress(
+  instance,
+  config = configFromUuid(instance.actionUuid),
+  render = renderInstance,
+  now = Date.now(),
+) {
+  if (config.onDoublePress) {
+    const previousAt = instance.lastShortPressAt;
+    const elapsed = now - previousAt;
+    if (Number.isFinite(previousAt) && elapsed >= 0 && elapsed <= (config.doublePressMs ?? DOUBLE_PRESS_MS)) {
+      instance.lastShortPressAt = null;
+      guardAction(instance, 'onDoublePress', () => config.onDoublePress(instance));
+      render(instance);
+      return;
+    }
+    // 第一次短按立即执行，不等待双击窗口；若窗口内出现第二次短按，再改派双击业务。
+    instance.lastShortPressAt = now;
+  }
   guardAction(instance, 'onRun', () => config.onRun(instance));
   render(instance);
 }
@@ -974,7 +992,7 @@ function endPress(instance, config = configFromUuid(instance.actionUuid), runtim
     render(instance);
     return;
   }
-  dispatchShortPress(instance, config, render);
+  dispatchShortPress(instance, config, render, instance.lastKeyEventAt);
 }
 
 // 新宿主会在 keydown/keyup 之后补发 run，需要短路掉，否则业务会重复执行一次。
@@ -990,7 +1008,7 @@ function dispatchRunFallback(instance, config = configFromUuid(instance.actionUu
   if (keyEventsFresh(instance, now)) {
     return;
   }
-  dispatchShortPress(instance, config, render);
+  dispatchShortPress(instance, config, render, now);
 }
 
 // 新宿主会在 keydown 之后补发 run。必须在 runtime() 之前短路，否则 runtime() 自带的
@@ -1196,6 +1214,7 @@ $UD.onSetActive(safeHandler('setActive', (message) => {
     instance.pressed = false;
     instance.longPressQualified = false;
     instance.longPressFeedback = false;
+    instance.lastShortPressAt = null;
   }
 }));
 

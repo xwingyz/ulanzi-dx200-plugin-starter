@@ -70,7 +70,7 @@
 - `defaults` 只放可序列化设置，不放运行态临时值。
 - `createState(instance)` 只初始化实例态，例如计数、开关、轮播步进；调用时 `instance` 的 `context` 与归一化后的 `settings` 已就绪，可据此水合持久化运行态（见「运行态持久化」），但不得在此发起探测、定时器或任何 I/O 以外的副作用。
 - `onRun` 只处理按键行为，不直接写死 SVG 字符串。
-- `onRun` 表示短按业务；长按业务声明在可选 `onLongPress`，不得在 action 内自行维护双击窗口或裸长按定时器。
+- `onRun` 表示首次短按业务；需要双击时声明可选 `onDoublePress`，长按业务声明在可选 `onLongPress`。具体分派合同见「双击事件统一处理」与「图标与按钮 UI 规范」。
 - `render` 必须是纯渲染函数输入，依赖 `settings + state` 产出图标。
 - 所有设置都先经 `normalizeSettings` 归一化，再进入 `render`。
 - 通用字段（`title` / `subtitle` / `theme` / `frameSize` / `showFrame`）由框架归一化；action 私有字段由该 action 的可选 `normalizeSettings(settings, defaults)` 返回，框架不得持有 action 私有枚举或字段分支。
@@ -92,12 +92,29 @@ action 可按需声明以下可选能力，未声明时框架直接跳过：
 
 - `normalizeSettings(settings, defaults)`：只归一化本 action 的私有字段，返回的新对象与框架通用字段合并。
 - `onReady(instance)`：实例完成本轮设置合并与渲染后的准备工作。
+- `onDoublePress(instance)`：声明后，第一次短按仍立即调用 `onRun`；默认 300ms 内第二次短按改为调用本钩子，不再重复调用 `onRun`。未声明时每次短按均独立调用 `onRun`。
+- `doublePressMs`：可选双击窗口；没有明确交互理由时沿用 300ms 默认值。
 - `onLongPress(instance)`：按住达到基座阈值后标记成立，并在随后的 `keyup` 执行的业务。基座使用 SDK `keydown` / `keyup` 判定，默认阈值 600ms；同一次按压不再调用 `onRun`。
 - `longPressMs`：可选长按阈值；没有明确交互理由时沿用 600ms 默认值。
 - `onSettingsChanged(instance, previousSettings)`：响应归一化后的设置变化。
 - `onParamFromPlugin(instance, param)`：处理 Property Inspector 来件中的 action 私有语义。
 - `onDispose(instance)`：实例被宿主移除（`onClear`）或进程退出前的最后一次回调，用于把攒在内存里的运行态 flush 落盘。框架在此之后统一回收定时器，因此 `onDispose` 内不得再登记定时器或发起异步续作——只做同步落盘。
 - `persist`：默认保存归一化后的完整设置；设为 `false` 关闭该 action 的持久化，或提供筛选函数只返回需要保存的字段。
+
+### 双击事件统一处理（强制项）
+
+双击属于共享按键基座能力，不是 action 私有手势。所有 action 必须沿用同一套分派代码和以下事件合同：
+
+- action 需要双击时，只在 `ACTION_CONFIGS` 中声明 `onDoublePress(instance)`；不得自行监听 `keydown` / `keyup`，不得用 `Date.now()`、点击计数器、`lastClickAt` 或定时器重复实现双击识别。统一分派只保留在业务插件与 template 的 `dispatchShortPress`，不得复制进 action 模块。
+- 双击窗口默认 300ms，以相邻两次**短按释放**的时间差计算；第二次释放与第一次释放间隔 `<= 300ms` 时成立。只有经过明确交互验证时才允许在 config 中设置 `doublePressMs`，不得把该值放进用户设置或运行态。
+- 第一次短按必须立即调用 `onRun` 并渲染，不等待双击窗口结束。窗口内的第二次短按只调用 `onDoublePress` 并渲染，不再调用第二次 `onRun`；本次双击分派后立即清空候选状态，第三次短按重新开始一组。窗口外的短按作为下一组第一次短按处理。
+- 未声明 `onDoublePress` 的 action 不启用双击语义，每次短按都独立调用 `onRun`。不得为“暂时不用双击”声明空的 `onDoublePress`。
+- 长按优先于短按和双击：达到长按阈值的本次按压只在释放时调用 `onLongPress`，不进入 `dispatchShortPress`，因此不会调用 `onRun` 或 `onDoublePress`。实例失活时，框架必须清除尚未配对的首次短按状态。
+- SDK 真实按键事件与旧宿主 `run` 回退必须共用 `dispatchShortPress`；真实 `keydown` / `keyup` 后宿主补发的 `run` 由框架短路，action 不得自行兼容或补偿，否则会造成重复执行。
+- `onDoublePress` 只承载第二次短按成立后的业务变化。若第一次 `onRun` 已启动异步任务，而双击语义要求暂停、取消或改派该任务，action 必须在 `onDoublePress` 中通过既有 `AbortSignal`、generation/request id 或等价的实例态机制使首次任务失效；框架只识别手势，不回滚第一次 `onRun`。
+- 异步 `onDoublePress` 必须直接返回 Promise，并与 `onRun` 一样由 `guardAction` 兜底。统一写法为 `onDoublePress: (instance) => handleDoublePress(instance)`；不得用带大括号但没有 `return` 的包装函数吞掉 Promise。
+
+共享层测试必须固定以下分派语义：第一次短按立即执行、窗口边界内第二次短按抑制第二次 `onRun`、窗口外重新起组、第三次短按重新起组、未声明钩子时逐次执行、长按不触发双击、实例失活清空候选，以及真实按键事件后的 `run` 不重复执行。声明 `onDoublePress` 的 action 另在自己的测试文件中验证业务结果；涉及首次异步任务失效时，还必须覆盖该竞态。
 
 ### 运行态持久化（与设置持久化分离）
 
@@ -132,8 +149,8 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 - action 代码不得直接调用 `setTimeout` / `setInterval`。统一使用框架的 `setInstanceTimeout(instance, slot, fn, ms)` / `clearInstanceTimeout(instance, slot)` / `hasInstanceTimeout(instance, slot)`，定时器句柄按实例登记，回调自动带异常兜底；实例被 `onClear` 移除时由框架 `disposeInstance` 统一回收，action 不需要（也不允许）自己维护裸句柄。
 - 多实例争用同一排他资源（例如带宽测速）时，统一使用框架 `createExclusiveTaskQueue()` 创建的共享队列；资源名由业务定义，框架只负责同资源串行、同实例去重、排队/运行取消和 `AbortSignal`。不得在 action 内另造模块级 busy 标志或私有队列，`disposeInstance` 必须取消该实例仍在排队或运行的任务。
-- 框架对所有进入 action 代码的入口统一兜底：`onRun`、`onLongPress`、`render`、`createState`、定时器回调、宿主事件处理均经 `guardAction` / `safeHandler` 包裹。单个 action 抛错只影响该实例：记日志、该键位显示 ERR 状态图（`renderErrorState`），进程与其他 action 不受影响。
-- 异步 `onRun` / `onLongPress` 必须 return Promise（箭头函数省略大括号，或显式 `return`），否则 rejection 逃逸出框架兜底。
+- 框架对所有进入 action 代码的入口统一兜底：`onRun`、`onDoublePress`、`onLongPress`、`render`、`createState`、定时器回调、宿主事件处理均经 `guardAction` / `safeHandler` 包裹。单个 action 抛错只影响该实例：记日志、该键位显示 ERR 状态图（`renderErrorState`），进程与其他 action 不受影响。
+- 异步 `onRun` / `onDoublePress` / `onLongPress` 必须 return Promise（箭头函数省略大括号，或显式 `return`），否则 rejection 逃逸出框架兜底。
 - 进程级 `unhandledRejection` / `uncaughtException` 只是最后一道网：记日志并维持进程存活，不作为常规错误处理途径；正常路径的错误必须在 `guardAction` 层被拦下。
 
 ## 5. 图标与按钮 UI 规范
@@ -143,7 +160,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 静态层：`manifest.json` 和 `States[].Image` 使用 `assets/icons/*.svg`，用于宿主未拉起运行态前的默认图标。
 - 动态层：`plugin/app.js` 用 `setBaseDataIcon` 推送运行态 `data:image/svg+xml;base64,...`。
 
-实体按压视觉由 Ulanzi Studio / 设备宿主原生实现，行为以官方 Codex Usage 插件为参考：插件不得在 `keydown` 时通过 SVG 矩阵、`viewBox` 或额外 `STATE` 图标模拟缩放，否则会与宿主动画叠加成两次缩放。共享基座只使用 SDK `keydown` / `keyup` 维护长按状态；按下期间不为按压反馈提交图标。达到长按阈值时，定时器只标记长按成立，并由基座直接反转 SVG 内的十六进制 RGB 色值、提交一次同尺寸图作为确认反馈；此时不得调用 `onLongPress`。不得依赖宿主可能忽略的 SVG filter，也不得改变 `viewBox`、transform 或任何几何尺寸，并保持到 `keyup`。松开时，若长按已成立则调用 `onLongPress` 并抑制 `onRun`，否则调用 `onRun`；随后清除反色态并按最新业务状态绘制一次正常颜色图。业务 action 不得各自绘制按压态或长按反馈。`run` 仅作为旧宿主兼容回退；当前 context 一旦观察到真实 key 事件，必须在调用 `eventProcessor.runtime()` 之前短路后续 `run`，防止重复执行业务。
+实体按压视觉由 Ulanzi Studio / 设备宿主原生实现，行为以官方 Codex Usage 插件为参考：插件不得在 `keydown` 时通过 SVG 矩阵、`viewBox` 或额外 `STATE` 图标模拟缩放，否则会与宿主动画叠加成两次缩放。共享基座只使用 SDK `keydown` / `keyup` 维护长按状态；按下期间不为按压反馈提交图标。达到长按阈值时，定时器只标记长按成立，并由基座直接反转 SVG 内的十六进制 RGB 色值、提交一次同尺寸图作为确认反馈；此时不得调用 `onLongPress`。不得依赖宿主可能忽略的 SVG filter，也不得改变 `viewBox`、transform 或任何几何尺寸，并保持到 `keyup`。松开时，若长按已成立则调用 `onLongPress` 并抑制短按；否则第一次短按立即调用 `onRun`，声明 `onDoublePress` 的 action 在默认 300ms 内收到第二次短按时改派 `onDoublePress`，不重复调用 `onRun`。随后清除反色态并按最新业务状态绘制一次正常颜色图。双击识别不得延迟第一次短按，业务 action 不得各自绘制按压态、维护双击窗口或实现长按反馈。`run` 仅作为旧宿主兼容回退；当前 context 一旦观察到真实 key 事件，必须在调用 `eventProcessor.runtime()` 之前短路后续 `run`，防止重复执行业务。
 
 统一要求：
 
@@ -342,6 +359,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - Inspector 改值后，按钮能实时或预期地刷新。
 - 删除旧实例并重新拖放后，UUID 绑定正常。
 - **多语言完整**：PI 与运行态无硬编码单语言文案（数据/通用缩写除外），`en.json`/`zh_CN.json` 的 key 两端对齐、`Actions[]` 已含本 action，宿主中/英切换无漏译（细则与完成清单见 [i18n-guide.md](i18n-guide.md) §9）。
+- 声明 `onDoublePress` 时只使用共享 `dispatchShortPress`，并已按「双击事件统一处理」覆盖本 action 的双击业务结果及相关异步竞态。
 - 没有把业务逻辑塞进桥接库或脚本目录。
 
 改动触及共享层（框架段、`inspector-shared.js`、`libs/`）时，`npm test` 是**合并前的强制门槛**，不是可选项：这套测试正是用来兜住"单 action 改动打穿框架"的回归。测试失败时先查是否真的动了共享语义，不要为了让测试变绿而改测试预期。

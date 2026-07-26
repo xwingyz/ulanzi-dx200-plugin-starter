@@ -7,8 +7,8 @@
       "Tooltip": "通过 Ookla Speedtest 服务器测试下载和上传速度。"
     },
     {
-      "Name": "延迟监测",
-      "Tooltip": "监测单个 URL 并实时显示延迟。"
+      "Name": "Web 延迟监测",
+      "Tooltip": "监测单个 HTTP/HTTPS URL 并实时显示响应延迟。"
     },
     {
       "Name": "Pomowave",
@@ -129,7 +129,7 @@
     "TIMEOUT": "超时",
     "NET": "网络",
     "now": "刚刚",
-    "Latency Monitor": "延迟监测",
+    "Web Latency Monitor": "Web 延迟监测",
     "Monitor one URL at a fixed interval. Press the key to test immediately.": "按固定间隔监测一个 URL。短按按键可立即测试。",
     "Each action monitors one URL. Settings are saved to this key instance.": "每个 action 监测一个 URL，设置按键实例独立保存。",
     "URL": "URL",
@@ -138,13 +138,15 @@
     "Warn (ms)": "警告阈值（毫秒）",
     "SSL Warn (days)": "SSL 到期警告（天）",
     "Chart": "图表",
-    "Pause": "暂停",
+    "Display range": "显示范围",
+    "Keep margins": "保留边距",
+    "PAUSE": "暂停",
     "Paused": "已暂停",
-    "DOWN": "中断",
+    "DOWN": "离线",
     "Offline": "离线",
-    "Slow": "缓慢",
-    "Latency": "延迟",
-    "Checking": "检测中",
+    "SLOW": "偏高",
+    "UP": "正常",
+    "CHECK": "检测",
     "Pomowave": "Pomowave",
     "A Pomodoro timer for Lex Utility. Press to start or pause; hold to restart the current focus after an interruption.": "Lex Utility 番茄钟。短按开始或暂停，长按可在中断后重新开始当前专注。",
     "Focus (min)": "专注（分钟）",

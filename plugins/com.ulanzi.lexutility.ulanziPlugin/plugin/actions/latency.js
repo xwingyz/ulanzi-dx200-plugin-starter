@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import { execFile } from 'node:child_process';
 
 export function createLatencyAction(runtime) {
   const {
@@ -29,6 +30,8 @@ export function createLatencyAction(runtime) {
 const LATENCY_HISTORY_LIMIT = 24;
 const LATENCY_GRAPH_MODES = ['bars', 'line'];
 const LATENCY_MANUAL_FEEDBACK_MS = 650;
+const LATENCY_OPEN_ERROR_MS = 1200;
+const LATENCY_OPEN_ERROR_SLOT = 'latencyOpenError';
 // uptime 聚合：5 分钟一桶、只保留 24h（288 桶）。逐条存样本在 3s 间隔下会到 28800 条，
 // 所以桶内延迟分布用固定分箱直方图压成 17 个整数——p95 精度到箱宽，对按钮上的三位数足够。
 const LATENCY_BUCKET_MS = 5 * 60 * 1000;
@@ -50,12 +53,63 @@ const SPEEDTEST_SELECTION_MODES = ['fixed', 'dailyRandom'];
 const SPEEDTEST_CHART_TYPES = ['line', 'bar'];
 const LATENCY_SSL_WARN_DAYS = 30;
 
+function normalizeLatencyUrl(value, fallback = '') {
+  const raw = String(value || fallback).trim();
+  if (!raw) {
+    return fallback;
+  }
+  if (/^[a-z][a-z\d+.-]*:/i.test(raw) && !/^https?:\/\//i.test(raw)) {
+    return fallback;
+  }
+  return normalizeUrl(raw, fallback);
+}
+
 function hostFromUrl(url) {
   try {
-    return new URL(normalizeUrl(url, '')).hostname.replace(/^www\./, '');
+    return new URL(normalizeLatencyUrl(url, '')).hostname.replace(/^www\./, '');
   } catch {
     return 'invalid host';
   }
+}
+
+function openLatencyUrl(rawUrl, options = {}) {
+  const execFileImpl = options.execFile ?? execFile;
+  const platform = options.platform ?? process.platform;
+  const raw = String(rawUrl || '').trim();
+  if (/^[a-z][a-z\d+.-]*:/i.test(raw) && !/^https?:\/\//i.test(raw)) {
+    return Promise.reject(new Error(`Latency target protocol is not supported: ${raw.split(':', 1)[0]}:`));
+  }
+  let url;
+  try {
+    url = new URL(normalizeLatencyUrl(rawUrl, ''));
+  } catch {
+    return Promise.reject(new Error('Latency target URL is invalid'));
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return Promise.reject(new Error(`Latency target protocol is not supported: ${url.protocol}`));
+  }
+
+  let command;
+  let args;
+  if (platform === 'darwin') {
+    command = '/usr/bin/open';
+    args = [url.href];
+  } else if (platform === 'win32') {
+    command = 'rundll32.exe';
+    args = ['url.dll,FileProtocolHandler', url.href];
+  } else {
+    return Promise.reject(new Error(`Opening a browser is not supported on ${platform}`));
+  }
+
+  return new Promise((resolve, reject) => {
+    execFileImpl(command, args, { timeout: 4000, windowsHide: true }, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(url.href);
+    });
+  });
 }
 
 // host 超宽时中段省略：保留开头与结尾（结尾带着 TLD），比尾部截断保住更多辨识度——
@@ -154,7 +208,7 @@ async function checkUrl(rawUrl, timeoutMs, options = {}) {
   const hop = options.requestHop ?? requestHop;
   let url;
   try {
-    url = new URL(normalizeUrl(rawUrl, ''));
+    url = new URL(normalizeLatencyUrl(rawUrl, ''));
   } catch {
     return { ok: false, ms: 0, code: 0, error: 'bad_url' };
   }
@@ -310,24 +364,24 @@ function renderLatencyIcon(instance) {
   const host = hostFromUrl(instance.settings.url);
   const language = instance.settings.uiLanguage;
   const warnMs = Number.parseInt(instance.settings.warnMs, 10) || 400;
-  const status = instance.paused ? 'paused' : instance.status || 'checking';
+  const status = instance.checking ? 'checking' : instance.paused ? 'paused' : instance.status || 'checking';
   const accent =
     status === 'down' ? '#ef4444'
     : status === 'slow' ? '#f59e0b'
     : status === 'up' ? theme.accent
     : theme.muted;
   const bigText =
-    status === 'paused' ? t('Pause', language)
+    status === 'paused' ? t('PAUSE', language)
     : status === 'down' ? t('DOWN', language)
     : status === 'checking' ? '...'
     : instance.lastMs == null ? '...'
     : String(instance.lastMs);
   const headerText =
-    status === 'paused' ? t('Paused', language)
-    : status === 'down' ? t('Offline', language)
-    : status === 'slow' ? t('Slow', language)
-    : status === 'up' ? t('Latency', language)
-    : t('Checking', language);
+    status === 'paused' ? t('PAUSE', language)
+    : status === 'down' ? t('DOWN', language)
+    : status === 'slow' ? t('SLOW', language)
+    : status === 'up' ? t('UP', language)
+    : t('CHECK', language);
   const stats = latencyStats(instance);
   const hostLabel = clipHostMiddle(host, 19);
   // 图表基色固定用主题 accent：历史柱描述的是各自当时的延迟，不随「当前状态」整体染色
@@ -338,7 +392,7 @@ function renderLatencyIcon(instance) {
     : chart.bars;
   const uptimeLabel = formatUptimeLabel(stats);
   const p95Label = stats.p95 == null ? '' : `p95 ${stats.p95}`;
-  // Pause / DOWN 是词不是数值，跟 ms 单位并排没有意义，居中独占主区。
+  // PAUSE / DOWN 是词不是数值，跟 ms 单位并排没有意义，居中独占主区。
   const numeric = status !== 'paused' && status !== 'down';
   const valueFontSize = bigText.length >= 4 ? 42 : 50;
 
@@ -500,6 +554,9 @@ function clearLatencyTimer(instance) {
 }
 
 function scheduleLatencyCheck(instance) {
+  if (instance.paused) {
+    return;
+  }
   const intervalSec = Number.parseInt(instance.settings.intervalSec, 10) || 15;
   setInstanceTimeout(instance, 'latency', () => runLatencyCheck(instance), intervalSec * 1000);
 }
@@ -534,38 +591,57 @@ function commitLatencyResult(instance, result, options = {}) {
     flush(instance);
   }
   render(instance);
-  schedule(instance);
+  if (!instance.paused) {
+    schedule(instance);
+  }
   return true;
 }
 
-// SDK 的 keyup 会把未触发长按的操作分派到这里：短按立即刷新；Pause 中短按恢复。
+// 单击始终立即探测；Pause 中只做一次手动探测，不改变暂停状态。
 function handleLatencyShortPress(instance, options = {}) {
   const run = options.run ?? runLatencyCheck;
-  const flush = options.flush ?? flushLatencyState;
-  if (instance.paused) {
-    instance.paused = false;
-    flush(instance);
-  }
   return run(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true });
 }
 
-// 长按切换 Pause。进入 Pause 时提升 requestId，使正在飞行的探测结果失效；退出时立即首探。
-function handleLatencyLongPress(instance, options = {}) {
+// 双击是 Pause 的唯一切换手势。运行中进入 Pause 时作废第一次单击发起的在途探测；
+// Pause 中第一次单击只做一次手动探测，第二次单击恢复轮询并复用仍在途的结果。
+function handleLatencyDoublePress(instance, options = {}) {
   const run = options.run ?? runLatencyCheck;
   const flush = options.flush ?? flushLatencyState;
-  instance.requestId += 1;
-  instance.checking = false;
-  clearLatencyTimer(instance);
-  clearInstanceTimeout(instance, 'latencyFeedback');
-  instance.paused = !instance.paused;
-  if (instance.paused) {
+  if (!instance.paused) {
+    instance.requestId += 1;
+    instance.checking = false;
+    clearLatencyTimer(instance);
+    clearInstanceTimeout(instance, 'latencyFeedback');
+    instance.paused = true;
     instance.status = 'paused';
     instance.lastMs = null;
     flush(instance);
     return undefined;
   }
+
+  instance.paused = false;
   flush(instance);
+  if (instance.checking) {
+    return undefined;
+  }
   return run(instance, { immediateRender: true, minDisplayMs: LATENCY_MANUAL_FEEDBACK_MS, forceFeedback: true });
+}
+
+// 长按只负责打开配置的原始目标。浏览器启动失败由基座 guardAction 记录并显示 ERR；
+// 这里登记恢复定时器，确保错误态约 1.2 秒后回到此前的监测/暂停画面。
+async function handleLatencyLongPress(instance, options = {}) {
+  const open = options.open ?? openLatencyUrl;
+  const schedule = options.setTimeout ?? setInstanceTimeout;
+  const cancel = options.clearTimeout ?? clearInstanceTimeout;
+  const render = options.render ?? renderInstance;
+  cancel(instance, LATENCY_OPEN_ERROR_SLOT);
+  try {
+    return await open(instance.settings.url);
+  } catch (error) {
+    schedule(instance, LATENCY_OPEN_ERROR_SLOT, () => render(instance), LATENCY_OPEN_ERROR_MS);
+    throw error;
+  }
 }
 
 async function runLatencyCheck(instance, options = {}) {
@@ -628,7 +704,7 @@ const config = {
       graphMode: 'bars',
     },
     normalizeSettings: (settings, defaults) => ({
-      url: normalizeUrl(settings.url, defaults.url),
+      url: normalizeLatencyUrl(settings.url, defaults.url),
       intervalSec: normalizeNumberString(settings.intervalSec, defaults.intervalSec, 3, 3600),
       warnMs: normalizeNumberString(settings.warnMs, defaults.warnMs, 50, 10000),
       timeoutMs: normalizeNumberString(settings.timeoutMs, defaults.timeoutMs, 500, 30000),
@@ -644,6 +720,7 @@ const config = {
       ...hydrateLatencyState(readPersistedState(instance.context)),
     }),
     onRun: (instance) => handleLatencyShortPress(instance),
+    onDoublePress: (instance) => handleLatencyDoublePress(instance),
     onLongPress: (instance) => handleLatencyLongPress(instance),
     onReady: (instance) => {
       if (instance.paused) {
@@ -692,10 +769,12 @@ const config = {
       checkUrl,
       commitLatencyResult,
       formatUptimeLabel,
+      handleLatencyDoublePress,
       handleLatencyLongPress,
       handleLatencyShortPress,
       hydrateLatencyState,
       latencyStats,
+      openLatencyUrl,
       recordLatencySample,
       sslDaysLeft,
     },

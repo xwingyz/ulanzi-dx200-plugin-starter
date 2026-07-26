@@ -29,8 +29,8 @@
       "SupportedInMultiActions": false
     },
     {
-      "Name": "Latency Monitor",
-      "Tooltip": "Monitor one URL and show live latency.",
+      "Name": "Web Latency Monitor",
+      "Tooltip": "Monitor one HTTP/HTTPS URL and show live response latency.",
       "Icon": "assets/icons/actionLatency.svg",
       "PropertyInspectorPath": "property-inspector/latency.html",
       "UUID": "com.ulanzi.ulanzistudio.lexutility.latency",

@@ -7,8 +7,8 @@
       "Tooltip": "Test download and upload speed with an Ookla Speedtest server."
     },
     {
-      "Name": "Latency Monitor",
-      "Tooltip": "Monitor one URL and show live latency."
+      "Name": "Web Latency Monitor",
+      "Tooltip": "Monitor one HTTP/HTTPS URL and show live response latency."
     },
     {
       "Name": "Pomowave",
@@ -129,7 +129,7 @@
     "TIMEOUT": "TIMEOUT",
     "NET": "NETWORK",
     "now": "now",
-    "Latency Monitor": "Latency Monitor",
+    "Web Latency Monitor": "Web Latency Monitor",
     "Monitor one URL at a fixed interval. Press the key to test immediately.": "Monitor one URL at a fixed interval. Press the key to test immediately.",
     "Each action monitors one URL. Settings are saved to this key instance.": "Each action monitors one URL. Settings are saved to this key instance.",
     "URL": "URL",
@@ -138,13 +138,15 @@
     "Warn (ms)": "Warn (ms)",
     "SSL Warn (days)": "SSL Warn (days)",
     "Chart": "Chart",
-    "Pause": "Pause",
+    "Display range": "Display range",
+    "Keep margins": "Keep margins",
+    "PAUSE": "PAUSE",
     "Paused": "Paused",
     "DOWN": "DOWN",
     "Offline": "Offline",
-    "Slow": "Slow",
-    "Latency": "Latency",
-    "Checking": "Checking",
+    "SLOW": "SLOW",
+    "UP": "UP",
+    "CHECK": "CHECK",
     "Pomowave": "Pomowave",
     "A Pomodoro timer for Lex Utility. Press to start or pause; hold to restart the current focus after an interruption.": "A Pomodoro timer for Lex Utility. Press to start or pause; hold to restart the current focus after an interruption.",
     "Focus (min)": "Focus (min)",
