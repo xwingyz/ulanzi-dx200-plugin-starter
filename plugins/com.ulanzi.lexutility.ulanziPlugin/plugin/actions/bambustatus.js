@@ -1,4 +1,5 @@
 import dgram from 'node:dgram';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,11 +12,16 @@ const MQTT_PORT = 8883;
 const STATUS_TIMEOUT_MS = 12_000;
 const REDRAW_MS = 30_000;
 const COMPLETION_HOLD_MS = 3 * 60_000;
+const MANUAL_REFRESH_FEEDBACK_MS = 650;
 const RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
 const SCAN_PARAM = '__bambustatusScan';
 const SCAN_RESULT_PARAM = '__bambustatusDiscovery';
 const DIAG_PARAM = '__bambustatusDiag';
 const BAMBU_MARK_PATH = 'M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z';
+const MAKERWORLD_URLS = Object.freeze({
+  global: 'https://makerworld.com/',
+  china: 'https://makerworld.com.cn/',
+});
 
 const STAGE_LABELS = {
   1: 'Auto bed leveling',
@@ -58,6 +64,54 @@ function clipText(value, maxLength) {
 function normalizeModel(value) {
   const raw = cleanString(value);
   return MODEL_NAMES[raw.toUpperCase()] || raw;
+}
+
+function runExternal(command, args, options = {}) {
+  const execFileImpl = options.execFile ?? execFile;
+  return new Promise((resolve, reject) => {
+    execFileImpl(command, args, { timeout: 4_000, windowsHide: true }, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function openBambuStudio(options = {}) {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'darwin') {
+    await runExternal('/usr/bin/open', ['-a', 'BambuStudio'], options);
+  } else if (platform === 'win32') {
+    await runExternal('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      "Start-Process -FilePath 'bambu-studio.exe'",
+    ], options);
+  } else if (platform === 'linux') {
+    await runExternal('bambu-studio', [], options);
+  } else {
+    throw new Error(`Opening Bambu Studio is not supported on ${platform}`);
+  }
+  return 'BambuStudio';
+}
+
+async function openMakerWorld(site, options = {}) {
+  const normalizedSite = Object.hasOwn(MAKERWORLD_URLS, site) ? site : 'china';
+  const url = MAKERWORLD_URLS[normalizedSite];
+  const platform = options.platform ?? process.platform;
+  if (platform === 'darwin') {
+    await runExternal('/usr/bin/open', [url], options);
+  } else if (platform === 'win32') {
+    await runExternal('rundll32.exe', ['url.dll,FileProtocolHandler', url], options);
+  } else if (platform === 'linux') {
+    await runExternal('xdg-open', [url], options);
+  } else {
+    throw new Error(`Opening MakerWorld is not supported on ${platform}`);
+  }
+  return url;
 }
 
 function isCompleteSettings(settings = {}) {
@@ -341,7 +395,15 @@ export function createBambuStatusAction(runtime) {
     renderInstance(instance);
   }
 
-  function refreshCurrentStatus(instance) {
+  function refreshCurrentStatus(instance, options = {}) {
+    if (options.manualFeedback) {
+      instance.manualRefreshing = true;
+      renderInstance(instance);
+      setInstanceTimeout(instance, 'bambustatusManualRefreshFeedback', () => {
+        instance.manualRefreshing = false;
+        renderInstance(instance);
+      }, MANUAL_REFRESH_FEEDBACK_MS);
+    }
     clearCompletion(instance);
     if (!requestCurrentStatus(instance)) connectPrinter(instance);
   }
@@ -622,7 +684,9 @@ export function createBambuStatusAction(runtime) {
       FAILED: [t('Print failed', language), localizeStage(data.stage, 'Check the printer')],
     };
     let body = '';
-    if (instance.connectionState === 'CONFIG_REQUIRED') {
+    if (instance.manualRefreshing) {
+      body = `<text data-manual-refresh-feedback="active" x="128" y="164" text-anchor="middle" fill="${theme.text}" font-size="44" font-weight="800">...</text>`;
+    } else if (instance.connectionState === 'CONFIG_REQUIRED') {
       body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">${escapeXml(t('Setup required', language))}</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Open the Inspector to scan', language))}</text>`;
     } else if (instance.connectionState === 'CONNECTING') {
       body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">${escapeXml(t('Connecting', language))}</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Reading printer status', language))}</text>`;
@@ -637,15 +701,15 @@ export function createBambuStatusAction(runtime) {
           theme,
           { percent: progress, color: theme.accent, value: `${progress}%`, showBar: true },
         )}
-        <text x="46" y="205" text-anchor="start" fill="${theme.text}" font-size="25" font-weight="800">T ${formatDuration(data.elapsedSec)}</text>
-        <text x="210" y="205" text-anchor="end" fill="${theme.text}" font-size="25" font-weight="800">R ${formatDuration(data.remainingSec)}</text>`;
+        <text x="43" y="205" text-anchor="start" fill="${theme.text}" font-size="28" font-weight="800">T ${formatDuration(data.elapsedSec)}</text>
+        <text x="213" y="205" text-anchor="end" fill="${theme.text}" font-size="28" font-weight="800">R ${formatDuration(data.remainingSec)}</text>`;
     } else {
       const [primary, secondary] = labels[status] || labels.IDLE;
       body = `
         <text x="128" y="137" text-anchor="middle" fill="${status === 'FAILED' ? theme.crit : theme.text}" font-size="36" font-weight="800">${escapeXml(primary)}</text>
         <text x="128" y="172" text-anchor="middle" fill="${theme.muted}" font-size="18" font-weight="600">${escapeXml(clipText(secondary, 14))}</text>
-        ${['PREPARING', 'PAUSED'].includes(status) ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="17" font-weight="650">${progress}% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)} · ${escapeXml(t('Left', language))} ${formatDuration(data.remainingSec)}</text>` : ''}
-        ${status === 'FINISHED' ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="17" font-weight="650">100% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)}</text>` : ''}`;
+        ${['PREPARING', 'PAUSED'].includes(status) ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="20" font-weight="650">${progress}% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)} · ${escapeXml(t('Left', language))} ${formatDuration(data.remainingSec)}</text>` : ''}
+        ${status === 'FINISHED' ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="20" font-weight="650">100% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)}</text>` : ''}`;
     }
     const highlightColor = instance.connectionState === 'OFFLINE' || status === 'FAILED'
       ? theme.crit
@@ -665,13 +729,15 @@ export function createBambuStatusAction(runtime) {
 
   const config = {
     defaults: {
-      printerName: '', printerIp: '', serialNumber: '', accessCode: '', theme: 'mint', frameSize: 'optimal', showFrame: 'true',
+      printerName: '', printerIp: '', serialNumber: '', accessCode: '', makerworldSite: 'china',
+      theme: 'mint', frameSize: 'optimal', showFrame: 'true',
     },
     normalizeSettings: (settings) => ({
       printerName: cleanString(settings.printerName).slice(0, 40),
       printerIp: cleanString(settings.printerIp),
       serialNumber: cleanString(settings.serialNumber),
       accessCode: cleanString(settings.accessCode),
+      makerworldSite: normalizeChoice(settings.makerworldSite, 'china', ['global', 'china']),
       theme: normalizeChoice(settings.theme, 'mint', ['mint', 'ember', 'mono', 'signal', 'neon', 'ice', 'sunset', 'forest', 'sand']),
     }),
     createState: (instance) => ({
@@ -679,9 +745,12 @@ export function createBambuStatusAction(runtime) {
       progress: null, elapsedSec: null, remainingSec: null, lastSeenAt: null, print: {}, mqttClient: null,
       discoverySocket: null, connectionGeneration: 0, reconnectAttempt: 0, statusReceived: false, diagnostic: '',
       completedSnapshot: null, completionLatched: false, suppressFinishedUntilNextTask: false,
-      autoScanStarted: false, reportedOnline: false, ...hydrateSnapshot(readPersistedState(instance.context)),
+      autoScanStarted: false, reportedOnline: false, manualRefreshing: false,
+      ...hydrateSnapshot(readPersistedState(instance.context)),
     }),
-    onRun: (instance) => refreshCurrentStatus(instance),
+    onRun: (instance) => refreshCurrentStatus(instance, { manualFeedback: true }),
+    onDoublePress: (instance) => openBambuStudio(),
+    onLongPress: (instance) => openMakerWorld(instance.settings.makerworldSite),
     onReady: async (instance) => {
       scheduleRedraw(instance);
       scheduleCompletionExpiry(instance);
@@ -709,6 +778,7 @@ export function createBambuStatusAction(runtime) {
       clearInstanceTimeout(instance, 'bambustatusReconnect');
       clearInstanceTimeout(instance, 'bambustatusRedraw');
       clearInstanceTimeout(instance, 'bambustatusCompletionExpiry');
+      clearInstanceTimeout(instance, 'bambustatusManualRefreshFeedback');
       flushSnapshot(instance);
     },
     render: renderBambuStatus,
@@ -726,6 +796,8 @@ export function createBambuStatusAction(runtime) {
       hydrateSnapshot,
       isCompleteSettings,
       mergeDiscovery,
+      bambuOpenBambuStudio: openBambuStudio,
+      bambuOpenMakerWorld: openMakerWorld,
       parseSsdpPacket,
       readBambuStudioAccessCodes,
       resolvePrintState,

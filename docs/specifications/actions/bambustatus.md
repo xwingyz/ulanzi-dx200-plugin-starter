@@ -1,19 +1,19 @@
-# Bambu P2S Status 功能与技术规范
+# Bambu 3D Printer Status 功能与技术规范
 
 状态：首版已实现，等待真实 P2S 状态订阅验收  
 最后代码核对：2026-07-26
 action key：`bambustatus`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.bambustatus`
 
-**变更门槛：修改 Bambu P2S Status 的业务模块、manifest、Inspector、图标、设置、状态、I/O、持久化、交互、渲染或测试契约前，必须先完整阅读本文件；涉及基座时还必须读写 `../base.md`。**
+**变更门槛：修改 Bambu 3D Printer Status 的业务模块、manifest、Inspector、图标、设置、状态、I/O、持久化、交互、渲染或测试契约前，必须先完整阅读本文件；涉及基座时还必须读写 `../base.md`。**
 
 ## 1. 功能定位与边界
 
-Bambu P2S Status 是 Lex Utility 内的一键一机只读监控 action。首版只验证 Bambu Lab P2S，在同一局域网内读取实时打印状态，不发送暂停、继续、停止、温控或运动等控制命令。
+Bambu 3D Printer Status 是 Lex Utility 内的一键一机只读监控 action。首版只验证 Bambu Lab P2S，在同一局域网内读取实时打印状态，不发送暂停、继续、停止、温控或运动等控制命令。
 
 四层实现：
 
-- manifest：`manifest.json` 的 `Bambu P2S Status`。
+- manifest：`manifest.json` 的 `Bambu 3D Printer Status`。
 - 业务：`plugin/actions/bambustatus.js`。
 - Inspector：`property-inspector/bambustatus.html`、`bambustatus.js`。
 - 静态图标：`assets/icons/actionBambustatus.svg`。
@@ -24,9 +24,10 @@ Bambu P2S Status 是 Lex Utility 内的一键一机只读监控 action。首版�
 
 - 一个 action 实例只绑定一台打印机，各实例独立保存打印机名称、连接设置、连接状态和完成快照。
 - 配置不完整时自动扫描一次；Inspector 提供“重新扫描”，手动配置始终可覆盖扫描结果。
-- 短按立即断开并重新连接，重新订阅实时状态。
-- 长按清除已锁存的完成快照，恢复显示打印机当前实时状态。
-- 打印完成后锁存完整显示快照，跨 Ulanzi Studio 重启保留；下一次任务开始或长按时解除。
+- 单击立即请求当前状态；连接不可用时断开并重新连接。按下后中间信息区显示 `...`，反馈至少保持 650ms；品牌图标不变色、不增加高亮。
+- 双击通过系统应用启动器打开 Bambu Studio。统一手势合同仍要求第一次短按先立即执行一次刷新，第二次短按成立后再打开应用。
+- 长按按实例设置打开 MakerWorld 国际站 `https://makerworld.com/` 或中国站 `https://makerworld.com.cn/`。
+- 打印完成后锁存完整显示快照，跨 Ulanzi Studio 重启保留；下一次任务开始、锁存到期或单击刷新时解除。
 - 离线时不把旧进度冒充实时数据，改为显示离线与最后成功更新时间。
 
 ## 3. 自动发现与连接契约
@@ -75,6 +76,7 @@ subscribe: device/<serialNumber>/report
 | `printerIp` | 空 | IPv4 / 主机名，最长 253 | 打印机局域网地址 |
 | `serialNumber` | 空 | ASCII，最长 64 | MQTT topic 设备标识 |
 | `accessCode` | 空 | 字符串，最长 128 | LAN Access Code，明文本机保存 |
+| `makerworldSite` | `china` | `global` / `china` | 长按打开 MakerWorld 国际站或中国站 |
 | `theme` | `mint` | 公共主题 key | 键面主题 |
 | `frameSize` | `optimal` | `optimal` / `max` | 安全显示范围 |
 | `showFrame` | `true` | `true` / `false` | 是否显示公共边框 |
@@ -116,7 +118,7 @@ Inspector 不遮蔽 Access Code。所有设置由共享设置存储写入 `data/
 - 人工输入和扫描发现后的完整字段保存经浏览器桥带 `__settingsSubmit` 标记；只有这种明确提交可更新本地设置，历史未标记快照没有写权限。
 - 扫描结果由 action 主进程通过框架 `persistSettings` 直接保存，且空的发现字段不得覆盖已有人工值；Inspector 收到扫描结果只负责显示，不得再次提交。这样宿主重放历史扫描结果时不会产生二次写盘。
 - 打印进度必须直接复用 ChatGPT Usage 的共享 `renderMeterRow`：主题面板底槽、`rx=3`、30% 透明度的完成色填充，以及数字和 `%` 的分级排版；不得为 Bambu Action 另画私有进度条。
-- 下方用 25px 字号左右分列 `T <已用时间>` 和 `R <剩余时间>`，不显示“用时 / 余时”汉字。
+- 下方用 28px 字号左右分列 `T <已用时间>` 和 `R <剩余时间>`，不显示“用时 / 余时”汉字；其他状态的第三行详情不低于 20px。
 - `PREPARING` 主区域显示细分阶段；`PAUSED`、`FAILED`、`OFFLINE`、`INCOMPATIBLE` 显示明确中文状态。
 - 离线隐藏旧进度，底部显示最后成功更新时间。
 - 完成锁存显示 `已完成`、100% 进度、已用时间与完成时快照；不显示会误导的剩余时间。快照保留 3 分钟，到期后自动清除并主动请求一次当前状态；用户也可随时单击立即清除并刷新。
@@ -129,7 +131,9 @@ Inspector 不遮蔽 Access Code。所有设置由共享设置存储写入 `data/
 | --- | --- |
 | `createState` | 水合版本化完成快照，初始化连接与状态镜像 |
 | `onReady` | 配置不完整时自动扫描；配置完整且尚无客户端时连接 MQTT，重复恢复现有实例不得重连 |
-| `onRun` | 单击清除完成锁存并立即请求当前状态；连接不可用时重新连接 |
+| `onRun` | 单击显示刷新反馈、清除完成锁存并立即请求当前状态；连接不可用时重新连接 |
+| `onDoublePress` | 通过系统应用启动器打开 Bambu Studio |
+| `onLongPress` | 按 `makerworldSite` 打开对应 MakerWorld 站点 |
 | `onSettingsChanged` | 连接字段变化时断开旧连接并连接新目标 |
 | `onParamFromPlugin` | 处理重新扫描控制命令并回推扫描结果/诊断 |
 | `onDispose` | 关闭 MQTT/UDP socket、清理实例定时器并落盘完成快照 |

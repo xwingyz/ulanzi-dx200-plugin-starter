@@ -23,8 +23,8 @@
       "Tooltip": "从 Codex CLI 显示 Codex 用量额度与重置倒计时。"
     },
     {
-      "Name": "拓竹 P2S 状态",
-      "Tooltip": "显示单台 Bambu Lab P2S 的实时状态、进度、已用与剩余时间。"
+      "Name": "Bambu 3D Printer Status",
+      "Tooltip": "显示单台 Bambu Lab 3D 打印机的实时状态、进度、已用与剩余时间。"
     },
     {
       "Name": "群晖 NAS 状态",
@@ -41,7 +41,7 @@
   ],
   "Localization": {
     "Lex Utility": "Lex Utility",
-    "Bambu P2S Status": "拓竹 P2S 状态",
+    "Bambu 3D Printer Status": "Bambu 3D Printer Status",
     "Synology NAS Status": "群晖 NAS 状态",
     "Title": "标题",
     "Subtitle": "副标题",
@@ -254,6 +254,10 @@
     "Serial number": "序列号",
     "Printer Access Code": "打印机访问码",
     "Stored as plain text in this local action setting. The plugin never writes it to logs or the key display.": "以明文保存在本机此 action 设置中。插件不会将其写入日志或按键画面。",
+    "MakerWorld site": "MakerWorld 站点",
+    "China (makerworld.com.cn)": "中国站（makerworld.com.cn）",
+    "Global (makerworld.com)": "国际站（makerworld.com）",
+    "Long press opens the selected MakerWorld site.": "长按打开所选 MakerWorld 站点。",
     "Scan and autofill": "扫描并自动填充",
     "Incomplete settings are discovered and saved automatically. You can rescan at any time.": "将自动发现并保存缺失设置，也可随时重新扫描。",
     "Reading Bambu Studio settings and scanning the local network…": "正在读取 Bambu Studio 设置并扫描局域网……",

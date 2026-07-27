@@ -1,4 +1,4 @@
-const BAMBUSTATUS_FIELDS = withLanguageField(['printerName', 'printerIp', 'serialNumber', 'accessCode', 'theme', 'frameSize', 'showFrame']);
+const BAMBUSTATUS_FIELDS = withLanguageField(['printerName', 'printerIp', 'serialNumber', 'accessCode', 'makerworldSite', 'theme', 'frameSize', 'showFrame']);
 const BAMBUSTATUS_DISCOVERY_FIELDS = ['printerName', 'printerIp', 'serialNumber', 'accessCode'];
 const BAMBUSTATUS_SCAN_PARAM = '__bambustatusScan';
 const BAMBUSTATUS_SCAN_RESULT_PARAM = '__bambustatusDiscovery';

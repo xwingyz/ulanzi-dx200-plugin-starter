@@ -145,10 +145,39 @@ test('bambustatus keeps an expired completion clear until the next task starts',
   assert.equal(instance.suppressFinishedUntilNextTask, false);
 });
 
-test('bambustatus uses a single click refresh and has no long-press action', () => {
+test('bambustatus keeps refresh, app launch and MakerWorld on the shared gesture hooks', () => {
   const config = testing.ACTION_CONFIGS.bambustatus;
   assert.equal(typeof config.onRun, 'function');
-  assert.equal(config.onLongPress, undefined);
+  assert.equal(typeof config.onDoublePress, 'function');
+  assert.equal(typeof config.onLongPress, 'function');
+  assert.equal(config.defaults.makerworldSite, 'china');
+  assert.equal(config.normalizeSettings({ makerworldSite: 'global' }).makerworldSite, 'global');
+  assert.equal(config.normalizeSettings({ makerworldSite: 'invalid' }).makerworldSite, 'china');
+});
+
+test('bambustatus launches Bambu Studio and the configured MakerWorld site through the OS', async () => {
+  const calls = [];
+  const execFile = (command, args, options, callback) => {
+    calls.push({ command, args, options });
+    callback(null);
+  };
+  assert.equal(
+    await testing.bambuOpenBambuStudio({ platform: 'darwin', execFile }),
+    'BambuStudio',
+  );
+  assert.equal(
+    await testing.bambuOpenMakerWorld('global', { platform: 'darwin', execFile }),
+    'https://makerworld.com/',
+  );
+  assert.equal(
+    await testing.bambuOpenMakerWorld('china', { platform: 'win32', execFile }),
+    'https://makerworld.com.cn/',
+  );
+  assert.deepEqual(calls.map(({ command, args }) => [command, args]), [
+    ['/usr/bin/open', ['-a', 'BambuStudio']],
+    ['/usr/bin/open', ['https://makerworld.com/']],
+    ['rundll32.exe', ['url.dll,FileProtocolHandler', 'https://makerworld.com.cn/']],
+  ]);
 });
 
 test('bambustatus header renders only the configured printer name', () => {
@@ -166,6 +195,25 @@ test('bambustatus header renders only the configured printer name', () => {
   const svg = Buffer.from(config.render(instance).split(',')[1], 'base64').toString('utf8');
   assert.match(svg, />书房打印机<\/text>/);
   assert.doesNotMatch(svg, />P2S<\/text>/);
+  testing.dropPersistedState(context);
+});
+
+test('bambustatus renders manual refresh as centered dots without highlighting the brand mark', () => {
+  const config = testing.ACTION_CONFIGS.bambustatus;
+  const context = 'com.ulanzi.ulanzistudio.lexutility.bambustatus___refresh-feedback';
+  const instance = {
+    context,
+    active: false,
+    settings: { ...config.defaults },
+    ...config.createState({ context }),
+    connectionState: 'ONLINE',
+    liveStatus: 'IDLE',
+    manualRefreshing: true,
+  };
+  const svg = Buffer.from(config.render(instance).split(',')[1], 'base64').toString('utf8');
+  assert.match(svg, /data-manual-refresh-feedback="active"[^>]*>\.\.\.<\/text>/);
+  assert.doesNotMatch(svg, /<circle[^>]+cx="62" cy="65"/);
+  assert.match(svg, new RegExp(`<path d="[^"]+" fill="#00AE42"`));
   testing.dropPersistedState(context);
 });
 
@@ -189,7 +237,7 @@ test('bambustatus running layout reuses the ChatGPT meter style with larger T an
   // 字号来自共享的 renderMeterRow：数字随行高自适应，单位固定 15px。
   // 共享原语调整时这里会一起变——这是预期的统一，不是回归。
   assert.match(svg, /<tspan font-size="30\.2">68<\/tspan><tspan font-size="15\.0">%<\/tspan>/);
-  assert.match(svg, /font-size="25" font-weight="800">T 1h24<\/text>/);
-  assert.match(svg, /font-size="25" font-weight="800">R 36m<\/text>/);
+  assert.match(svg, /font-size="28" font-weight="800">T 1h24<\/text>/);
+  assert.match(svg, /font-size="28" font-weight="800">R 36m<\/text>/);
   testing.dropPersistedState(context);
 });

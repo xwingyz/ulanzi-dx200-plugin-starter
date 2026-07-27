@@ -93,8 +93,8 @@
       "SupportedInMultiActions": false
     },
     {
-      "Name": "Bambu P2S Status",
-      "Tooltip": "Show live status, progress, elapsed time and remaining time for one Bambu Lab P2S.",
+      "Name": "Bambu 3D Printer Status",
+      "Tooltip": "Show live status, progress, elapsed time and remaining time for one Bambu Lab 3D printer.",
       "Icon": "assets/icons/actionBambustatus.svg",
       "PropertyInspectorPath": "property-inspector/bambustatus.html",
       "UUID": "com.ulanzi.ulanzistudio.lexutility.bambustatus",

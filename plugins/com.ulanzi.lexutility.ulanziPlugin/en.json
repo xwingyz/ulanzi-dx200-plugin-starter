@@ -23,8 +23,8 @@
       "Tooltip": "Show Codex usage limits and reset countdowns from the Codex CLI."
     },
     {
-      "Name": "Bambu P2S Status",
-      "Tooltip": "Show live status, progress, elapsed time and remaining time for one Bambu Lab P2S."
+      "Name": "Bambu 3D Printer Status",
+      "Tooltip": "Show live status, progress, elapsed time and remaining time for one Bambu Lab 3D printer."
     },
     {
       "Name": "Synology NAS Status",
@@ -41,7 +41,7 @@
   ],
   "Localization": {
     "Lex Utility": "Lex Utility",
-    "Bambu P2S Status": "Bambu P2S Status",
+    "Bambu 3D Printer Status": "Bambu 3D Printer Status",
     "Synology NAS Status": "Synology NAS Status",
     "Title": "Title",
     "Subtitle": "Subtitle",
@@ -254,6 +254,10 @@
     "Serial number": "Serial number",
     "Printer Access Code": "Printer Access Code",
     "Stored as plain text in this local action setting. The plugin never writes it to logs or the key display.": "Stored as plain text in this local action setting. The plugin never writes it to logs or the key display.",
+    "MakerWorld site": "MakerWorld site",
+    "China (makerworld.com.cn)": "China (makerworld.com.cn)",
+    "Global (makerworld.com)": "Global (makerworld.com)",
+    "Long press opens the selected MakerWorld site.": "Long press opens the selected MakerWorld site.",
     "Scan and autofill": "Scan and autofill",
     "Incomplete settings are discovered and saved automatically. You can rescan at any time.": "Incomplete settings are discovered and saved automatically. You can rescan at any time.",
     "Reading Bambu Studio settings and scanning the local network…": "Reading Bambu Studio settings and scanning the local network…",
