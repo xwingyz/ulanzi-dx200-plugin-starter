@@ -7,6 +7,7 @@ const {
   ACTION_CONFIGS,
   chooseSpeedtestServer,
   handleSpeedtestDoublePress,
+  handleSpeedtestRun,
   hydrateSpeedtestState,
   isWithinActiveWindow,
   parseSpeedtestResult,
@@ -18,6 +19,8 @@ const {
   serializeSpeedtestState,
   speedChart,
   speedtestCandidates,
+  speedtestNextActiveWindowStart,
+  speedtestNextDueAt,
 } = __testing;
 
 const ICON_NOW = Date.UTC(2026, 6, 18, 12);
@@ -236,6 +239,39 @@ test('active windows support normal and cross-midnight schedules', () => {
   assert.equal(isWithinActiveWindow({ activeAllDay: 'false', activeStart: '22:00', activeEnd: '06:00' }, at(23)), true);
   assert.equal(isWithinActiveWindow({ activeAllDay: 'false', activeStart: '22:00', activeEnd: '06:00' }, at(4)), true);
   assert.equal(isWithinActiveWindow({ activeAllDay: 'false', activeStart: '22:00', activeEnd: '06:00' }, at(12)), false);
+});
+
+test('next automatic due time is clamped to the next active window when needed', () => {
+  const at = (day, hour, minute = 0) => new Date(2026, 6, day, hour, minute).getTime();
+  const daytime = { activeAllDay: 'false', activeStart: '08:00', activeEnd: '23:00' };
+  const overnight = { activeAllDay: 'false', activeStart: '08:00', activeEnd: '01:00' };
+
+  assert.equal(speedtestNextActiveWindowStart(daytime, at(18, 3)), at(18, 8));
+  assert.equal(speedtestNextActiveWindowStart(daytime, at(18, 23)), at(19, 8));
+  assert.equal(speedtestNextActiveWindowStart(overnight, at(18, 3)), at(18, 8));
+
+  assert.equal(speedtestNextDueAt(daytime, at(18, 22, 45), 30 * 60_000), at(19, 8));
+  assert.equal(speedtestNextDueAt(overnight, at(18, 0, 45), 30 * 60_000), at(18, 8));
+  assert.equal(speedtestNextDueAt(overnight, at(18, 23), 30 * 60_000), at(18, 23, 30));
+  assert.equal(speedtestNextDueAt({ activeAllDay: 'true' }, at(18, 23), 30 * 60_000), at(18, 23, 30));
+});
+
+test('manual key press runs once outside the automatic active window', async () => {
+  const calls = [];
+  const instance = {
+    phase: 'idle',
+    settings: { activeAllDay: 'false', activeStart: '08:00', activeEnd: '09:00' },
+  };
+
+  const result = await handleSpeedtestRun(instance, {
+    request: async (target, options) => {
+      calls.push({ target, options });
+      return 'measured';
+    },
+  });
+
+  assert.equal(result, 'measured');
+  assert.deepEqual(calls, [{ target: instance, options: { source: 'manual' } }]);
 });
 
 test('double press pauses automatic tests, cancels active work, and resumes scheduling', () => {

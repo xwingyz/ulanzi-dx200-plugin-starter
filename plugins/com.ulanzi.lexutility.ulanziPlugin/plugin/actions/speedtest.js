@@ -160,14 +160,30 @@ function isWithinActiveWindow(settings, now = Date.now()) {
   return start < end ? minute >= start && minute < end : minute >= start || minute < end;
 }
 
-function nextActiveWindowStart(settings, now = Date.now()) {
+function speedtestNextActiveWindowStart(settings, now = Date.now()) {
   if (isWithinActiveWindow(settings, now)) {
     return now;
   }
   const start = parseClockMinutes(settings?.activeStart, '08:00');
   const date = new Date(now);
-  const candidate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), Math.floor(start / 60), start % 60).getTime();
-  return candidate > now ? candidate : candidate + 24 * 60 * 60 * 1000;
+  const candidate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    Math.floor(start / 60),
+    start % 60,
+  );
+  if (candidate.getTime() <= now) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+  return candidate.getTime();
+}
+
+function speedtestNextDueAt(settings, now, delayMs) {
+  const candidate = Number(now) + Math.max(0, Number(delayMs) || 0);
+  return isWithinActiveWindow(settings, candidate)
+    ? candidate
+    : speedtestNextActiveWindowStart(settings, candidate);
 }
 
 function speedtestCandidates(settings, state) {
@@ -477,19 +493,28 @@ function scheduleNextSpeedtest(instance, options = {}) {
   }
   const now = Date.now();
   if (options.settingsChanged || !Number(instance.nextDueAt)) {
-    instance.nextDueAt = now + intervalMs;
+    instance.nextDueAt = speedtestNextDueAt(instance.settings, now, intervalMs);
+  } else {
+    const candidate = Math.max(now, Number(instance.nextDueAt));
+    instance.nextDueAt = isWithinActiveWindow(instance.settings, candidate)
+      ? candidate
+      : speedtestNextActiveWindowStart(instance.settings, candidate);
   }
-  const dueAt = Math.max(now, Number(instance.nextDueAt));
+  const dueAt = instance.nextDueAt;
   setInstanceTimeout(instance, 'speedtestSchedule', () => {
     const firedAt = Date.now();
     if (firedAt - dueAt > 5000) {
-      instance.nextDueAt = firedAt + 30_000 + Math.floor(Math.random() * 60_001);
+      instance.nextDueAt = speedtestNextDueAt(
+        instance.settings,
+        firedAt,
+        30_000 + Math.floor(Math.random() * 60_001),
+      );
       flushSpeedtestState(instance);
       scheduleNextSpeedtest(instance);
       return;
     }
     if (!isWithinActiveWindow(instance.settings)) {
-      instance.nextDueAt = nextActiveWindowStart(instance.settings);
+      instance.nextDueAt = speedtestNextActiveWindowStart(instance.settings);
       flushSpeedtestState(instance);
       scheduleNextSpeedtest(instance);
       return;
@@ -518,7 +543,11 @@ function initializeSpeedtestInstance(instance) {
   const intervalMs = speedtestIntervalMs(instance.settings);
   const now = Date.now();
   if (intervalMs && !instance.autoPaused && (!instance.nextDueAt || instance.nextDueAt <= now)) {
-    instance.nextDueAt = now + 30_000 + Math.floor(Math.random() * 60_001);
+    instance.nextDueAt = speedtestNextDueAt(
+      instance.settings,
+      now,
+      30_000 + Math.floor(Math.random() * 60_001),
+    );
   }
   if (intervalMs && !instance.autoPaused) scheduleNextSpeedtest(instance);
   scheduleSpeedtestClock(instance);
@@ -550,7 +579,9 @@ function requestSpeedtest(instance, options = {}) {
       instance.phase = 'idle';
       instance.errorCode = '';
       instance.retryCount = 0;
-      instance.nextDueAt = speedtestIntervalMs(instance.settings) ? Date.now() + speedtestIntervalMs(instance.settings) : 0;
+      instance.nextDueAt = speedtestIntervalMs(instance.settings)
+        ? speedtestNextDueAt(instance.settings, Date.now(), speedtestIntervalMs(instance.settings))
+        : 0;
       flushSpeedtestState(instance);
       scheduleNextSpeedtest(instance);
       sendSpeedtestRuntime(instance);
@@ -572,7 +603,9 @@ function requestSpeedtest(instance, options = {}) {
         setInstanceTimeout(instance, 'speedtestRetry', () => requestSpeedtest(instance, { source: 'retry' }), SPEEDTEST_RETRY_MS);
       } else {
         instance.retryCount = 0;
-        instance.nextDueAt = speedtestIntervalMs(instance.settings) ? Date.now() + speedtestIntervalMs(instance.settings) : 0;
+        instance.nextDueAt = speedtestIntervalMs(instance.settings)
+          ? speedtestNextDueAt(instance.settings, Date.now(), speedtestIntervalMs(instance.settings))
+          : 0;
         scheduleNextSpeedtest(instance);
       }
       return { errorCode };
@@ -626,6 +659,18 @@ function handleSpeedtestDoublePress(instance, options = {}) {
   }
   sendRuntime(instance);
   render(instance);
+}
+
+function handleSpeedtestRun(instance, options = {}) {
+  const cancelTask = options.cancelTask ?? ((target) => exclusiveTasks.cancel(target, SPEEDTEST_RESOURCE));
+  const request = options.request ?? requestSpeedtest;
+  if (['queued', 'running', 'discovering'].includes(instance.phase)) {
+    cancelTask(instance);
+    return Promise.resolve();
+  }
+  // 活动窗口只约束自动调度。实体按键和 Inspector 的立即测速都属于
+  // 用户明确发起的手动任务，任何时段都直接执行一次。
+  return request(instance, { source: 'manual' });
 }
 
 function openSpeedtestWebsite(options = {}) {
@@ -868,13 +913,7 @@ const config = {
       retryCount: 0,
       ...hydrateSpeedtestState(readPersistedState(instance.context)),
     }),
-    onRun: (instance) => {
-      if (['queued', 'running', 'discovering'].includes(instance.phase)) {
-        exclusiveTasks.cancel(instance, SPEEDTEST_RESOURCE);
-        return Promise.resolve();
-      }
-      return requestSpeedtest(instance, { source: 'manual' });
-    },
+    onRun: (instance) => handleSpeedtestRun(instance),
     onDoublePress: (instance) => handleSpeedtestDoublePress(instance),
     onLongPress: () => openSpeedtestWebsite(),
     onReady: (instance) => initializeSpeedtestInstance(instance),
@@ -902,6 +941,7 @@ const config = {
     testing: {
       chooseSpeedtestServer,
       handleSpeedtestDoublePress,
+      handleSpeedtestRun,
       hydrateSpeedtestState,
       isWithinActiveWindow,
       mapSpeedtestDirectoryServers,
@@ -913,6 +953,8 @@ const config = {
       serializeSpeedtestState,
       speedChart,
       speedtestCandidates,
+      speedtestNextActiveWindowStart,
+      speedtestNextDueAt,
     },
   };
 }
