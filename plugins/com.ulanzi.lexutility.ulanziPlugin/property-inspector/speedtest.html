@@ -57,12 +57,14 @@
       .danger { color: #fca5a5; }
       .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
       .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .schedule-group { display: grid; gap: 10px; margin: 10px 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(96, 165, 250, 0.05); }
+      .schedule-group > strong { font-size: 12px; color: var(--text); }
     </style>
   </head>
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1 data-localize="Network Speed">Network Speed</h1>
+        <h1 data-localize="Network Speed Test">Network Speed Test</h1>
         <form id="property-inspector">
           <div id="runtime" class="runtime" data-localize="Waiting for plugin status…">Waiting for plugin status…</div>
 
@@ -86,15 +88,26 @@
               </select>
             </div>
           </div>
-          <div class="grid">
-            <div class="field">
-              <label for="activeStart" data-localize="Start">Start</label>
-              <input id="activeStart" name="activeStart" type="time" value="08:00">
+          <div class="schedule-group">
+            <strong data-localize="Automatic test period">Automatic test period</strong>
+            <label class="toggle" for="activeAllDay">
+              <div>
+                <strong data-localize="Active all day">Active all day</strong>
+                <span data-localize="Ignore the automatic test period and run at any time">Ignore the automatic test period and run at any time</span>
+              </div>
+              <input id="activeAllDay" name="activeAllDay" type="checkbox">
+            </label>
+            <div class="grid">
+              <div class="field">
+                <label for="activeStart" data-localize="Automatic test start">Automatic test start</label>
+                <input id="activeStart" name="activeStart" type="time" value="08:00">
+              </div>
+              <div class="field">
+                <label for="activeEnd" data-localize="Automatic test end">Automatic test end</label>
+                <input id="activeEnd" name="activeEnd" type="time" value="01:00">
+              </div>
             </div>
-            <div class="field">
-              <label for="activeEnd" data-localize="End">End</label>
-              <input id="activeEnd" name="activeEnd" type="time" value="23:00">
-            </div>
+            <div class="hint" data-localize="When the end is earlier than the start, it is treated as the next day.">When the end is earlier than the start, it is treated as the next day.</div>
           </div>
           <div class="field">
             <label for="timeoutSec" data-localize="Single-test timeout">Single-test timeout</label>
@@ -128,13 +141,6 @@
             </div>
           </div>
           <div class="toggle-row">
-            <label class="toggle" for="activeAllDay">
-              <div>
-                <strong data-localize="Active all day">Active all day</strong>
-                <span data-localize="Ignore the schedule and run automatic tests at any time">Ignore the schedule and run automatic tests at any time</span>
-              </div>
-              <input id="activeAllDay" name="activeAllDay" type="checkbox">
-            </label>
             <label class="toggle" for="geoIpEnabled">
               <div>
                 <strong data-localize="IP location check">IP location check</strong>
@@ -148,7 +154,7 @@
           <div class="field">
             <label for="cliPath" data-localize="Ookla CLI path (leave blank for auto-detection)">Ookla CLI path (leave blank for auto-detection)</label>
             <input id="cliPath" name="cliPath" placeholder="/opt/homebrew/bin/speedtest">
-            <div class="hint" data-localize="The plugin does not download the CLI or accept the Ookla terms for you.">The plugin does not download the CLI or accept the Ookla terms for you.</div>
+            <div class="hint" data-localize="Download and install the official Ookla Speedtest CLI yourself, then accept its terms on first run.">Download and install the official Ookla Speedtest CLI yourself, then accept its terms on first run.</div>
           </div>
           <div class="action-row">
             <button class="ghost-btn" id="testSelected" type="button" data-localize="Test now">Test now</button>

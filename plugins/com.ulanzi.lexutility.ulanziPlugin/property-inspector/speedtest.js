@@ -118,8 +118,10 @@ function initSpeedtestInspector() {
       discovering: 'Discovering servers',
       error: 'Error',
     };
-    const status = runtime.cliFound
-      ? $UD.t(phaseLabels[runtime.phase] || runtime.phase || 'Idle')
+    const status = runtime.autoPaused
+      ? $UD.t('Automatic tests paused')
+      : runtime.cliFound
+        ? $UD.t(phaseLabels[runtime.phase] || runtime.phase || 'Idle')
       : $UD.t('Ookla CLI not found');
     const discovered = runtime.serverCacheUpdatedAt
       ? `<br>${$UD.t('Server catalog')} ${new Date(runtime.serverCacheUpdatedAt).toLocaleString()} · ${(runtime.servers || []).length} ${$UD.t('servers')}`

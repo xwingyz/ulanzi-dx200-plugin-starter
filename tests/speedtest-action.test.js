@@ -6,9 +6,11 @@ import { __testing } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/
 const {
   ACTION_CONFIGS,
   chooseSpeedtestServer,
+  handleSpeedtestDoublePress,
   hydrateSpeedtestState,
   isWithinActiveWindow,
   parseSpeedtestResult,
+  openSpeedtestWebsite,
   mapSpeedtestDirectoryServers,
   mergeSpeedtestGeo,
   needsSpeedtestDiscovery,
@@ -159,7 +161,7 @@ test('speedtest action defaults match the confirmed product contract', () => {
   assert.equal(defaults.intervalMin, '30');
   assert.equal(defaults.activeAllDay, 'false');
   assert.equal(defaults.activeStart, '08:00');
-  assert.equal(defaults.activeEnd, '23:00');
+  assert.equal(defaults.activeEnd, '01:00');
   assert.equal(defaults.timeoutSec, '180');
   assert.equal(defaults.candidateServers, '[]');
   assert.equal(defaults.chartType, 'line');
@@ -215,12 +217,14 @@ test('speedtest state keeps seven days and at most 672 records', () => {
   }));
   history.unshift({ at: now - 8 * 24 * 60 * 60 * 1000, ok: true });
 
-  const serialized = serializeSpeedtestState({ history, lastCompletedAt: now }, now);
+  const serialized = serializeSpeedtestState({ history, lastCompletedAt: now, autoPaused: true }, now);
   const hydrated = hydrateSpeedtestState(serialized, now);
 
+  assert.equal(serialized.version, 2);
   assert.equal(hydrated.history.length, 672);
   assert.ok(hydrated.history.every((entry) => entry.at >= now - 7 * 24 * 60 * 60 * 1000));
   assert.equal(hydrated.lastCompletedAt, now);
+  assert.equal(hydrated.autoPaused, true);
 });
 
 test('active windows support normal and cross-midnight schedules', () => {
@@ -232,6 +236,60 @@ test('active windows support normal and cross-midnight schedules', () => {
   assert.equal(isWithinActiveWindow({ activeAllDay: 'false', activeStart: '22:00', activeEnd: '06:00' }, at(23)), true);
   assert.equal(isWithinActiveWindow({ activeAllDay: 'false', activeStart: '22:00', activeEnd: '06:00' }, at(4)), true);
   assert.equal(isWithinActiveWindow({ activeAllDay: 'false', activeStart: '22:00', activeEnd: '06:00' }, at(12)), false);
+});
+
+test('double press pauses automatic tests, cancels active work, and resumes scheduling', () => {
+  const calls = [];
+  const instance = {
+    autoPaused: false,
+    phase: 'running',
+    nextDueAt: 123,
+  };
+  const options = {
+    cancelTask: () => { calls.push('cancel'); },
+    clearTimer: (_instance, slot) => { calls.push(`clear:${slot}`); },
+    flush: () => { calls.push('flush'); },
+    render: () => { calls.push('render'); },
+    sendRuntime: () => { calls.push('runtime'); },
+    schedule: () => { calls.push('schedule'); },
+  };
+
+  handleSpeedtestDoublePress(instance, options);
+  assert.equal(instance.autoPaused, true);
+  assert.equal(instance.nextDueAt, 0);
+  assert.deepEqual(calls, [
+    'clear:speedtestSchedule',
+    'clear:speedtestRetry',
+    'cancel',
+    'flush',
+    'runtime',
+    'render',
+  ]);
+
+  calls.length = 0;
+  instance.phase = 'idle';
+  handleSpeedtestDoublePress(instance, options);
+  assert.equal(instance.autoPaused, false);
+  assert.deepEqual(calls, ['schedule', 'runtime', 'render']);
+});
+
+test('long press opens the Speedtest website with the platform launcher', async () => {
+  const invocations = [];
+  const execFile = (command, args, options, callback) => {
+    invocations.push({ command, args, options });
+    callback(null);
+  };
+
+  assert.equal(await openSpeedtestWebsite({ platform: 'darwin', execFile }), 'https://www.speedtest.net/');
+  assert.deepEqual(invocations[0], {
+    command: '/usr/bin/open',
+    args: ['https://www.speedtest.net/'],
+    options: { windowsHide: true },
+  });
+
+  invocations.length = 0;
+  await openSpeedtestWebsite({ platform: 'win32', execFile });
+  assert.deepEqual(invocations[0].args, ['url.dll,FileProtocolHandler', 'https://www.speedtest.net/']);
 });
 
 test('checked nodes replace the full cache as the candidate pool', () => {

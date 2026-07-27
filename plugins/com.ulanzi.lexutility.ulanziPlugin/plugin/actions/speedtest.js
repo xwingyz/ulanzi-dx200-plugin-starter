@@ -26,7 +26,7 @@ export function createSpeedtestAction(runtime) {
     writePersistedState,
   } = runtime;
 
-const SPEEDTEST_STATE_VERSION = 1;
+const SPEEDTEST_STATE_VERSION = 2;
 const SPEEDTEST_HISTORY_MS = 7 * 24 * 60 * 60 * 1000;
 const SPEEDTEST_HISTORY_LIMIT = 672;
 // 图表窗口：只画最近 12 次。24 次在 170 宽里每根柱子不到 7 宽，
@@ -40,6 +40,7 @@ const SPEEDTEST_DISCOVERY_RETRY_MS = 10 * 60 * 1000;
 // 相对时间标签的刷新节拍：一分钟一次，正好是标签的最小刻度。
 const SPEEDTEST_CLOCK_MS = 60 * 1000;
 const SPEEDTEST_DIRECTORY_URL = 'https://www.speedtest.net/api/js/servers';
+const SPEEDTEST_WEBSITE_URL = 'https://www.speedtest.net/';
 const SPEEDTEST_INTERVALS = ['15', '30', '60', 'manual'];
 const SPEEDTEST_TIMEOUTS = ['120', '180', '240', '300'];
 // any 表示不筛选：候选池直接用全部节点，适合跨境网络或不确定该测哪边时。
@@ -102,6 +103,7 @@ function serializeSpeedtestState(instance, now = Date.now()) {
     lastResult: latest,
     lastCompletedAt: Number(instance?.lastCompletedAt || 0),
     nextDueAt: Number(instance?.nextDueAt || 0),
+    autoPaused: instance?.autoPaused === true,
     dailyServerId: String(instance?.dailyServerId || ''),
     dailyServerDate: String(instance?.dailyServerDate || ''),
     serverCache: JSON.parse(sanitizeServerList(instance?.serverCache || [])),
@@ -119,6 +121,7 @@ function hydrateSpeedtestState(payload = {}, now = Date.now()) {
     lastResult: clean.lastResult,
     lastCompletedAt: clean.lastCompletedAt,
     nextDueAt: clean.nextDueAt,
+    autoPaused: clean.autoPaused,
     dailyServerId: clean.dailyServerId,
     dailyServerDate: clean.dailyServerDate,
     serverCache: clean.serverCache,
@@ -460,6 +463,12 @@ function speedtestIntervalMs(settings) {
 
 function scheduleNextSpeedtest(instance, options = {}) {
   clearInstanceTimeout(instance, 'speedtestSchedule');
+  if (instance.autoPaused) {
+    const hadNextDue = Number(instance.nextDueAt || 0) !== 0;
+    instance.nextDueAt = 0;
+    if (options.settingsChanged || hadNextDue) flushSpeedtestState(instance);
+    return;
+  }
   const intervalMs = speedtestIntervalMs(instance.settings);
   if (!intervalMs) {
     instance.nextDueAt = 0;
@@ -508,10 +517,10 @@ function initializeSpeedtestInstance(instance) {
   instance.speedtestInitialized = true;
   const intervalMs = speedtestIntervalMs(instance.settings);
   const now = Date.now();
-  if (intervalMs && (!instance.nextDueAt || instance.nextDueAt <= now)) {
+  if (intervalMs && !instance.autoPaused && (!instance.nextDueAt || instance.nextDueAt <= now)) {
     instance.nextDueAt = now + 30_000 + Math.floor(Math.random() * 60_001);
   }
-  if (intervalMs) scheduleNextSpeedtest(instance);
+  if (intervalMs && !instance.autoPaused) scheduleNextSpeedtest(instance);
   scheduleSpeedtestClock(instance);
   sendSpeedtestRuntime(instance);
   return ensureSpeedtestDiscovery(instance);
@@ -595,6 +604,49 @@ function requestSpeedtest(instance, options = {}) {
   return promise;
 }
 
+function handleSpeedtestDoublePress(instance, options = {}) {
+  const cancelTask = options.cancelTask ?? ((target) => exclusiveTasks.cancel(target, SPEEDTEST_RESOURCE));
+  const clearTimer = options.clearTimer ?? clearInstanceTimeout;
+  const flush = options.flush ?? flushSpeedtestState;
+  const render = options.render ?? renderInstance;
+  const sendRuntime = options.sendRuntime ?? sendSpeedtestRuntime;
+  const schedule = options.schedule ?? scheduleNextSpeedtest;
+
+  instance.autoPaused = !instance.autoPaused;
+  if (instance.autoPaused) {
+    clearTimer(instance, 'speedtestSchedule');
+    clearTimer(instance, 'speedtestRetry');
+    instance.nextDueAt = 0;
+    if (['queued', 'running', 'discovering'].includes(instance.phase)) {
+      cancelTask(instance);
+    }
+    flush(instance);
+  } else {
+    schedule(instance, { settingsChanged: true });
+  }
+  sendRuntime(instance);
+  render(instance);
+}
+
+function openSpeedtestWebsite(options = {}) {
+  const run = options.execFile ?? execFile;
+  const platform = options.platform ?? process.platform;
+  const command = platform === 'darwin' ? '/usr/bin/open'
+    : platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
+  const args = platform === 'win32'
+    ? ['url.dll,FileProtocolHandler', SPEEDTEST_WEBSITE_URL]
+    : [SPEEDTEST_WEBSITE_URL];
+  return new Promise((resolve, reject) => {
+    run(command, args, { windowsHide: true }, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(SPEEDTEST_WEBSITE_URL);
+    });
+  });
+}
+
 function handleSpeedtestParam(instance, param = {}) {
   // 重新获取走 force：用户点了按钮就绕过退避，立刻重新拉一次。
   if (param.refreshServers === 'true') return ensureSpeedtestDiscovery(instance, { force: true });
@@ -624,6 +676,7 @@ function sendSpeedtestRuntime(instance) {
     serverCacheUpdatedAt: instance.serverCacheUpdatedAt || 0,
     cliFound: Boolean(resolveSpeedtestCli(instance.settings)),
     nextDueAt: instance.nextDueAt || 0,
+    autoPaused: instance.autoPaused === true,
   };
   sendParamFromPlugin({ ...instance.settings, speedtestRuntime: JSON.stringify(payload) }, instance.context);
 }
@@ -746,7 +799,8 @@ function renderSpeedtestIcon(instance, now = Date.now()) {
   const phaseLabel = instance.phase === 'queued' ? `${t('QUEUE', language)} ${Math.max(1, instance.queuePosition || 1)}`
     : instance.phase === 'running' ? t('TESTING', language)
       : instance.phase === 'discovering' ? t('NODES', language)
-        : instance.phase === 'error' ? t(instance.errorCode || 'ERROR', language) : '';
+        : instance.phase === 'error' ? t(instance.errorCode || 'ERROR', language)
+          : instance.autoPaused ? t('PAUSED', language) : '';
   const scopeKey = { any: 'GLOBAL', overseas: 'OVERSEAS' }[instance.settings.scope] || 'MAINLAND';
   const scope = t(scopeKey, language);
   const history = instance.history || [];
@@ -788,7 +842,7 @@ const config = {
       intervalMin: '30',
       activeAllDay: 'false',
       activeStart: '08:00',
-      activeEnd: '23:00',
+      activeEnd: '01:00',
       timeoutSec: '180',
       candidateServers: '[]',
       chartType: 'line',
@@ -821,6 +875,8 @@ const config = {
       }
       return requestSpeedtest(instance, { source: 'manual' });
     },
+    onDoublePress: (instance) => handleSpeedtestDoublePress(instance),
+    onLongPress: () => openSpeedtestWebsite(),
     onReady: (instance) => initializeSpeedtestInstance(instance),
     onSettingsChanged: (instance, previousSettings) => {
       const targetChanged = previousSettings.scope !== instance.settings.scope ||
@@ -845,12 +901,14 @@ const config = {
     config,
     testing: {
       chooseSpeedtestServer,
+      handleSpeedtestDoublePress,
       hydrateSpeedtestState,
       isWithinActiveWindow,
       mapSpeedtestDirectoryServers,
       mergeSpeedtestGeo,
       needsSpeedtestDiscovery,
       parseSpeedtestResult,
+      openSpeedtestWebsite,
       renderSpeedtestIcon,
       serializeSpeedtestState,
       speedChart,

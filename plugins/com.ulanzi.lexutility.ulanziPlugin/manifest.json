@@ -13,7 +13,7 @@
   "SupportedInMultiActions": false,
   "Actions": [
     {
-      "Name": "Network Speed",
+      "Name": "Network Speed Test",
       "Tooltip": "Test download and upload speed with an Ookla Speedtest server.",
       "Icon": "assets/icons/actionSpeedtest.svg",
       "PropertyInspectorPath": "property-inspector/speedtest.html",
