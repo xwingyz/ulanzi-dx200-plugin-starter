@@ -26,6 +26,30 @@ const LEX_ACTION_KEYS = [
   'systemstatus',
   'healthbreak',
 ];
+const LEX_ACTION_NAMES = {
+  en: [
+    'Network Speed Test',
+    'Web Latency Monitor',
+    'Pomowave',
+    'Claude Usage',
+    'ChatGPT Usage',
+    'Bambu 3D Printer Status',
+    'Synology NAS Status',
+    'System Status',
+    'MicroBreak',
+  ],
+  zh_CN: [
+    '网络测速',
+    '网站延迟监测',
+    '番茄钟',
+    'Claude 用量',
+    'ChatGPT 用量',
+    'Bambu 3D 打印机状态',
+    '群晖 NAS 状态',
+    '系统状态',
+    '休息一下',
+  ],
+};
 const LEX_DYNAMIC_LOCALIZATION_KEYS = [
   // Speed Test Inspector 运行阶段与范围。
   'Idle', 'Queued', 'Running', 'Discovering servers', 'Error',
@@ -57,7 +81,7 @@ const LEX_DYNAMIC_LOCALIZATION_KEYS = [
   'Authentication failed', 'Permission denied', 'API error',
   // System Status 动态生成的指标选项。
   'CPU usage', 'RAM usage', 'GPU usage', 'CPU temperature', 'Upload speed', 'Download speed',
-  // Health Break 运行计划。
+  // MicroBreak 运行计划。
   'Eyes', 'Look far', 'Blink', 'Neck and shoulders', 'Chin tuck', 'Turn left', 'Turn right',
   'Shoulder blades', 'Wrists', 'Open and close', 'Left wrist', 'Right wrist', 'Stand',
   'Stand up', 'Heel raises', 'Walk', 'Breathing', 'Inhale', 'Exhale', 'Pelvic floor',
@@ -128,6 +152,13 @@ for (const plugin of PLUGINS) {
         assert.ok(action.Name, `${label} Actions[${index}] missing Name`);
         assert.ok(action.Tooltip, `${label} Actions[${index}] missing Tooltip`);
       });
+      if (plugin.name === 'lex utility') {
+        assert.deepEqual(
+          doc.Actions.map((action) => action.Name),
+          LEX_ACTION_NAMES[label],
+          `${label} action names drifted from the product naming contract`,
+        );
+      }
     }
 
     // en 与 zh_CN 的 Localization key 集必须完全一致——缺 key 会在界面上漏出未翻译文案。
@@ -164,6 +195,14 @@ test('all Lex Utility action inspectors expose the shared language contract', ()
     assert.match(script, /withLanguageField\(/, `${actionKey}: uiLanguage is not collected`);
     assert.match(script, /bindLanguageSelection\(/, `${actionKey}: language changes are not persisted`);
     assert.match(script, /REQUEST_SETTINGS_PARAM/, `${actionKey}: panel does not request authoritative settings`);
+
+    const gestureNotes = [...html.matchAll(/<p class="pi-note gesture-note" data-localize=(["'])(.*?)\1>/g)];
+    assert.equal(gestureNotes.length, 1, `${actionKey}: expected exactly one gesture note`);
+    const gestureIndex = gestureNotes[0].index;
+    const firstDividerIndex = html.indexOf('<hr class="pi-divider">');
+    assert.ok(firstDividerIndex >= 0, `${actionKey}: missing common settings divider`);
+    assert.ok(gestureIndex < firstDividerIndex, `${actionKey}: gesture note must precede the first common settings divider`);
+    assert.match(gestureNotes[0][2], /^Single click:.* Double click:.* Long press:/, `${actionKey}: gesture note order is invalid`);
 
     for (const [, , rawKey] of html.matchAll(/data-localize=(["'])(.*?)\1/g)) {
       const key = rawKey.replaceAll('&amp;', '&');

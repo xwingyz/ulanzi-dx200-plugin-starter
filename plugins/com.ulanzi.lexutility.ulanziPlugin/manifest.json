@@ -141,7 +141,7 @@
       "SupportedInMultiActions": false
     },
     {
-      "Name": "Health Break",
+      "Name": "MicroBreak",
       "Tooltip": "Guide short eye, posture and movement breaks for long computer sessions.",
       "Icon": "assets/icons/actionHealthbreak.svg",
       "PropertyInspectorPath": "property-inspector/healthbreak.html",

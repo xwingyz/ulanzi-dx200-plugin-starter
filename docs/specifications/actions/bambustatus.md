@@ -1,7 +1,7 @@
 # Bambu 3D Printer Status 功能与技术规范
 
 状态：首版已实现，等待真实 P2S 状态订阅验收  
-最后代码核对：2026-07-26
+最后代码核对：2026-07-27
 action key：`bambustatus`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.bambustatus`
 
@@ -14,6 +14,7 @@ Bambu 3D Printer Status 是 Lex Utility 内的一键一机只读监控 action。
 四层实现：
 
 - manifest：`manifest.json` 的 `Bambu 3D Printer Status`。
+- 注册名称：英文 `Bambu 3D Printer Status`，简体中文 `Bambu 3D 打印机状态`。
 - 业务：`plugin/actions/bambustatus.js`。
 - Inspector：`property-inspector/bambustatus.html`、`bambustatus.js`。
 - 静态图标：`assets/icons/actionBambustatus.svg`。
@@ -181,3 +182,4 @@ suppressFinishedUntilNextTask: boolean
 - Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
 - 扫描、连接、打印阶段和设备状态按实例 `uiLanguage` 翻译；打印机名称、序列号、进度、温度和 MQTT 原始详情保持原始数据。
 - 业务层保存稳定的英文阶段标识，翻译只发生在 Inspector 和 render 边界；新增键由 `tests/i18n.test.js` 锁定覆盖。
+- 用户可见注册名称固定为英文 `Bambu 3D Printer Status`、简体中文 `Bambu 3D 打印机状态`。

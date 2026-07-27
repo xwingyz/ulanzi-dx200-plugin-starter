@@ -14,6 +14,7 @@ Network Speed Test 调用官方 Ookla Speedtest CLI 测量下载、上传和网�
 四层实现：
 
 - manifest：`manifest.json` 的 `Network Speed Test`。
+- 注册名称：英文 `Network Speed Test`，简体中文 `网络测速`。
 - 业务：`plugin/actions/speedtest.js`。
 - Inspector：`property-inspector/speedtest.html`、`speedtest.js`。
 - 静态图标：`assets/icons/actionSpeedtest.svg`。
@@ -156,3 +157,4 @@ CLI JSON 转换为：
 - Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
 - 测速阶段、节点模式、即时测速状态和键面运行态文案按实例 `uiLanguage` 翻译；简体中文界面的 `Mainland China`、`Overseas` 及键面 `MAINLAND`、`OVERSEAS` 保留英文。测速值、服务器名称、地区代码和外部错误详情保持原始数据。
 - `en.json` 与 `zh_CN.json` 的 action 名称/说明顺序必须与 manifest 一致，新增键由 `tests/i18n.test.js` 锁定覆盖。
+- 用户可见注册名称固定为英文 `Network Speed Test`、简体中文 `网络测速`。

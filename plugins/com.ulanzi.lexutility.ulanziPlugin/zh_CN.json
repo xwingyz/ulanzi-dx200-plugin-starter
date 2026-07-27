@@ -3,15 +3,15 @@
   "Description": "Ulanzi DX200 实用工具起步插件。",
   "Actions": [
     {
-      "Name": "Network Speed Test",
+      "Name": "网络测速",
       "Tooltip": "通过 Ookla Speedtest 服务器测试下载和上传速度。"
     },
     {
-      "Name": "Web 延迟监测",
+      "Name": "网站延迟监测",
       "Tooltip": "监测单个 HTTP/HTTPS URL 并实时显示响应延迟。"
     },
     {
-      "Name": "Pomowave",
+      "Name": "番茄钟",
       "Tooltip": "带声音提示和节奏休息的番茄钟。"
     },
     {
@@ -23,7 +23,7 @@
       "Tooltip": "从 Codex CLI 显示 Codex 用量额度与重置倒计时。"
     },
     {
-      "Name": "Bambu 3D Printer Status",
+      "Name": "Bambu 3D 打印机状态",
       "Tooltip": "显示单台 Bambu Lab 3D 打印机的实时状态、进度、已用与剩余时间。"
     },
     {
@@ -35,13 +35,13 @@
       "Tooltip": "实时显示最多三项 CPU、内存、GPU、温度、上传或下载指标。"
     },
     {
-      "Name": "健康休息",
+      "Name": "休息一下",
       "Tooltip": "在长时间用电脑时引导短暂的护眼、姿势与活动休息。"
     }
   ],
   "Localization": {
     "Lex Utility": "Lex Utility",
-    "Bambu 3D Printer Status": "Bambu 3D Printer Status",
+    "Bambu 3D Printer Status": "Bambu 3D 打印机状态",
     "Synology NAS Status": "群晖 NAS 状态",
     "Title": "标题",
     "Subtitle": "副标题",
@@ -58,7 +58,16 @@
     "Language": "语言",
     "Auto": "自动",
     "Theme": "主题",
-    "Network Speed Test": "Network Speed Test",
+    "Single click: start or cancel a manual speed test. Double click: pause or resume automatic speed tests. Long press: open Speedtest.net.": "单击：开始或取消一次手动测速。双击：暂停或恢复自动测速。长按：打开 Speedtest.net。",
+    "Single click: test immediately. Double click: pause or resume monitoring. Long press: open the monitored URL.": "单击：立即探测。双击：暂停或恢复监测。长按：打开当前监测网址。",
+    "Single click: start, pause, resume, or confirm the next phase. Double click: perform the single-click action twice. Long press: restart a full focus session or skip a pending break.": "单击：开始、暂停、继续或确认下一阶段。双击：连续执行两次单击功能。长按：重新开始一轮完整专注，或跳过等待中的休息。",
+    "Single click: refresh Claude usage. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the Claude usage page.": "单击：刷新 Claude 用量。双击：等同单击，第二次刷新受冷却限制。长按：打开 Claude 用量页面。",
+    "Single click: refresh Codex usage. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the configured usage page.": "单击：刷新 Codex 用量。双击：等同单击，第二次刷新受冷却限制。长按：打开已配置的用量页面。",
+    "Single click: refresh printer status. Double click: refresh once and open Bambu Studio. Long press: open the selected MakerWorld site.": "单击：刷新打印机状态。双击：刷新一次并打开 Bambu Studio。长按：打开所选 MakerWorld 站点。",
+    "Single click: refresh NAS status. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the DSM page on macOS.": "单击：刷新 NAS 状态。双击：等同单击，第二次刷新受冷却限制。长按：在 macOS 上打开 DSM 页面。",
+    "Single click: refresh system metrics. Double click: request two consecutive manual refreshes. Long press: not assigned.": "单击：刷新系统指标。双击：连续请求两次手动刷新。长按：未设置。",
+    "Single click: start, pause, or resume a break. Double click: perform the single-click action twice. Long press: skip a due reminder or cancel the current break.": "单击：开始、暂停或继续休息。双击：连续执行两次单击功能。长按：跳过到期提醒或取消当前休息。",
+    "Network Speed Test": "网络测速",
     "Overview & schedule": "概览与计划",
     "Each action instance independently selects any, mainland China, or overseas servers.": "每个 action 实例独立选择不限、Mainland China 或 Overseas 节点。",
     "Server region": "节点区域",
@@ -134,8 +143,8 @@
     "TIMEOUT": "超时",
     "NET": "网络",
     "now": "刚刚",
-    "Web Latency Monitor": "Web 延迟监测",
-    "Monitor one URL at a fixed interval. Press the key to test immediately.": "按固定间隔监测一个 URL。短按按键可立即测试。",
+    "Web Latency Monitor": "网站延迟监测",
+    "Monitor one URL at a fixed interval.": "按固定间隔监测一个 URL。",
     "Each action monitors one URL. Settings are saved to this key instance.": "每个 action 监测一个 URL，设置按键实例独立保存。",
     "URL": "URL",
     "Interval (s)": "间隔（秒）",
@@ -152,8 +161,8 @@
     "SLOW": "偏高",
     "UP": "正常",
     "CHECK": "检测",
-    "Pomowave": "Pomowave",
-    "A Pomodoro timer for Lex Utility. Press to start or pause; hold to restart the current focus after an interruption.": "Lex Utility 番茄钟。短按开始或暂停，长按可在中断后重新开始当前专注。",
+    "Pomowave": "番茄钟",
+    "A Pomodoro timer for Lex Utility.": "Lex Utility 番茄钟。",
     "Focus (min)": "专注（分钟）",
     "Short break": "短休息",
     "Long break": "长休息",
@@ -353,7 +362,7 @@
     "Windows advanced sensors": "Windows 高级传感器",
     "Optional local LibreHardwareMonitor HTTP API. Only localhost and 127.0.0.1 are accepted.": "可选的本机 LibreHardwareMonitor HTTP API，仅接受 localhost 和 127.0.0.1。",
     "On macOS, GPU data comes from I/O Registry and CPU temperature appears when the system allows it. Windows can use LibreHardwareMonitor. Unavailable sensors show N/A, never 0.": "macOS 的 GPU 数据来自 I/O Registry，CPU 温度仅在系统允许时显示；Windows 可使用 LibreHardwareMonitor。不可用的传感器显示 N/A，不显示 0。",
-    "Choose one to three local metrics. Press to refresh immediately. All data is read locally.": "选择一至三个本机指标。短按可立即刷新，所有数据均在本机读取。",
+    "Choose one to three metrics. All data is read locally.": "选择一至三个指标，所有数据均在本机读取。",
     "CPU usage": "CPU 使用率",
     "RAM usage": "内存使用率",
     "GPU usage": "GPU 使用率",
@@ -362,7 +371,7 @@
     "Download speed": "下载速度",
     "SYSTEM": "系统",
     "WAIT": "等待",
-    "Health Break": "健康休息",
+    "MicroBreak": "休息一下",
     "Exercise groups (1–4, performed in this order)": "动作组（选择 1–4 项，按此顺序执行）",
     "Eyes · Look far and blink": "护眼 · 远眺与眨眼",
     "Neck and shoulders · Retract and turn": "颈肩 · 微收与转动",
@@ -392,7 +401,7 @@
     "Bonus today": "今日加练",
     "Goal streak": "连续达标",
     "No records yet": "暂无记录",
-    "Press to start or pause. Hold to skip a due reminder; hold during exercise to cancel. Completing the full guide counts once.": "短按开始或暂停；提醒到期时长按可跳过，练习中长按可取消。完整完成一次引导计为一次。",
+    "Completing the full guide counts once.": "完整完成一次引导计为一次。",
     "Later": "稍后",
     "Waiting": "等待",
     "Done": "完成",

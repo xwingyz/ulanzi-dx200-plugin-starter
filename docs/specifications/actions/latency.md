@@ -14,6 +14,7 @@ Web Latency Monitor 持续探测一个 HTTP/HTTPS URL，在 DX200 键面显示�
 四层实现：
 
 - manifest：`manifest.json` 的 `Web Latency Monitor`。
+- 注册名称：英文 `Web Latency Monitor`，简体中文 `网站延迟监测`。
 - 业务：`plugin/actions/latency.js`。
 - Inspector：`property-inspector/latency.html`、`latency.js`。
 - 静态图标：`assets/icons/actionLatency.svg`。
@@ -123,6 +124,6 @@ certExpiresAt
 ## 多语言契约
 
 - Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
-- action 的英文名称为 `Web Latency Monitor`，简体中文名称为“Web 延迟监测”，明确限定 HTTP/HTTPS Web 探测，不与 ICMP 或一般链路延迟混淆。
+- action 的英文名称为 `Web Latency Monitor`，简体中文名称为“网站延迟监测”，明确限定 HTTP/HTTPS 网站探测，不与 ICMP 或一般链路延迟混淆。
 - 暂停、等待、正常和异常等键面状态按实例 `uiLanguage` 翻译；目标地址、证书日期、延迟值和探测结果保持原始数据。
 - `en.json` 与 `zh_CN.json` 的 action 名称/说明顺序必须与 manifest 一致，新增键由 `tests/i18n.test.js` 锁定覆盖。

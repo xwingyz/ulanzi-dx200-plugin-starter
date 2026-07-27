@@ -1,21 +1,22 @@
-# Health Break 功能与技术规范
+# MicroBreak 功能与技术规范
 
 状态：已实现，持续维护
-最后代码核对：2026-07-26
+最后代码核对：2026-07-27
 action key：`healthbreak`
 UUID：`com.ulanzi.ulanzistudio.lexutility.healthbreak`
 
-**变更门槛：修改 Health Break 的业务模块、manifest、Inspector、图标、设置、状态、提示音、持久化、交互、渲染或测试契约前，必须先完整阅读本文件；修改完成后，必须在同一次任务中同步必要的功能和技术变化，并更新“最后代码核对”日期。涉及基座时还必须读写 `../base.md`。**
+**变更门槛：修改 MicroBreak 的业务模块、manifest、Inspector、图标、设置、状态、提示音、持久化、交互、渲染或测试契约前，必须先完整阅读本文件；修改完成后，必须在同一次任务中同步必要的功能和技术变化，并更新“最后代码核对”日期。涉及基座时还必须读写 `../base.md`。**
 
 ## 1. 功能定位
 
-Health Break 面向长期使用电脑的程序员、主播、影视编辑等人群，以短而频繁、无需器械、容易完成的微活动打断久坐与持续屏幕暴露。一个物理键位是一套独立健康方案；同一个 action 可以拖入多个键位，每个实例独立配置动作组、周期、每日目标、有效时段、声音和统计。
+MicroBreak 面向长期使用电脑的程序员、主播、影视编辑等人群，以短而频繁、无需器械、容易完成的微活动打断久坐与持续屏幕暴露。一个物理键位是一套独立健康方案；同一个 action 可以拖入多个键位，每个实例独立配置动作组、周期、每日目标、有效时段、声音和统计。
 
 本 action 只提供一般健康习惯提醒，不诊断疾病、不验证动作质量，也不替代医疗建议。统计中的“完成”只表示用户完整跟完一次引导。
 
 四层实现目标：
 
-- manifest：`manifest.json` 的 `Health Break`。
+- manifest：`manifest.json` 的 `MicroBreak`。
+- 注册名称：英文 `MicroBreak`，简体中文 `休息一下`。
 - 业务：`plugin/actions/healthbreak.js`。
 - Inspector：`property-inspector/healthbreak.html`、`healthbreak.js`。
 - 静态图标：`assets/icons/actionHealthbreak.svg`。
@@ -84,13 +85,13 @@ done -> running -> done                主动加练
 - `due` 短按：开始本轮；长按：跳过此次提醒，跳过不计达标并从完整周期重新计时。
 - `running` 短按：暂停；`paused` 短按：继续。
 - `running` / `paused` 长按：取消本轮，不计达标并从完整周期重新计时。
-- 非到期、非练习状态的长按不执行 Health Break 业务。
+- 非到期、非练习状态的长按不执行 MicroBreak 业务。
 - 尚未到期的主动练习完成后计入目标并重置周期；达标后的主动练习记为加练，不恢复自动提醒。
 - 最后一个动作结束后自动计为完成，不需要二次确认。
 
 ## 6. 跨实例协调与提醒
 
-- Health Break 全部实例同一时间只允许一套练习运行，避免计时和声音叠加。
+- MicroBreak 全部实例同一时间只允许一套练习运行，避免计时和声音叠加。
 - 多个实例到期时，最早到期者进入 `due` 并闪烁，其余为静默 `queued`。
 - 当前练习完成、跳过或取消后保留 2 分钟提醒缓冲，再激活最早到期实例。
 - 当前练习中短按另一实例时，目标实例进入手动优先队列；当前练习结束后自动开始，不打断当前动作。
@@ -152,3 +153,4 @@ done -> running -> done                主动加练
 - Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
 - 动作组、动作阶段、提醒和运行状态按实例 `uiLanguage` 翻译；持续时间、完成次数和健康日数据保持原始语义。
 - 方向字形与文案分离，字形不进入翻译资源；新增键由 `tests/i18n.test.js` 锁定覆盖。
+- 用户可见注册名称固定为英文 `MicroBreak`、简体中文 `休息一下`。

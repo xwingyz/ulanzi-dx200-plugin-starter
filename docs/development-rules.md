@@ -220,6 +220,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - action 私有 inspector 入口文件只做 `initInspector(...)` 调用，不写重复连接代码。
 - HTML 表单结构保持 `#property-inspector` 和 `.uspi-wrapper`，不要每个 action 自定义 wrapper 约定。
 - Inspector 里主题按钮的 `data-theme-value` 必须直接对应 `THEMES` key。
+- 每个生产 action 的 Inspector 必须在**第一个通用配置分隔线之前**放一段按键说明，固定按“单击 / 双击 / 长按”的顺序写清当前真实功能。说明必须以 action 已声明的 `onRun` / `onDoublePress` / `onLongPress` 和共享手势合同为事实源：未声明 `onDoublePress` 时，不得写成“双击无操作”，应说明第二次短按仍按独立单击处理；未声明 `onLongPress` 时明确写“未设置”。文案使用英文默认值与 `data-localize`，所有语言文件同步覆盖；修改手势业务时必须在同一任务内更新此说明与对应 action 规格。
 - 文本等连续输入统一使用 `400ms` 去抖自动提交，减少连续写盘；表单提交、主题等按钮操作必须 flush 待提交值并立即发送。
 - 每个 PI 页面必须提供“保存”与“恢复默认”（`#resetDefaults`）按钮，以及内联反馈条（`#inspector-feedback` 容器 + `#feedback-saved` / `#feedback-reset` 文案）；两个按钮按下后由共享层 `flashInspectorFeedback` 显示反馈并自动隐藏。
 - 恢复默认按钮只发送 `__resetDefaults` 控制参数并取消未提交的去抖尾值；默认值的唯一权威是插件侧 `ACTION_CONFIGS.defaults`，PI 页面不得自带默认值副本。

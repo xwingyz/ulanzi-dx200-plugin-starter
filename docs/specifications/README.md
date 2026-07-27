@@ -19,7 +19,7 @@
 | [`actions/bambustatus.md`](actions/bambustatus.md) | Bambu P2S Status：局域网发现、MQTT 状态、完成锁存与显示 |
 | [`actions/nasstatus.md`](actions/nasstatus.md) | Synology NAS Status：DSM Web API 轮询、三态语义、温度与卷容量显示 |
 | [`actions/systemstatus.md`](actions/systemstatus.md) | System Status：CPU/RAM/GPU/温度/网络实时状态与跨平台降级 |
-| [`actions/healthbreak.md`](actions/healthbreak.md) | Health Break：多动作组微休息、活动时间周期、提醒协调、引导与统计 |
+| [`actions/healthbreak.md`](actions/healthbreak.md) | MicroBreak：多动作组微休息、活动时间周期、提醒协调、引导与统计 |
 
 ## 文档与规则的边界
 
