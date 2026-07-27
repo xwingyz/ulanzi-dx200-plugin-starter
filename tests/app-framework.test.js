@@ -21,6 +21,7 @@ const frameworks = [
     actionConfigs: lexActionConfigs,
     beginPress: lexTesting.beginPress,
     clearTimeout: lexTesting.clearInstanceTimeout,
+    createWakeCoordinator: lexTesting.createWakeCoordinator,
     createExclusiveTaskQueue: lexTesting.createExclusiveTaskQueue,
     createSettingsEventProcessor: lexTesting.createSettingsEventProcessor,
     delayInstance: lexTesting.delayInstance,
@@ -34,6 +35,8 @@ const frameworks = [
     initializeInstanceState: lexTesting.initializeInstanceState,
     resolveSettings: lexTesting.resolveSettingsForEvent,
     storageFactory: lexTesting.createSettingsStorage,
+    setTimeout: lexTesting.setInstanceTimeout,
+    timerRecoveryDecision: lexTesting.timerRecoveryDecision,
     writePersistedSettings: lexTesting.writePersistedSettings,
     configKey: 'latency',
     context: 'com.ulanzi.ulanzistudio.lexutility.latency___key-1___action-1',
@@ -54,6 +57,7 @@ const frameworks = [
     actionConfigs: templateActionConfigs,
     beginPress: templateTesting.beginPress,
     clearTimeout: templateTesting.clearInstanceTimeout,
+    createWakeCoordinator: templateTesting.createWakeCoordinator,
     createExclusiveTaskQueue: templateTesting.createExclusiveTaskQueue,
     createSettingsEventProcessor: templateTesting.createSettingsEventProcessor,
     delayInstance: templateTesting.delayInstance,
@@ -67,6 +71,8 @@ const frameworks = [
     initializeInstanceState: templateTesting.initializeInstanceState,
     resolveSettings: templateTesting.resolveSettingsForEvent,
     storageFactory: templateTesting.createSettingsStorage,
+    setTimeout: templateTesting.setInstanceTimeout,
+    timerRecoveryDecision: templateTesting.timerRecoveryDecision,
     writePersistedSettings: templateTesting.writePersistedSettings,
     configKey: 'counter',
     context: '__PLUGIN_UUID__.counter___key-1___action-1',
@@ -117,6 +123,58 @@ for (const framework of frameworks) {
     });
 
     assert.deepEqual(settings, { title: 'new PI', theme: 'mint', color: '#333333' });
+  });
+
+  test(`${framework.name}: wake recovery defers expired timers once instead of catching up immediately`, async () => {
+    const coordinator = framework.createWakeCoordinator({
+      gapMs: 50,
+      settleMs: 12,
+      spreadMs: 0,
+    });
+    coordinator.start(Date.now() - 100);
+    const instance = { context: 'wake-defer', active: true };
+    const startedAt = Date.now();
+
+    await new Promise((resolve) => {
+      framework.setTimeout(
+        instance,
+        'poll',
+        resolve,
+        0,
+        undefined,
+        { coordinator },
+      );
+    });
+
+    assert.ok(Date.now() - startedAt >= 8, 'an expired pre-sleep timer waits for the recovery gate');
+    assert.equal(coordinator.snapshot().generation, 1, 'one long event-loop gap creates one recovery generation');
+    assert.equal(instance.timers.size, 0, 'the deferred callback runs once and leaves no catch-up queue');
+  });
+
+  test(`${framework.name}: transient timers are dropped after a wake gap`, async () => {
+    const coordinator = framework.createWakeCoordinator({
+      gapMs: 50,
+      settleMs: 12,
+      spreadMs: 0,
+    });
+    coordinator.start(Date.now() - 100);
+    const instance = { context: 'wake-drop', active: true };
+    let ran = false;
+    let cancelled = false;
+
+    framework.setTimeout(
+      instance,
+      'feedback',
+      () => { ran = true; },
+      0,
+      () => { cancelled = true; },
+      { coordinator, latePolicy: 'drop' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(ran, false, 'stale press/feedback work cannot replay after wake');
+    assert.equal(cancelled, true, 'dropping a timer preserves its cancellation contract');
+    assert.equal(instance.timers.size, 0);
   });
 
   test(`${framework.name}: generic PI message hook is optional and receives the param`, () => {

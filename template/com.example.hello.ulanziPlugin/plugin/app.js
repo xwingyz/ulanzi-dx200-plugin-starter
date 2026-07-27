@@ -32,6 +32,11 @@ const DOUBLE_PRESS_MS = 300;
 // keydown/keyup 之后宿主补发 run 的容忍窗口，超过即认为按键事件通路已断，回落到 run。
 const RUN_AFTER_KEY_EVENT_MS = 1500;
 const LONG_PRESS_TIMER_SLOT = 'baseLongPress';
+const WAKE_RENDER_TIMER_SLOT = 'baseWakeRender';
+const WAKE_HEARTBEAT_MS = 1000;
+const WAKE_GAP_MS = 5000;
+const WAKE_SETTLE_MS = 2500;
+const WAKE_SPREAD_MS = 1500;
 
 // ok / warn / crit 是语义告警色，供需要分级预警的 action 使用。它们不进
 // THEME_SWATCHES —— 色卡只展示 canvas / panel / low / accent / text 五个角色。
@@ -451,17 +456,140 @@ function safeHandler(name, handler) {
   };
 }
 
-function setInstanceTimeout(instance, slot, fn, ms, onCancel) {
+function stableWakeSpread(context, slot, spreadMs) {
+  if (spreadMs <= 0) {
+    return 0;
+  }
+  let hash = 2166136261;
+  for (const char of `${context || ''}::${slot || ''}`) {
+    hash ^= char.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % spreadMs;
+}
+
+function createWakeCoordinator(options = {}) {
+  const gapMs = options.gapMs ?? WAKE_GAP_MS;
+  const settleMs = options.settleMs ?? WAKE_SETTLE_MS;
+  const spreadMs = options.spreadMs ?? WAKE_SPREAD_MS;
+  let active = false;
+  let lastObservedAt = null;
+  let generation = 0;
+  let resumeAt = 0;
+  let gateUntil = 0;
+
+  const snapshot = (now) => ({
+    generation,
+    resumeAt,
+    gateUntil,
+    recovering: active && now < gateUntil,
+  });
+
+  return {
+    start(now = Date.now()) {
+      active = true;
+      lastObservedAt = now;
+      return snapshot(now);
+    },
+    stop() {
+      active = false;
+      lastObservedAt = null;
+      gateUntil = 0;
+    },
+    observe(now = Date.now()) {
+      if (!active) {
+        return snapshot(now);
+      }
+      if (lastObservedAt !== null && now - lastObservedAt > gapMs) {
+        generation += 1;
+        resumeAt = now;
+        gateUntil = now + settleMs;
+      }
+      lastObservedAt = now;
+      return snapshot(now);
+    },
+    snapshot(now = Date.now()) {
+      return snapshot(now);
+    },
+    recoveryDelay(context, slot, now = Date.now()) {
+      return Math.max(0, gateUntil - now) + stableWakeSpread(context, slot, spreadMs);
+    },
+  };
+}
+
+const WAKE_COORDINATOR = createWakeCoordinator();
+let wakeHeartbeatHandle = null;
+
+function startWakeMonitor() {
+  if (wakeHeartbeatHandle) {
+    return;
+  }
+  WAKE_COORDINATOR.start();
+  const heartbeat = () => {
+    WAKE_COORDINATOR.observe();
+    wakeHeartbeatHandle = setTimeout(heartbeat, WAKE_HEARTBEAT_MS);
+    wakeHeartbeatHandle.unref?.();
+  };
+  wakeHeartbeatHandle = setTimeout(heartbeat, WAKE_HEARTBEAT_MS);
+  wakeHeartbeatHandle.unref?.();
+}
+
+function stopWakeMonitor() {
+  if (wakeHeartbeatHandle) {
+    clearTimeout(wakeHeartbeatHandle);
+    wakeHeartbeatHandle = null;
+  }
+  WAKE_COORDINATOR.stop();
+}
+
+function timerRecoveryDecision(timer, coordinator, instance, slot, now = Date.now()) {
+  const recovery = coordinator.observe(now);
+  if (recovery.generation <= timer.wakeGeneration || timer.latePolicy === 'run') {
+    return { type: 'run', recovery };
+  }
+  if (timer.latePolicy === 'drop') {
+    return { type: 'drop', recovery };
+  }
+  return {
+    type: 'defer',
+    delay: coordinator.recoveryDelay(instance?.context, slot, now),
+    recovery,
+  };
+}
+
+function setInstanceTimeout(instance, slot, fn, ms, onCancel, options = {}) {
   clearInstanceTimeout(instance, slot);
   if (!instance.timers) {
     instance.timers = new Map();
   }
-  const timer = { handle: null, cancel: onCancel };
+  const coordinator = options.coordinator ?? WAKE_COORDINATOR;
+  const timer = {
+    handle: null,
+    cancel: onCancel,
+    latePolicy: options.latePolicy ?? 'defer',
+    wakeGeneration: coordinator.snapshot().generation,
+  };
   timer.handle = setTimeout(() => {
     if (instance.timers?.get(slot) !== timer) {
       return;
     }
     instance.timers?.delete(slot);
+    const decision = timerRecoveryDecision(timer, coordinator, instance, slot);
+    if (decision.type === 'drop') {
+      const cancel = timer.cancel;
+      timer.cancel = undefined;
+      cancel?.();
+      return;
+    }
+    if (decision.type === 'defer') {
+      const cancel = timer.cancel;
+      timer.cancel = undefined;
+      setInstanceTimeout(instance, slot, fn, decision.delay, cancel, {
+        ...options,
+        coordinator,
+      });
+      return;
+    }
     timer.cancel = undefined;
     guardAction(instance, `timer:${slot}`, fn);
   }, ms);
@@ -911,7 +1039,7 @@ function syncInspectorSettings(instance, _incomingSettings = {}, ud = $UD) {
   ud.sendParamFromPlugin(authoritative, instance.context);
 }
 
-function renderInstance(instance) {
+function renderInstanceNow(instance) {
   if (instance.active === false) {
     return;
   }
@@ -924,6 +1052,24 @@ function renderInstance(instance) {
     return;
   }
   $UD.setBaseDataIcon(instance.context, longPressFeedbackIcon(icon, instance.longPressFeedback === true));
+}
+
+function renderInstance(instance) {
+  if (instance.active === false) {
+    return;
+  }
+  const recovery = WAKE_COORDINATOR.observe();
+  if (recovery.recovering) {
+    setInstanceTimeout(
+      instance,
+      WAKE_RENDER_TIMER_SLOT,
+      () => renderInstanceNow(instance),
+      WAKE_COORDINATOR.recoveryDelay(instance.context, WAKE_RENDER_TIMER_SLOT),
+    );
+    return;
+  }
+  clearInstanceTimeout(instance, WAKE_RENDER_TIMER_SLOT);
+  renderInstanceNow(instance);
 }
 
 function dispatchShortPress(
@@ -972,7 +1118,7 @@ function beginPress(instance, config = configFromUuid(instance.actionUuid), runt
     instance.longPressQualified = true;
     instance.longPressFeedback = true;
     (runtime.render ?? renderInstance)(instance);
-  }, config.longPressMs ?? LONG_PRESS_MS);
+  }, config.longPressMs ?? LONG_PRESS_MS, undefined, { latePolicy: 'drop' });
 }
 
 function endPress(instance, config = configFromUuid(instance.actionUuid), runtime = {}) {
@@ -1160,6 +1306,7 @@ function createSettingsEventProcessor(options = {}) {
 }
 
 function startPlugin() {
+  startWakeMonitor();
   $UD.connect(PLUGIN_UUID);
   const eventProcessor = createSettingsEventProcessor({ instances: INSTANCES });
 
@@ -1239,6 +1386,7 @@ const disposeAllInstances = () => {
   for (const instance of INSTANCES.values()) {
     disposeInstance(instance);
   }
+  stopWakeMonitor();
 };
 process.on('exit', disposeAllInstances);
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -1268,6 +1416,7 @@ export const __testing = Object.freeze({
   frameHighlight,
   beginPress,
   clearInstanceTimeout,
+  createWakeCoordinator,
   createSettingsStorage,
   createSettingsEventProcessor,
   createExclusiveTaskQueue,
@@ -1283,6 +1432,7 @@ export const __testing = Object.freeze({
   readPersistedState,
   resolveSettingsForEvent,
   setInstanceTimeout,
+  timerRecoveryDecision,
   writePersistedSettings,
   writePersistedState,
 });

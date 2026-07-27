@@ -1,7 +1,7 @@
 # Lex Utility 基座技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-26
+最后代码核对：2026-07-27
 事实源：`manifest.json`、`plugin/app.js`、`plugin/actions/index.js`、`property-inspector/inspector-shared.js`、`tests/`
 
 **变更门槛：修改任何基座或共享层功能/技术实现前，必须先完整阅读本文件；修改完成后，必须在同一次任务中把必要的功能和技术变化同步到本文件，并更新“最后代码核对”日期。若同时影响 action，还必须读写对应 action 规格。**
@@ -167,6 +167,9 @@ Ulanzi Studio :3906 / Simulator :39069
 
 - action 不得直接使用 `setTimeout` / `setInterval`；统一使用实例定时器 API，slot 在同一实例内唯一。
 - 定时器回调自动经过 action 错误边界，实例销毁时统一取消。
+- 基座用 1 秒心跳检测事件循环停顿；连续停顿超过 5 秒视为系统休眠恢复。休眠前登记的实例定时器不在恢复瞬间补跑：默认等待 2.5 秒稳定窗口，再按 `context + slot` 在 1.5 秒内确定性错峰执行一次，不形成追赶队列。
+- 短效交互定时器可声明 `latePolicy: 'drop'`。共享长按资格 timer 使用该策略，休眠恢复后取消资格，不补反色、不触发长按业务。
+- 恢复窗口内的 `renderInstance` 按 context 合并到 `baseWakeRender` slot，只提交最后一帧；正常运行期不改变原有即时渲染语义。
 - 排他资源使用 `createExclusiveTaskQueue()`。当前 `speedtest` 用资源名 `network-bandwidth` 串行测速和节点发现。
 - 队列提供同实例去重、排队位置、运行/排队取消和 `AbortSignal`；action 不另建模块级 busy 标志。
 - 异步 `onRun` / `onDoublePress` / `onLongPress` 必须返回 Promise，使 rejection 留在框架错误边界内。
