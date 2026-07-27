@@ -127,6 +127,8 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 两个存储共用 `createSettingsStorage` 工厂：传 `storePath` 指定文件，传 `legacyPath: null` 关闭 legacy 迁移（legacy 迁移只对设置存储有意义）。
 - 数据目录默认在插件目录下，`ULANZI_PLUGIN_DATA_DIR` 可覆盖（按 `PLUGIN_UUID` 分子目录）。宿主永远不设它，**它只服务于测试隔离**：多个测试会 import 真实 `app.js` 并触发真实落盘，不隔离就会把测试键写进仓库的 `plugins/*/data/`，再被 `install-plugin` 带到用户机器上。因此**用 `npm test` 跑测试，不要直接 `node --test`**——隔离靠 `--import ./tests/setup.mjs` 在模块加载前注入环境变量，路径常量是 import 期求值的，等测试跑起来再改已经晚了。`tests/test-isolation.test.js` 会在隔离失效时直接报错。
 
+诊断采集统一使用框架注入的 `appendDiagnosticLog(name, entry)`，业务 action 不得自行选择任意路径或写无限增长文件。文件固定为 `data/<name>.jsonl`，名称只允许小写 ASCII 字母、数字和中划线；单文件上限 512 KiB，超限只轮换一代 `.1`。框架只负责安全命名、追加和限量，不得出现 action key 分支；业务 action 负责白名单、去重和语义。Access Code、令牌、URL 凭据、序列号、IP、完整网络 payload 及无关个人信息不得写入诊断日志。该共享能力必须同步业务插件与 `template/`，并用仓库外临时目录测试轮换和路径拒绝。
+
 框架事件处理器只负责通用的实例管理、设置合并、持久化、回推和钩子分发，不得出现任何具体业务 action key，也不得为某个 action 新增专属分支。action 特有常量、I/O、状态机、渲染与字段归一化必须全部留在对应的 `plugin/actions/<key>.js`。
 
 ### 共享框架持久化

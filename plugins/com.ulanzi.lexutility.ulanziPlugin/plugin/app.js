@@ -41,6 +41,33 @@ const WAKE_HEARTBEAT_MS = 1000;
 const WAKE_GAP_MS = 5000;
 const WAKE_SETTLE_MS = 2500;
 const WAKE_SPREAD_MS = 1500;
+const DIAGNOSTIC_LOG_MAX_BYTES = 512 * 1024;
+
+function appendDiagnosticLog(name, entry, options = {}) {
+  if (!/^[a-z0-9-]+$/.test(String(name || ''))
+    || !entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return false;
+  }
+  const fsImpl = options.fsImpl ?? fs;
+  const dataDir = options.dataDir ?? DATA_DIR;
+  const maxBytes = options.maxBytes ?? DIAGNOSTIC_LOG_MAX_BYTES;
+  const logPath = path.join(dataDir, `${name}.jsonl`);
+  const rotatedPath = `${logPath}.1`;
+  try {
+    const line = `${JSON.stringify(entry)}\n`;
+    fsImpl.mkdirSync(dataDir, { recursive: true });
+    const currentBytes = fsImpl.existsSync(logPath) ? fsImpl.statSync(logPath).size : 0;
+    if (currentBytes + Buffer.byteLength(line) > maxBytes) {
+      if (fsImpl.existsSync(rotatedPath)) fsImpl.unlinkSync(rotatedPath);
+      if (fsImpl.existsSync(logPath)) fsImpl.renameSync(logPath, rotatedPath);
+    }
+    fsImpl.appendFileSync(logPath, line, 'utf8');
+    return true;
+  } catch (error) {
+    log(`diagnostic log write failed [${name}]`, error?.message || error);
+    return false;
+  }
+}
 
 // ok / warn / crit 是语义告警色，供需要分级预警的 action 使用（例如 claudeusage
 // 的额度 severity）。它们不进 THEME_SWATCHES —— 色卡只展示
@@ -184,6 +211,7 @@ const STATE_STORAGE = createSettingsStorage({ storePath: STATE_STORE_PATH, legac
 const PERSISTED_STATE = STATE_STORAGE.load();
 
 const ACTION_MODULES = createActionModules({
+  appendDiagnosticLog,
   clearInstanceTimeout,
   delayInstance,
   dropPersistedState,
@@ -1064,10 +1092,16 @@ function renderMeterRow(geometry, theme, options = {}) {
     tail = '',
     tailColor = theme.muted,
     showBar = true,
+    centerText = false,
+    centerTextOffset = 0,
+    centerTextXOffset = 0,
   } = options;
 
   const fontSize = Math.min(24, Math.max(15, height * 0.62));
-  const textY = (y + height * 0.5 + fontSize * 0.35).toFixed(1);
+  const textY = centerText
+    ? (y + height * 0.5 + centerTextOffset).toFixed(1)
+    : (y + height * 0.5 + fontSize * 0.35).toFixed(1);
+  const verticalAlign = centerText ? ' dominant-baseline="middle"' : '';
   const font = 'Arial, Helvetica, sans-serif';
 
   const track = showBar
@@ -1095,9 +1129,9 @@ function renderMeterRow(geometry, theme, options = {}) {
 
   return `
       ${track}${fill}
-      <text x="${x + 6}" y="${textY}" fill="${color}" font-size="${(fontSize * 0.82).toFixed(1)}" font-weight="800" font-family="${font}">${escapeXml(label)}</text>
-      <text x="${x + width * 0.56 + 4}" y="${textY}" text-anchor="end" fill="${theme.text}" font-weight="800" font-family="${font}">${numeric(value, fontSize * 1.26, UNIT_FONT_SIZE)}</text>
-      <text x="${x + width - 5}" y="${textY}" text-anchor="end" fill="${tailColor}" font-weight="700" font-family="${font}">${numeric(tail, fontSize * 1.0, UNIT_FONT_SIZE)}</text>`;
+      <text x="${x + 6}" y="${textY}"${verticalAlign} fill="${color}" font-size="${(fontSize * 0.82).toFixed(1)}" font-weight="800" font-family="${font}">${escapeXml(label)}</text>
+      <text x="${x + width * 0.56 + 4 + centerTextXOffset}" y="${textY}"${verticalAlign} text-anchor="end" fill="${theme.text}" font-weight="800" font-family="${font}">${numeric(value, fontSize * 1.26, UNIT_FONT_SIZE)}</text>
+      <text x="${x + width - 5}" y="${textY}"${verticalAlign} text-anchor="end" fill="${tailColor}" font-weight="700" font-family="${font}">${numeric(tail, fontSize * 1.0, UNIT_FONT_SIZE)}</text>`;
 }
 
 function normalizeSettings(actionUuid, settings = {}) {
@@ -1582,6 +1616,7 @@ export const __testing = Object.freeze({
   ACTION_CONFIGS,
   THEMES,
   ...ACTION_TESTING,
+  appendDiagnosticLog,
   formatCountdown,
   frameFor,
   frameHighlight,

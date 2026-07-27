@@ -30,6 +30,15 @@ test('bambustatus derives elapsed and remaining time without a ticking counter',
   );
 });
 
+test('bambustatus uses compact one-unit times and refreshes active printing states every ten seconds', () => {
+  assert.deepEqual(testing.formatDurationParts(5040), { value: '1', unit: 'h' });
+  assert.deepEqual(testing.formatDurationParts(2160), { value: '36', unit: 'm' });
+  assert.equal(testing.refreshDelay('RUNNING'), 10_000);
+  assert.equal(testing.refreshDelay('PREPARING'), 10_000);
+  assert.equal(testing.refreshDelay('PAUSED'), 10_000);
+  assert.equal(testing.refreshDelay('IDLE'), 30_000);
+});
+
 test('bambustatus parses Bambu SSDP headers and normalizes P2S model code', () => {
   const packet = [
     'HTTP/1.1 200 OK',
@@ -217,7 +226,7 @@ test('bambustatus renders manual refresh as centered dots without highlighting t
   testing.dropPersistedState(context);
 });
 
-test('bambustatus running layout reuses the ChatGPT meter style with larger T and R times', () => {
+test('bambustatus running layout centers the meter and uses spaced icons for estimated and remaining time', () => {
   const config = testing.ACTION_CONFIGS.bambustatus;
   const context = 'com.ulanzi.ulanzistudio.lexutility.bambustatus___progress-layout';
   const instance = {
@@ -234,10 +243,137 @@ test('bambustatus running layout reuses the ChatGPT meter style with larger T an
   const svg = Buffer.from(config.render(instance).split(',')[1], 'base64').toString('utf8');
   assert.match(svg, /width="170" height="51" rx="3"/);
   assert.match(svg, /width="115\.6" height="51" rx="3"[^>]+opacity="0\.30"/);
-  // 字号来自共享的 renderMeterRow：数字随行高自适应，单位固定 15px。
-  // 共享原语调整时这里会一起变——这是预期的统一，不是回归。
-  assert.match(svg, /<tspan font-size="30\.2">68<\/tspan><tspan font-size="15\.0">%<\/tspan>/);
-  assert.match(svg, /font-size="28" font-weight="800">T 1h24<\/text>/);
-  assert.match(svg, /font-size="28" font-weight="800">R 36m<\/text>/);
+  assert.match(svg, /x="154\.2" y="152\.2" dominant-baseline="middle"[^>]*><tspan[^>]*>68<\/tspan><tspan[^>]*>%<\/tspan>/);
+  assert.match(svg, /data-print-animation-frame="0"/);
+  assert.match(svg, /data-bambu-time-row="paired"[^>]+font-variant-numeric="tabular-nums"/);
+  assert.match(svg, /data-bambu-time-icon="estimated"[^>]+stroke="#14b8a6"/);
+  assert.match(svg, /data-bambu-time-icon="remaining"[^>]+stroke="#14b8a6"/);
+  assert.match(svg, /data-bambu-time-value="estimated"[^>]*><tspan[^>]+font-size="26">2<\/tspan><tspan[^>]+font-size="14" xml:space="preserve"> h<\/tspan>/);
+  assert.match(svg, /data-bambu-time-separator="slash"[^>]*>\/<\/text>/);
+  assert.match(svg, /data-bambu-time-value="remaining"[^>]*><tspan[^>]+font-size="26">36<\/tspan><tspan[^>]+font-size="14" xml:space="preserve"> m<\/tspan>/);
+  assert.doesNotMatch(svg, />[ETR] /);
+  testing.dropPersistedState(context);
+});
+
+test('bambustatus running E shows estimated total instead of elapsed time near completion', () => {
+  const config = testing.ACTION_CONFIGS.bambustatus;
+  const context = 'com.ulanzi.ulanzistudio.lexutility.bambustatus___near-completion-times';
+  const instance = {
+    context,
+    active: false,
+    settings: { ...config.defaults },
+    ...config.createState({ context }),
+    connectionState: 'ONLINE',
+    liveStatus: 'RUNNING',
+    progress: 88,
+    elapsedSec: 31 * 60,
+    remainingSec: 4 * 60,
+  };
+  const svg = Buffer.from(config.render(instance).split(',')[1], 'base64').toString('utf8');
+  assert.match(svg, /data-bambu-time-value="estimated"[^>]*><tspan[^>]+font-size="26">35<\/tspan><tspan[^>]+font-size="14" xml:space="preserve"> m<\/tspan>/);
+  assert.match(svg, /data-bambu-time-value="remaining"[^>]*><tspan[^>]+font-size="26">4<\/tspan><tspan[^>]+font-size="14" xml:space="preserve"> m<\/tspan>/);
+  testing.dropPersistedState(context);
+});
+
+test('bambustatus keeps stable idle, connecting and finished status lines short', () => {
+  const config = testing.ACTION_CONFIGS.bambustatus;
+  const context = 'com.ulanzi.ulanzistudio.lexutility.bambustatus___short-stable-states';
+  const base = {
+    context,
+    active: false,
+    settings: { ...config.defaults, uiLanguage: 'zh_CN' },
+    ...config.createState({ context }),
+  };
+
+  const idleSvg = Buffer.from(config.render({
+    ...base,
+    connectionState: 'ONLINE',
+    liveStatus: 'IDLE',
+  }).split(',')[1], 'base64').toString('utf8');
+  assert.match(idleSvg, /data-bambu-status-line="single"[^>]*>空闲<\/text>/);
+  assert.doesNotMatch(idleSvg, /等待新任务| · /);
+
+  const connectingSvg = Buffer.from(config.render({
+    ...base,
+    connectionState: 'CONNECTING',
+  }).split(',')[1], 'base64').toString('utf8');
+  assert.match(connectingSvg, /data-bambu-status-line="single"[^>]*>连接中<\/text>/);
+  assert.doesNotMatch(connectingSvg, /正在读取打印机状态| · /);
+
+  const finishedSvg = Buffer.from(config.render({
+    ...base,
+    connectionState: 'ONLINE',
+    liveStatus: 'FINISHED',
+    taskName: '一个特别长且不应出现在完成状态中的模型名称.3mf',
+    elapsedSec: 35 * 60,
+  }).split(',')[1], 'base64').toString('utf8');
+  assert.match(finishedSvg, /data-bambu-status-line="single"[^>]*>已完成<\/text>/);
+  assert.doesNotMatch(finishedSvg, /模型名称|打印任务| · /);
+  assert.match(finishedSvg, /data-bambu-time-row="single"/);
+  assert.match(finishedSvg, /data-bambu-time-icon="estimated"/);
+  assert.match(finishedSvg, /data-bambu-time-value="estimated"[^>]*><tspan[^>]+font-size="26">35<\/tspan><tspan[^>]+font-size="14" xml:space="preserve"> m<\/tspan>/);
+  testing.dropPersistedState(context);
+});
+
+test('bambustatus diagnostic snapshots include status fields only', () => {
+  const entry = testing.bambuStatusLogEntry({
+    gcode_state: 'RUNNING',
+    mc_percent: 42,
+    mc_remaining_time: 18,
+    gcode_start_time: 1_700_000_000,
+    mc_print_stage: 7,
+    stg_cur_name: 'Heating the nozzle',
+    subtask_name: 'Calibration cube.3mf',
+    dev_model_name: 'N2S',
+    print_error: 1234,
+    access_code: 'SECRET-CODE',
+    ipcam: { ip: '192.168.1.8' },
+    serial_number: 'SECRET-SERIAL',
+  }, 'RUNNING', 1_700_001_000_000);
+
+  assert.deepEqual(entry, {
+    at: '2023-11-14T22:30:00.000Z',
+    status: 'RUNNING',
+    gcodeState: 'RUNNING',
+    progress: 42,
+    remainingMinutes: 18,
+    startTime: 1_700_000_000,
+    stageCode: 7,
+    stageName: 'Heating the nozzle',
+    taskName: 'Calibration cube.3mf',
+    model: 'P2S',
+    errorCode: 1234,
+  });
+  const serialized = JSON.stringify(entry);
+  assert.doesNotMatch(serialized, /SECRET|192\.168\.1\.8|access_code|serial_number|ipcam/);
+});
+
+test('bambustatus shows only a detailed preparation stage and advances the print icon on reports', () => {
+  const config = testing.ACTION_CONFIGS.bambustatus;
+  const context = 'com.ulanzi.ulanzistudio.lexutility.bambustatus___state-line';
+  const base = {
+    context,
+    active: false,
+    settings: { ...config.defaults, uiLanguage: 'zh_CN' },
+    ...config.createState({ context }),
+    connectionState: 'ONLINE',
+  };
+  const preparing = { ...base, liveStatus: 'PREPARING', stage: 'Auto bed leveling' };
+  const preparingSvg = Buffer.from(config.render(preparing).split(',')[1], 'base64').toString('utf8');
+  assert.match(preparingSvg, /data-bambu-status-line="single"[^>]*>自动调平热床<\/text>/);
+  assert.doesNotMatch(preparingSvg, /准备中| · /);
+  assert.equal((preparingSvg.match(/data-bambu-status-line=/g) || []).length, 1);
+
+  const genericPreparing = { ...base, liveStatus: 'PREPARING', stage: 'Preparing to print' };
+  const genericSvg = Buffer.from(config.render(genericPreparing).split(',')[1], 'base64').toString('utf8');
+  assert.match(genericSvg, /data-bambu-status-line="single"[^>]*>准备中<\/text>/);
+
+  const running = { ...base, liveStatus: 'RUNNING', printAnimationFrame: 0 };
+  testing.applyPrintReport(running, { gcode_state: 'RUNNING', mc_percent: 10 }, 10_000);
+  const firstSvg = Buffer.from(config.render(running).split(',')[1], 'base64').toString('utf8');
+  testing.applyPrintReport(running, { mc_percent: 11 }, 11_000);
+  const secondSvg = Buffer.from(config.render(running).split(',')[1], 'base64').toString('utf8');
+  assert.match(firstSvg, /data-print-animation-frame="1"/);
+  assert.match(secondSvg, /data-print-animation-frame="2"/);
   testing.dropPersistedState(context);
 });

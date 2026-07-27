@@ -10,7 +10,8 @@ const SSDP_HOST = '239.255.255.250';
 const SSDP_PORT = 1990;
 const MQTT_PORT = 8883;
 const STATUS_TIMEOUT_MS = 12_000;
-const REDRAW_MS = 30_000;
+const ACTIVE_REFRESH_MS = 10_000;
+const PASSIVE_REDRAW_MS = 30_000;
 const COMPLETION_HOLD_MS = 3 * 60_000;
 const MANUAL_REFRESH_FEEDBACK_MS = 650;
 const RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
@@ -194,6 +195,33 @@ function mergePrint(previous = {}, incoming = {}) {
   return result;
 }
 
+function bambuStatusLogEntry(print = {}, status = resolvePrintState(print), now = Date.now()) {
+  const stageCode = finiteNumber(print.mc_print_stage ?? print.stg_cur);
+  const rawStageName = cleanString(print.stg_cur_name || print.stage_name || print.print_stage);
+  const rawErrorCode = print.mc_print_error_code ?? print.print_error ?? print.error_code;
+  const errorCode = finiteNumber(rawErrorCode) ?? clipText(String(rawErrorCode ?? ''), 80);
+  const entry = {
+    at: new Date(now).toISOString(),
+    status: cleanString(status).toUpperCase() || 'IDLE',
+  };
+  const fields = [
+    ['gcodeState', cleanString(print.gcode_state).toUpperCase()],
+    ['progress', clampPercent(print.mc_percent)],
+    ['remainingMinutes', finiteNumber(print.mc_remaining_time)],
+    ['startTime', finiteNumber(print.gcode_start_time)],
+    ['stageCode', stageCode],
+    ['stageName', clipText(rawStageName || (stageCode != null ? stageLabel(print) : ''), 120)],
+    ['taskName', clipText(print.subtask_name || print.gcode_file, 120)],
+    ['model', normalizeModel(print.dev_model_name || print.dev_model || print.model)],
+    ['errorCode', errorCode],
+    ['errorMessage', clipText(print.fail_reason || print.error_message || print.error, 120)],
+  ];
+  fields.forEach(([key, value]) => {
+    if (value !== null && value !== '') entry[key] = value;
+  });
+  return entry;
+}
+
 function serializeSnapshot(instance) {
   return {
     v: STATE_VERSION,
@@ -312,11 +340,29 @@ function mergeDiscovery(accessCodes, devices, hint = {}) {
 }
 
 function formatDuration(seconds) {
-  if (!Number.isFinite(seconds)) return '--';
+  const { value, unit } = formatDurationParts(seconds);
+  return `${value}${unit}`;
+}
+
+function formatDurationParts(seconds) {
+  if (!Number.isFinite(seconds)) return { value: '--', unit: '' };
   const totalMinutes = Math.max(0, Math.floor(seconds / 60));
   const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return hours ? `${hours}h${String(minutes).padStart(2, '0')}` : `${minutes}m`;
+  if (hours >= 100) return { value: String(Math.min(99, Math.floor(hours / 24))), unit: 'd' };
+  if (hours > 0) return { value: String(hours), unit: 'h' };
+  return { value: String(Math.min(99, totalMinutes)), unit: 'm' };
+}
+
+function estimatedTotalSeconds(elapsedSec, remainingSec) {
+  return Number.isFinite(elapsedSec) && Number.isFinite(remainingSec)
+    ? Math.max(0, elapsedSec) + Math.max(0, remainingSec)
+    : null;
+}
+
+function refreshDelay(status) {
+  return ['RUNNING', 'PREPARING', 'PAUSED'].includes(status)
+    ? ACTIVE_REFRESH_MS
+    : PASSIVE_REDRAW_MS;
 }
 
 function formatAge(timestamp, now = Date.now(), translate = (key) => key) {
@@ -346,6 +392,7 @@ export function createBambuStatusAction(runtime) {
     themeFor,
     toDataUrl,
     writePersistedState,
+    appendDiagnosticLog = () => false,
   } = runtime;
 
   function flushSnapshot(instance) {
@@ -369,15 +416,18 @@ export function createBambuStatusAction(runtime) {
     }
   }
 
-  function scheduleRedraw(instance) {
-    setInstanceTimeout(instance, 'bambustatusRedraw', () => {
+  function scheduleStatusRefresh(instance) {
+    setInstanceTimeout(instance, 'bambustatusRefresh', () => {
+      if (['RUNNING', 'PREPARING', 'PAUSED'].includes(instance.liveStatus)) {
+        requestCurrentStatus(instance);
+      }
       renderInstance(instance);
-      scheduleRedraw(instance);
-    }, REDRAW_MS);
+      scheduleStatusRefresh(instance);
+    }, refreshDelay(instance.liveStatus));
   }
 
   function requestCurrentStatus(instance) {
-    const serial = cleanString(instance.settings.serialNumber);
+    const serial = cleanString(instance.settings?.serialNumber);
     if (!serial || !instance.mqttClient?.connected) return false;
     instance.mqttClient.publish(`device/${serial}/request`, JSON.stringify({
       pushing: { sequence_id: String(Date.now()), command: 'pushall' },
@@ -470,6 +520,20 @@ export function createBambuStatusAction(runtime) {
       nextStatus = 'IDLE';
     }
     instance.liveStatus = nextStatus;
+    const statusLogEntry = bambuStatusLogEntry(print, nextStatus, now);
+    const { at: ignoredAt, ...statusLogValues } = statusLogEntry;
+    const statusLogSignature = JSON.stringify(statusLogValues);
+    if (statusLogSignature !== instance.lastStatusLogSignature) {
+      if (appendDiagnosticLog('bambustatus-status', statusLogEntry)) {
+        instance.lastStatusLogSignature = statusLogSignature;
+      }
+    }
+    if (nextStatus === 'RUNNING') {
+      instance.printAnimationFrame = (instance.printAnimationFrame + 1) % 3;
+    }
+    if (instance.active !== false && instance.settings) {
+      scheduleStatusRefresh(instance);
+    }
     if (nextStatus === 'FINISHED' && !instance.completionLatched) {
       instance.completedSnapshot = snapshotFromInstance(instance);
       instance.completionLatched = true;
@@ -676,40 +740,87 @@ export function createBambuStatusAction(runtime) {
         ? t('Preparation stage %s', language).replace('%s', numbered[1])
         : t(source, language);
     };
+    const preparingDetail = data.stage && data.stage !== 'Preparing to print'
+      ? localizeStage(data.stage, 'Preparing to print')
+      : '';
     const labels = {
-      IDLE: [t('Idle', language), t('Waiting for a new task', language)],
-      PREPARING: [t('Preparing', language), localizeStage(data.stage, 'Preparing to print')],
-      PAUSED: [t('Paused', language), localizeStage(data.stage, 'Print paused')],
-      FINISHED: [t('Finished', language), data.taskName || t('Print job', language)],
-      FAILED: [t('Print failed', language), localizeStage(data.stage, 'Check the printer')],
+      IDLE: [t('Idle', language), ''],
+      PREPARING: [preparingDetail || t('Preparing', language), ''],
+      PAUSED: [
+        t('Paused', language),
+        data.stage && data.stage !== 'Preparing to print'
+          ? localizeStage(data.stage, 'Print paused')
+          : t('Print paused', language),
+      ],
+      FINISHED: [t('Finished', language), ''],
+      FAILED: [t('Print failed', language), t('Check the printer', language)],
+    };
+    const lineText = (primary, secondary = '') => {
+      const combined = secondary ? `${primary} · ${secondary}` : primary;
+      return clipText(combined, 23);
+    };
+    const renderStatusLine = (text, color = theme.text) => {
+      const length = [...text].length;
+      const fontSize = length > 19 ? 20 : length > 14 ? 24 : length > 10 ? 28 : 34;
+      return `<text data-bambu-status-line="single" x="128" y="158" text-anchor="middle" fill="${color}" font-size="${fontSize}" font-weight="800">${escapeXml(text)}</text>`;
+    };
+    const renderTimeIcon = (kind, x) => kind === 'estimated'
+      ? `<g data-bambu-time-icon="estimated" transform="translate(${x} 198)" fill="none" stroke="${theme.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle r="7"/><path d="M0 -3.8 V0 L3.6 2.1"/></g>`
+      : `<g data-bambu-time-icon="remaining" transform="translate(${x} 198)" fill="none" stroke="${theme.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M-6 -7 H6 M-6 7 H6 M-5 -6 C-5 -2 -2 -1 0 0 C2 1 5 2 5 6 M5 -6 C5 -2 2 -1 0 0 C-2 1 -5 2 -5 6"/></g>`;
+    const renderTimeValue = (kind, seconds, x) => {
+      const { value, unit } = formatDurationParts(seconds);
+      return `<text data-bambu-time-value="${kind}" x="${x}" y="207" text-anchor="middle" font-weight="800"><tspan fill="${theme.text}" font-size="26">${value}</tspan>${unit ? `<tspan fill="${theme.muted}" font-size="14" xml:space="preserve"> ${unit}</tspan>` : ''}</text>`;
+    };
+    const renderTimes = (showRemaining = true) => showRemaining
+      ? `<g data-bambu-time-row="paired" font-family="Arial, Helvetica, sans-serif" font-variant-numeric="tabular-nums">${renderTimeIcon('estimated', 56)}${renderTimeValue('estimated', estimatedTotalSeconds(data.elapsedSec, data.remainingSec), 89)}<text data-bambu-time-separator="slash" x="128" y="205" text-anchor="middle" fill="${theme.low}" font-size="18" font-weight="700">/</text>${renderTimeIcon('remaining', 153)}${renderTimeValue('remaining', data.remainingSec, 186)}</g>`
+      : `<g data-bambu-time-row="single" font-family="Arial, Helvetica, sans-serif" font-variant-numeric="tabular-nums">${renderTimeIcon('estimated', 105)}${renderTimeValue('estimated', data.elapsedSec, 139)}</g>`;
+    const renderPrintingIcon = () => {
+      const frameIndex = Math.abs(Number(instance.printAnimationFrame) || 0) % 3;
+      const nozzleX = 55 + frameIndex * 6;
+      return `<g data-print-animation-frame="${frameIndex}" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="50" y="124" width="29" height="33" rx="3" stroke="${theme.muted}" stroke-width="2" opacity="0.9"/>
+        <path d="M54 151 H75 M55 147 H74" stroke="${theme.accent}" stroke-width="2"/>
+        <path d="M54 129 H75 M${nozzleX} 129 V137" stroke="${theme.muted}" stroke-width="2"/>
+        <path d="M${nozzleX - 3} 137 H${nozzleX + 3} L${nozzleX + 1} 141 H${nozzleX - 1} Z" fill="${theme.accent}" stroke="${theme.accent}" stroke-width="1"/>
+      </g>`;
     };
     let body = '';
     if (instance.manualRefreshing) {
-      body = `<text data-manual-refresh-feedback="active" x="128" y="164" text-anchor="middle" fill="${theme.text}" font-size="44" font-weight="800">...</text>`;
+      body = `<text data-manual-refresh-feedback="active" x="128" y="158" text-anchor="middle" fill="${theme.text}" font-size="44" font-weight="800">...</text>`;
     } else if (instance.connectionState === 'CONFIG_REQUIRED') {
-      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">${escapeXml(t('Setup required', language))}</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Open the Inspector to scan', language))}</text>`;
+      body = renderStatusLine(lineText(t('Setup required', language), t('Open the Inspector to scan', language)));
     } else if (instance.connectionState === 'CONNECTING') {
-      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="750">${escapeXml(t('Connecting', language))}</text><text x="128" y="177" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Reading printer status', language))}</text>`;
+      body = renderStatusLine(t('Connecting', language));
     } else if (instance.connectionState === 'INCOMPATIBLE') {
-      body = `<text x="128" y="137" text-anchor="middle" fill="${theme.warn}" font-size="27" font-weight="750">${escapeXml(t('Local status unavailable', language))}</text><text x="128" y="174" text-anchor="middle" fill="${theme.muted}" font-size="16">${escapeXml(t('Keep cloud mode', language))}</text><text x="128" y="198" text-anchor="middle" fill="${theme.muted}" font-size="16">${escapeXml(t('No automatic mode change', language))}</text>`;
+      body = renderStatusLine(lineText(t('Local status unavailable', language), t('Keep cloud mode', language)), theme.warn);
     } else if (instance.connectionState === 'OFFLINE') {
-      body = `<text x="128" y="143" text-anchor="middle" fill="${theme.crit}" font-size="36" font-weight="800">${escapeXml(t('Disconnected', language))}</text><text x="128" y="181" text-anchor="middle" fill="${theme.muted}" font-size="17">${escapeXml(t('Last update', language))} ${escapeXml(formatAge(instance.lastSeenAt, Date.now(), (key) => t(key, language)))}</text>`;
+      body = renderStatusLine(lineText(
+        t('Disconnected', language),
+        `${t('Last update', language)} ${formatAge(instance.lastSeenAt, Date.now(), (key) => t(key, language))}`,
+      ), theme.crit);
     } else if (status === 'RUNNING') {
       body = `
         ${renderMeterRow(
           { x: 43, y: 116, width: 170, height: 51 },
           theme,
-          { percent: progress, color: theme.accent, value: `${progress}%`, showBar: true },
+          {
+            percent: progress,
+            color: theme.accent,
+            value: `${progress}%`,
+            showBar: true,
+            centerText: true,
+            centerTextOffset: 10.7,
+            centerTextXOffset: 12,
+          },
         )}
-        <text x="43" y="205" text-anchor="start" fill="${theme.text}" font-size="28" font-weight="800">T ${formatDuration(data.elapsedSec)}</text>
-        <text x="213" y="205" text-anchor="end" fill="${theme.text}" font-size="28" font-weight="800">R ${formatDuration(data.remainingSec)}</text>`;
+        ${renderPrintingIcon()}
+        ${renderTimes(true)}`;
     } else {
       const [primary, secondary] = labels[status] || labels.IDLE;
-      body = `
-        <text x="128" y="137" text-anchor="middle" fill="${status === 'FAILED' ? theme.crit : theme.text}" font-size="36" font-weight="800">${escapeXml(primary)}</text>
-        <text x="128" y="172" text-anchor="middle" fill="${theme.muted}" font-size="18" font-weight="600">${escapeXml(clipText(secondary, 14))}</text>
-        ${['PREPARING', 'PAUSED'].includes(status) ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="20" font-weight="650">${progress}% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)} · ${escapeXml(t('Left', language))} ${formatDuration(data.remainingSec)}</text>` : ''}
-        ${status === 'FINISHED' ? `<text x="128" y="207" text-anchor="middle" fill="${theme.text}" font-size="20" font-weight="650">100% · ${escapeXml(t('Used', language))} ${formatDuration(data.elapsedSec)}</text>` : ''}`;
+      body = `${renderStatusLine(
+        lineText(primary, secondary),
+        status === 'FAILED' ? theme.crit : theme.text,
+      )}${['PREPARING', 'PAUSED'].includes(status) ? renderTimes(true) : ''}${status === 'FINISHED' ? renderTimes(false) : ''}`;
     }
     const highlightColor = instance.connectionState === 'OFFLINE' || status === 'FAILED'
       ? theme.crit
@@ -745,14 +856,15 @@ export function createBambuStatusAction(runtime) {
       progress: null, elapsedSec: null, remainingSec: null, lastSeenAt: null, print: {}, mqttClient: null,
       discoverySocket: null, connectionGeneration: 0, reconnectAttempt: 0, statusReceived: false, diagnostic: '',
       completedSnapshot: null, completionLatched: false, suppressFinishedUntilNextTask: false,
-      autoScanStarted: false, reportedOnline: false, manualRefreshing: false,
+      autoScanStarted: false, reportedOnline: false, manualRefreshing: false, printAnimationFrame: 0,
+      lastStatusLogSignature: '',
       ...hydrateSnapshot(readPersistedState(instance.context)),
     }),
     onRun: (instance) => refreshCurrentStatus(instance, { manualFeedback: true }),
     onDoublePress: (instance) => openBambuStudio(),
     onLongPress: (instance) => openMakerWorld(instance.settings.makerworldSite),
     onReady: async (instance) => {
-      scheduleRedraw(instance);
+      scheduleStatusRefresh(instance);
       scheduleCompletionExpiry(instance);
       if (isCompleteSettings(instance.settings)) {
         return shouldConnectOnReady(instance) ? connectPrinter(instance) : undefined;
@@ -776,7 +888,7 @@ export function createBambuStatusAction(runtime) {
       closeClient(instance);
       closeDiscovery(instance);
       clearInstanceTimeout(instance, 'bambustatusReconnect');
-      clearInstanceTimeout(instance, 'bambustatusRedraw');
+      clearInstanceTimeout(instance, 'bambustatusRefresh');
       clearInstanceTimeout(instance, 'bambustatusCompletionExpiry');
       clearInstanceTimeout(instance, 'bambustatusManualRefreshFeedback');
       flushSnapshot(instance);
@@ -789,10 +901,13 @@ export function createBambuStatusAction(runtime) {
     config,
     testing: {
       applyPrintReport,
+      bambuStatusLogEntry,
       completionExpiryDelay,
       deriveTimes,
+      estimatedTotalSeconds,
       formatAge,
       formatDuration,
+      formatDurationParts,
       hydrateSnapshot,
       isCompleteSettings,
       mergeDiscovery,
@@ -800,6 +915,7 @@ export function createBambuStatusAction(runtime) {
       bambuOpenMakerWorld: openMakerWorld,
       parseSsdpPacket,
       readBambuStudioAccessCodes,
+      refreshDelay,
       resolvePrintState,
       shouldConnectOnReady,
       stageLabel,

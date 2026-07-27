@@ -104,6 +104,30 @@ test('Lex Utility only exposes production actions', () => {
   );
 });
 
+for (const [name, testing] of [['lex utility', lexTesting], ['template', templateTesting]]) {
+  test(`${name}: diagnostic logs are bounded JSONL files with safe names`, (t) => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ulanzi-diagnostic-log-'));
+    t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+
+    assert.equal(testing.appendDiagnosticLog('../unsafe', { status: 'IDLE' }, { dataDir }), false);
+    assert.equal(testing.appendDiagnosticLog('action-status', { status: 'IDLE' }, {
+      dataDir,
+      maxBytes: 50,
+    }), true);
+    assert.equal(testing.appendDiagnosticLog('action-status', { status: 'RUNNING', progress: 42 }, {
+      dataDir,
+      maxBytes: 50,
+    }), true);
+
+    assert.equal(fs.existsSync(path.join(dataDir, 'action-status.jsonl')), true);
+    assert.equal(fs.existsSync(path.join(dataDir, 'action-status.jsonl.1')), true);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(dataDir, 'action-status.jsonl'), 'utf8').trim()),
+      { status: 'RUNNING', progress: 42 },
+    );
+  });
+}
+
 for (const framework of frameworks) {
   test(`${framework.name}: host restore keeps persisted settings authoritative`, () => {
     const settings = framework.resolveSettings('hostRestore', {

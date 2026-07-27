@@ -161,6 +161,13 @@ Ulanzi Studio :3906 / Simulator :39069
 - 运行态缺失、版本不符或损坏必须降级为空；不得阻止 action 启动。
 - action 应在语义边界批量落盘，并在 `onDispose` 同步 flush，禁止高频逐 tick/逐探测写盘。
 
+### 5.4 诊断日志
+
+- 框架统一向 action 注入 `appendDiagnosticLog(name, entry)`，按 `data/<name>.jsonl` 追加 JSONL；`name` 只允许小写 ASCII 字母、数字和中划线。
+- 单个活动文件最多 512 KiB，超限轮换为 `.1`，只保留一代历史。日志写入失败返回 `false`，不得阻止 action 或其他实例运行。
+- 框架只提供通用写入能力，不感知具体 action key，也不替 action 收集数据。业务 action 必须自行构造字段白名单、去重，并明确禁止凭据、令牌、完整网络 payload 和无关个人信息进入日志。
+- 业务插件与 template 必须保持该注入能力和轮换语义一致；测试通过显式临时目录验证，不能污染插件数据目录。
+
 测试通过 `ULANZI_PLUGIN_DATA_DIR` 把数据放到仓库外的隔离目录；应使用 `npm test`，不要绕过 `tests/setup.mjs` 直接运行 `node --test`。
 
 ## 6. 并发与资源隔离
@@ -205,7 +212,7 @@ Ulanzi Studio :3906 / Simulator :39069
 - `renderScreenFrame` / `renderThemeBackdrop`：绘制公共背景和框架。
 - `frameContent`：把 action 内容装入设计箱。
 - `frameHighlight`：为告警、等待或运行状态绘制一致的内框高亮。
-- `renderMeterRow`：计量行——整行背景按百分比横向填充，三段文字叠在其上（左标签 / 中数值 / 右附注）。用量类 action 共用，保证并排摆放时行高、字号与填充观感必然一致。填充用矩形宽度实现，**禁止 clipPath**（宿主渲染器支持不可靠，会静默失效）。只负责几何与排版，颜色由调用方传入（`color` 给标签与填充，`tailColor` 给右侧附注）。数字与单位自动拆成不同字号的 `<tspan>`：数字随行高自适应，单位固定 15px——单位是恒定量纲标注，不该随行数抖动。
+- `renderMeterRow`：计量行——整行背景按百分比横向填充，三段文字叠在其上（左标签 / 中数值 / 右附注）。用量类 action 共用，保证并排摆放时行高、字号与填充观感必然一致。填充用矩形宽度实现，**禁止 clipPath**（宿主渲染器支持不可靠，会静默失效）。只负责几何与排版，颜色由调用方传入（`color` 给标签与填充，`tailColor` 给右侧附注）。数字与单位自动拆成不同字号的 `<tspan>`：数字随行高自适应，单位固定 15px——单位是恒定量纲标注，不该随行数抖动。可选 `centerText: true` 使用槽体几何中线；混合字号产生视觉偏差时可用 `centerTextOffset` 做纵向光学校正；左侧有图标等附加元素时可用 `centerTextXOffset` 横向校正中间数值。三项默认关闭或为零，避免改变现有用量 action 的排版。
 - `formatCountdown(resetsAt, now?)`：重置倒计时格式化。**只保留最大的那一个单位**（`6d` / `5h` / `45m` / `now`），不写 `1d23h` 这种复合形式——键面上这一栏是最次要的信息，粗粒度足够，省下的宽度留给百分比。用量类 action 共用，两个键并排时同样的剩余时长必须写成同样的字样。
 - `themeFor`、`mixHex`、`escapeXml`、`toDataUrl`：主题和 SVG 安全辅助。
 
