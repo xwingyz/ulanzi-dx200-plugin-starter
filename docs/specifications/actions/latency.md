@@ -1,7 +1,7 @@
 # Web Latency Monitor 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-26
+最后代码核对：2026-07-27
 action key：`latency`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.latency`
 
@@ -96,6 +96,8 @@ certExpiresAt
 
 定时器 slot：`latency`（轮询）、`latencyFeedback`（手动刷新最小反馈时长）、`latencyOpenError`（浏览器打开失败后约 1.2 秒恢复键面）。
 
+系统休眠期间不会按错过的 30 秒周期累计探测。恢复后，休眠前到期的 `latency` 回调由基座等待稳定窗口并错峰执行一次；结果提交后重新从当前时刻安排下一周期。恢复窗口内同一键位的检查态和结果态由基座合帧，避免宿主连续重绘整个设备画面。
+
 默认浏览器启动使用无 shell 的平台命令：macOS 为 `/usr/bin/open`，Windows 为 `rundll32.exe url.dll,FileProtocolHandler`。URL 无效、scheme 不受支持或进程启动失败时，由框架错误边界写日志并显示 `ERR`，约 1.2 秒后恢复原监测画面。
 
 ## 7. 键面显示
@@ -114,6 +116,7 @@ certExpiresAt
 - Pause 显示、单击手动探测、双击暂停/恢复及在途结果作废。
 - 长按打开原始 URL、平台命令选择、非法 scheme 与打开失败后的错误恢复。
 - 安全框背景与告警高亮。
+- 事件循环长时间停顿后，旧轮询只错峰执行一次，瞬时长按 timer 不补执行。
 
 修改探测口径、状态字段、桶宽/窗口、交互或显示时，应同步本文件并扩充 `tests/app-framework.test.js` 的 latency 用例；涉及真实 socket 时序的修改还应做本地 HTTP/HTTPS 冒烟验证。
 
