@@ -1,7 +1,7 @@
 # ChatGPT Usage 功能与技术规范
 
 状态：持续维护
-最后代码核对：2026-07-26
+最后代码核对：2026-07-28
 action key：`chatgptusage`
 UUID：`com.ulanzi.ulanzistudio.lexutility.chatgptusage`
 
@@ -37,10 +37,11 @@ ChatGPT Usage 在单个 DX200 键面上显示 Codex 的限额用量与重置倒�
 ## 2. 用户功能
 
 - 按设定间隔自动拉取限额，键面按更短间隔本地重绘倒计时。
-- 短按立即拉取一次，带最小反馈时长与冷却保护。
+- 短按立即拉取一次，拉取期间把已有用量百分比替换为 `...`，结果返回后更新最新数据；带冷却保护。
+- 双击仍按共享手势合同执行：第一次短按刷新，第二次短按受冷却限制。ChatGPT 桌面端没有公开可用的 Live 语音深链或命令接口，不用 UI 自动化模拟点击。
 - 长按打开 `usageUrl`。
 - 限额行按窗口时长排序，短窗口在前；只有一条限额时用剩余空间显示限额重置券张数。
-- 拉取失败时按失败原因显示不同标识；已有历史数据时保留上次数值并叠加陈旧标记。
+- 拉取失败时按失败原因显示不同标识；临时故障保留上次数值并叠加陈旧标记，确认需要重新登录时清空旧数据并直接显示登录提醒。
 
 ## 3. 取数契约
 
@@ -52,7 +53,7 @@ ChatGPT Usage 在单个 DX200 键面上显示 Codex 的限额用量与重置倒�
 
 ### 3.2 登录判定
 
-读 `~/.codex/auth.json`，要求存在且 `tokens.access_token` 非空，否则 `NOT_LOGGED_IN`。**只读，不解析 token 内容、不刷新、不写回。**
+读 `~/.codex/auth.json`，要求存在且 `tokens.access_token` 非空，否则 `NOT_LOGGED_IN`。**只读，不解析 token 内容、不刷新、不写回。** app-server 返回 401 或明确的登录、认证、token 过期错误时也归入 `NOT_LOGGED_IN`；普通 RPC 错误不误判为登录失效。
 
 先读文件再 spawn：这样"没登录"能在几毫秒内判定并给出准确原因，而不是等一个进程起来再超时。
 
@@ -87,6 +88,7 @@ rateLimitsByLimitId  { <limitId>: {...} }
 - 优先读 `rateLimitsByLimitId[limitId]`，回退 `rateLimits`。`limitId` 默认 `codex`。
 - 百分比取 `usedPercent`，归一化到 0..100 整数。
 - 倒计时由 `resetsAt`（**Unix 秒，需 ×1000**）与本地时间差计算。
+- 重置券从 `rateLimitResetCredits` 读取次数，并从 `status: "available"` 的 `credits[].expiresAt` 中取最近到期时间，作为重置券行倒计时。
 - 行标签由 `windowDurationMins` 换算：10080 → `W`（周）、300 → `5H`、其余 → `{n}H` / `{n}D`。
 - 两条限额都读不出可用百分比时视为失败。
 
@@ -129,6 +131,7 @@ rateLimitsByLimitId  { <limitId>: {...} }
 | 态 | 触发 | 键面表现 |
 | --- | --- | --- |
 | `OK` | 拉取成功 | 正常数据行 |
+| `REFRESHING` | 有历史数据时短按刷新 | 保留行结构，百分比临时显示 `...` |
 | `STALE` | 有历史数据，本次失败 | 保留上次数值 + 陈旧点 |
 | `NO_CLI` | 找不到可执行文件 | 终端字形 + `No codex` |
 | `NOT_LOGGED_IN` | auth.json 缺失或无 token | 钥匙字形 + `codex login` |
@@ -136,7 +139,7 @@ rateLimitsByLimitId  { <limitId>: {...} }
 | `RPC_ERROR` | JSON-RPC 返回 error 或结构不可解析 | 感叹号 + `Error` |
 | `PENDING` | 首次拉取未返回 | 标记 + 占位横线 |
 
-只要曾成功拉取过，任何失败都优先降级为 `STALE`。具体原因写入日志并回显 Inspector 诊断面板。
+只要曾成功拉取过，临时失败优先降级为 `STALE`。`NOT_LOGGED_IN` 是例外：立即清空用量、重置券、订阅类型和上次获取时间，显示登录提醒，并把清空结果写回运行态持久化。具体原因回显 Inspector 诊断面板。
 
 ## 7. 品牌资产
 
@@ -154,7 +157,7 @@ OpenAI 标记，`viewBox="0 0 24 24"` 单 path，取自 simple-icons（收录的
 ├──────────────┤
 │ 5H  12%   2h │  行2：短窗口在前（存在时）
 │ W   30%   5d │  行3：周限额
-│ RESET 3      │  行4：重置券（showResetCredits 且有券时）
+│ RESET 3   6d │  行4：重置券次数 + 最近到期倒计时
 └──────────────┘
 ```
 
@@ -163,7 +166,7 @@ OpenAI 标记，`viewBox="0 0 24 24"` 单 path，取自 simple-icons（收录的
 - 内容箱为 `42..214`，即基座规范的设计箱范围，不额外内缩。
 - 数据行为行背景填充式进度条，填充用矩形宽度实现，**禁止 clipPath**。
 - 倒计时配色与字号规则与 [claudeusage](claudeusage.md) 完全一致（`m`/`h`/`d` 递进高亮，数字大、单位固定 15px）。
-- 重置券行不是限额，不画进度填充（`percent` 传 null），但**底槽跟随 `showBarBackground` 一起保留**——否则这一行比上面少一层背景，在键面上会显得空落落地贴着边。文字用 `theme.muted`。
+- 重置券行不是限额，不画进度填充（`percent` 传 null），但**底槽跟随 `showBarBackground` 一起保留**——否则这一行比上面少一层背景，在键面上会显得空落落地贴着边。中间显示可用次数，右侧显示最近到期的一张重置券倒计时；接口未给到期时间时右侧留空。文字用 `theme.muted`。
 - 全部内容经 `renderScreenFrame` / `frameContent` 输出，不绕过安全边框。
 - 复用 `theme.ok/warn/crit` 语义色（由 claudeusage 那次改动引入）。
 
@@ -173,7 +176,7 @@ OpenAI 标记，`viewBox="0 0 24 24"` 单 path，取自 simple-icons（收录的
 | --- | --- |
 | `createState` | 初始化显示态，水合上次成功数据 |
 | `onReady` | 安排拉取与重绘两个定时器；立即首拉 |
-| `onRun` | 短按立即拉取，10 秒冷却 |
+| `onRun` | 短按立即拉取，已有数据的百分比先显示 `...`，10 秒冷却 |
 | `onLongPress` | 打开 `usageUrl`（按平台选 `open` / `start` / `xdg-open`） |
 | `onParamFromPlugin` | `__chatgptusageProbe` 控制命令触发诊断并回推 `__chatgptusageDiag` |
 | `onSettingsChanged` | 间隔变化重启对应定时器；`codexCommand` / `limitId` 变化立即重拉 |
@@ -189,6 +192,7 @@ OpenAI 标记，`viewBox="0 0 24 24"` 单 path，取自 simple-icons（收录的
 ```text
 primary / secondary: { label, percent, resetsAt, windowMins } | null
 resetCredits: number | null
+resetCreditsExpiresAt: number | null
 planType: string | null
 fetchedAt, lastErrorKind
 ```
@@ -197,7 +201,7 @@ fetchedAt, lastErrorKind
 
 ## 11. 已覆盖的关键验证
 
-`tests/chatgptusage-action.test.js` 22 条，另有渲染与端到端人工验证（2026-07-19：真实拉取成功，键面 13 个状态渲染正确，与 claudeusage 并排比对行位、字号、填充与倒计时格式完全对齐）。
+`tests/chatgptusage-action.test.js` 25 条，另有渲染与端到端人工验证（2026-07-19：真实拉取成功，键面 13 个状态渲染正确，与 claudeusage 并排比对行位、字号、填充与倒计时格式完全对齐；2026-07-28：真实响应确认重置券含 `expiresAt`）。
 
 - `auth.json` 缺失 / 无 tokens / JSON 损坏三种未登录路径。
 - JSON-RPC 返回 error、非 JSON 行、超时、进程启动失败。
@@ -207,6 +211,8 @@ fetchedAt, lastErrorKind
 - Unix 秒 → 倒计时，含跨天与已过期。
 - 阈值 75/90 分级。
 - 有历史失败 → `STALE`；无历史失败 → 具体 kind。
+- 手动刷新期间百分比显示 `...`，登录失效清空旧数据。
+- 重置券次数与最近到期倒计时。
 - `onDispose` 后无残留定时器与子进程。
 
 ## 12. 已知风险
@@ -215,6 +221,7 @@ fetchedAt, lastErrorKind
 2. 每次拉取 spawn 一个进程，比 claudeusage 的 HTTP GET 重；间隔下限锁 60 秒。
 3. `secondary` 在当前账户恒为 null，**双行布局无法实机验证**，只能靠构造数据覆盖。
 4. OpenAI 标记的商标属性（见 §7）。
+5. ChatGPT 桌面端当前没有公开的 Live 语音深链或命令接口。用 AppleScript/辅助功能模拟界面点击会依赖应用版本、界面语言和权限，不作为正式双击能力。
 
 ## 多语言契约
 

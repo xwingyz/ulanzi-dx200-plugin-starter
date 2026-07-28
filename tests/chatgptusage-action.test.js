@@ -8,6 +8,8 @@ import { __testing } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/
 const {
   ACTION_CONFIGS,
   chatgptApplyResult,
+  chatgptHandleShortPress,
+  chatgptRpcErrorKind,
   chatgptSeverityFromPercent,
   chatgptVisibleRows,
   chatgptWorstSeverity,
@@ -35,7 +37,13 @@ function rpcResult(overrides = {}) {
       ...overrides.rateLimits,
     },
     rateLimitsByLimitId: overrides.rateLimitsByLimitId,
-    rateLimitResetCredits: { availableCount: 3, credits: [] },
+    rateLimitResetCredits: {
+      availableCount: 3,
+      credits: [
+        { status: 'available', expiresAt: 1785524678 },
+        { status: 'available', expiresAt: 1786556232 },
+      ],
+    },
     ...overrides.root,
   };
 }
@@ -49,6 +57,7 @@ function instance(overrides = {}) {
     primary: null,
     secondary: null,
     resetCredits: null,
+    resetCreditsExpiresAt: null,
     planType: null,
     fetchedAt: null,
     lastErrorKind: null,
@@ -135,6 +144,11 @@ test('resetsAt is unix seconds and must be widened to milliseconds', () => {
   // 1784949936 秒 —— 若忘记 ×1000，会被当成 1970 年而永远显示 now。
   assert.equal(parsed.primary.resetsAt, 1784949936 * 1000);
   assert.ok(parsed.primary.resetsAt > Date.parse('2020-01-01'));
+  assert.equal(
+    parsed.resetCreditsExpiresAt,
+    1785524678 * 1000,
+    'the nearest available reset credit expiry drives the reset-row countdown',
+  );
 });
 
 test('a missing secondary window simply yields no second row', () => {
@@ -231,6 +245,12 @@ test('rpc failures and unparseable results surface as their own kinds', async ()
   assert.equal(good.data.primary.percent, 30);
 });
 
+test('authentication-shaped rpc failures become a login reminder', () => {
+  assert.equal(chatgptRpcErrorKind({ code: 401, message: 'request failed' }), 'NOT_LOGGED_IN');
+  assert.equal(chatgptRpcErrorKind({ code: -32000, message: 'token expired' }), 'NOT_LOGGED_IN');
+  assert.equal(chatgptRpcErrorKind({ code: -32000, message: 'rate limit reached' }), 'RPC_ERROR');
+});
+
 // 假 app-server：按真实协议应答 initialize，再按脚本回 rateLimits。
 function fakeSpawn(script) {
   return () => {
@@ -316,18 +336,54 @@ test('an rpc error reply, a timeout, and a spawn failure each terminate cleanly'
   assert.equal(failed.kind, 'RPC_ERROR');
 });
 
-test('a failure keeps the last known numbers instead of blanking the key', () => {
+test('temporary failures keep history, but login failures clear it', () => {
   const withHistory = instance({ primary: win('W', 30), resetCredits: 3 });
   assert.equal(chatgptApplyResult(withHistory, { ok: false, kind: 'TIMEOUT' }), false);
   assert.equal(withHistory.displayState, 'STALE');
   assert.equal(withHistory.lastErrorKind, 'TIMEOUT');
   assert.equal(withHistory.primary.percent, 30);
 
-  for (const kind of ['NO_CLI', 'NOT_LOGGED_IN', 'TIMEOUT', 'RPC_ERROR']) {
+  const loggedOut = instance({
+    primary: win('W', 30),
+    resetCredits: 3,
+    resetCreditsExpiresAt: 1785524678 * 1000,
+    planType: 'plus',
+    fetchedAt: 99,
+  });
+  assert.equal(chatgptApplyResult(loggedOut, { ok: false, kind: 'NOT_LOGGED_IN' }), false);
+  assert.equal(loggedOut.displayState, 'NOT_LOGGED_IN');
+  assert.equal(loggedOut.primary, null);
+  assert.equal(loggedOut.resetCredits, null);
+  assert.equal(loggedOut.resetCreditsExpiresAt, null);
+  assert.equal(loggedOut.planType, null);
+  assert.equal(loggedOut.fetchedAt, null);
+
+  for (const kind of ['NO_CLI', 'TIMEOUT', 'RPC_ERROR']) {
     const fresh = instance();
     chatgptApplyResult(fresh, { ok: false, kind });
     assert.equal(fresh.displayState, kind);
   }
+});
+
+test('a manual refresh replaces visible percentages with dots until the fetch completes', async () => {
+  const current = instance({ primary: win('W', 30), lastManualAt: 0 });
+  let observedState = null;
+  const result = chatgptHandleShortPress(current, {
+    now: 100_000,
+    run: async (target) => {
+      observedState = target.displayState;
+    },
+  });
+  assert.equal(current.displayState, 'REFRESHING');
+  await result;
+  assert.equal(observedState, 'REFRESHING');
+
+  const svg = Buffer.from(
+    config.render(current, { now: 100_000 }).split(',')[1],
+    'base64',
+  ).toString('utf8');
+  assert.match(svg, />\.\.\.<\/tspan>/);
+  assert.doesNotMatch(svg, />30<\/tspan><tspan[^>]*>%<\/tspan>/);
 });
 
 test('hydrated data is stale until a live fetch confirms it', () => {
@@ -424,6 +480,21 @@ test('render survives every display state and draws one band per visible row', (
   assert.ok(withCredits.includes('>RESET<'));
   assert.ok(!one.includes('>RESET<'), 'zero credits should not take a row');
   assert.ok(!two.includes('clipPath'), 'must not rely on clipPath');
+});
+
+test('the reset-credit row shows the nearest expiry countdown beside the count', () => {
+  const now = Date.parse('2026-07-28T00:00:00Z');
+  const svg = Buffer.from(
+    config.render(instance({
+      primary: win('W', 30),
+      resetCredits: 2,
+      resetCreditsExpiresAt: now + 3 * 3600_000,
+    }), { now }).split(',')[1],
+    'base64',
+  ).toString('utf8');
+  assert.ok(svg.includes('>RESET<'));
+  assert.ok(svg.includes('>2<'));
+  assert.match(svg, />3<\/tspan><tspan[^>]*>h<\/tspan>/);
 });
 
 test('the brand mark stays visible on light themes', () => {

@@ -181,13 +181,27 @@ export function createChatGptUsageAction(runtime) {
         }
         if (message.id === 1) {
           finish(message.error
-            ? { ok: false, kind: 'RPC_ERROR' }
+            ? { ok: false, kind: rpcErrorKind(message.error) }
             : { ok: true, result: message.result || {} });
         }
       });
 
       send({ method: 'initialize', id: 0, params: { clientInfo: CLIENT_INFO } });
     });
+  }
+
+  function rpcErrorKind(error) {
+    const code = Number(error?.code);
+    const detail = (() => {
+      try {
+        return JSON.stringify(error);
+      } catch {
+        return String(error || '');
+      }
+    })();
+    return code === 401 || /\b(unauthori[sz]ed|not authenticated|authentication required|sign[ -]?in|required login|log[ -]?in required|token expired|expired token)\b/i.test(detail)
+      ? 'NOT_LOGGED_IN'
+      : 'RPC_ERROR';
   }
 
   // ---------------------------------------------------------------- 解析
@@ -253,11 +267,20 @@ export function createChatGptUsageAction(runtime) {
     if (!primary && !secondary) {
       return null;
     }
-    const credits = Number(result?.rateLimitResetCredits?.availableCount);
+    const resetCreditGroup = result?.rateLimitResetCredits;
+    const credits = Number(resetCreditGroup?.availableCount);
+    const resetCreditsExpiresAt = Array.isArray(resetCreditGroup?.credits)
+      ? resetCreditGroup.credits
+        .filter((credit) => !credit?.status || credit.status === 'available')
+        .map((credit) => normalizeResetsAt(credit?.expiresAt))
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b)[0] ?? null
+      : null;
     return {
       primary,
       secondary,
       resetCredits: Number.isFinite(credits) ? credits : null,
+      resetCreditsExpiresAt,
       planType: typeof group.planType === 'string' ? group.planType : null,
     };
   }
@@ -420,7 +443,10 @@ export function createChatGptUsageAction(runtime) {
 
     const bands = [...rows];
     if (showCredits && Number.isFinite(instance.resetCredits) && instance.resetCredits > 0) {
-      bands.push({ credits: instance.resetCredits });
+      bands.push({
+        credits: instance.resetCredits,
+        expiresAt: instance.resetCreditsExpiresAt,
+      });
     }
 
     let body = '';
@@ -438,22 +464,25 @@ export function createChatGptUsageAction(runtime) {
         // "用掉了多少券"。但底槽跟着 showBar 一起保留，否则这一行会比上面两行
         // 少一层背景，在键面上显得空落落地贴着边。
         if (band.credits !== undefined) {
+          const tail = formatCountdown(band.expiresAt, nowMs);
           return renderMeterRow(geometry, theme, {
             percent: null,
             color: theme.muted,
             label: t('RESET', language),
             value: String(band.credits),
-            tail: '',
+            tail,
+            tailColor: countdownColor(tail, theme),
             showBar,
           });
         }
+        const countdown = formatCountdown(band.resetsAt, nowMs);
         return renderMeterRow(geometry, theme, {
           percent: band.percent,
           color: severityColor(band.severity, theme, severityColors),
           label: band.label,
-          value: `${band.percent}%`,
-          tail: formatCountdown(band.resetsAt, nowMs),
-          tailColor: countdownColor(formatCountdown(band.resetsAt, nowMs), theme),
+          value: state === 'REFRESHING' ? '...' : `${band.percent}%`,
+          tail: countdown,
+          tailColor: countdownColor(countdown, theme),
           showBar,
         });
       }).join('');
@@ -466,8 +495,8 @@ export function createChatGptUsageAction(runtime) {
     }
 
     // STALE 徽章：画对应失败原因的错误图标（缩小版），与 claudeusage 同构。
-    // NO_CLI / NOT_LOGGED_IN 需要用户去处理（装 CLI / 登录），用 crit 提级；
-    // TIMEOUT / RPC_ERROR 是暂时性故障，用 warn。
+    // NO_CLI 需要用户安装或配置 CLI，用 crit 提级；TIMEOUT / RPC_ERROR 是暂时性故障，
+    // 用 warn。NOT_LOGGED_IN 已在 applyResult 中强制清空数据，不会进入 STALE。
     const staleBadge = state === 'STALE' && hasData
       ? (() => {
         const kind = instance.lastErrorKind || 'RPC_ERROR';
@@ -502,6 +531,7 @@ export function createChatGptUsageAction(runtime) {
       primary: instance.primary || null,
       secondary: instance.secondary || null,
       resetCredits: instance.resetCredits ?? null,
+      resetCreditsExpiresAt: instance.resetCreditsExpiresAt ?? null,
       planType: instance.planType || null,
       fetchedAt: instance.fetchedAt ?? null,
       lastErrorKind: instance.lastErrorKind || null,
@@ -524,6 +554,9 @@ export function createChatGptUsageAction(runtime) {
       primary,
       secondary,
       resetCredits: valid && Number.isFinite(raw.resetCredits) ? raw.resetCredits : null,
+      resetCreditsExpiresAt: valid && Number.isFinite(raw.resetCreditsExpiresAt)
+        ? raw.resetCreditsExpiresAt
+        : null,
       planType: valid && typeof raw.planType === 'string' ? raw.planType : null,
       fetchedAt: valid && Number.isFinite(raw.fetchedAt) ? raw.fetchedAt : null,
       lastErrorKind: valid && typeof raw.lastErrorKind === 'string' ? raw.lastErrorKind : null,
@@ -566,6 +599,7 @@ export function createChatGptUsageAction(runtime) {
       instance.primary = result.data.primary;
       instance.secondary = result.data.secondary;
       instance.resetCredits = result.data.resetCredits;
+      instance.resetCreditsExpiresAt = result.data.resetCreditsExpiresAt;
       instance.planType = result.data.planType;
       instance.fetchedAt = now;
       instance.lastErrorKind = null;
@@ -573,6 +607,16 @@ export function createChatGptUsageAction(runtime) {
       return true;
     }
     instance.lastErrorKind = result.kind;
+    if (result.kind === 'NOT_LOGGED_IN') {
+      instance.primary = null;
+      instance.secondary = null;
+      instance.resetCredits = null;
+      instance.resetCreditsExpiresAt = null;
+      instance.planType = null;
+      instance.fetchedAt = null;
+      instance.displayState = 'NOT_LOGGED_IN';
+      return false;
+    }
     instance.displayState = (instance.primary || instance.secondary) ? 'STALE' : result.kind;
     return false;
   }
@@ -596,7 +640,7 @@ export function createChatGptUsageAction(runtime) {
     }
 
     instance.fetching = false;
-    if (applyResult(instance, result)) {
+    if (applyResult(instance, result) || result.kind === 'NOT_LOGGED_IN') {
       flushState(instance);
     }
     renderInstance(instance);
@@ -611,6 +655,7 @@ export function createChatGptUsageAction(runtime) {
       return undefined;
     }
     instance.lastManualAt = now;
+    instance.displayState = (instance.primary || instance.secondary) ? 'REFRESHING' : 'PENDING';
     clearInstanceTimeout(instance, 'chatgptusagePoll');
     return run(instance, { immediateRender: true });
   }
@@ -755,6 +800,7 @@ export function createChatGptUsageAction(runtime) {
       // 与 claudeusage 重名的一律加前缀。
       chatgptApplyResult: applyResult,
       chatgptBuildDiagnostics: buildDiagnostics,
+      chatgptHandleShortPress: handleShortPress,
       chatgptSeverityFromPercent: severityFromPercent,
       hasCodexLogin,
       hydrateChatGptState: hydrateState,
@@ -762,6 +808,7 @@ export function createChatGptUsageAction(runtime) {
       parseRateLimits,
       readRateLimits,
       resolveCodexCommand,
+      chatgptRpcErrorKind: rpcErrorKind,
       chatgptVisibleRows: visibleRows,
       chatgptWorstSeverity: worstSeverity,
       windowLabel,
