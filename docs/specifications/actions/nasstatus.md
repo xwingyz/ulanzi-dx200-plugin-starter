@@ -1,7 +1,7 @@
 # Synology NAS Status 功能与技术规范
 
 状态：首版已实现；API 链路已在 DS923+（DSM 7.3.2-86009）真机验证在线态，键面三态待实机复核  
-最后代码核对：2026-07-26
+最后代码核对：2026-07-28
 action key：`nasstatus`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.nasstatus`
 
@@ -22,10 +22,10 @@ Synology NAS Status 是 Lex Utility 内的一键一机只读监控 action：通�
 
 ## 2. 用户功能
 
-- 一个实例绑定一台 NAS；显示机器名（显示名 > API hostname > 型号）、系统温度（含历史图表）、最多两个卷的容量（背景进度条 + 已用/总量 + 百分比）。键面最多 3 行：温度行 + 至多两个存储行。
+- 一个实例绑定一台 NAS；显示机器名（显示名 > API hostname > 型号）、系统温度（含历史图表）、最多两个卷的容量。容量可从百分比、总容量、已用容量、剩余容量中选择两个显示，背景进度条始终按已用百分比绘制。键面最多 3 行：温度行 + 至多两个存储行。
 - 三态语义：**在线**（正常取数）/ **离线**（TCP 超时或拒连；不自称"关机"，插件无法证明关机）/ **异常**（能连通但认证失败、权限不足或 API 报错——必须与离线可区分，避免排查错方向）。
 - 短按：立即刷新（带冷却，刷新中显示角标反馈）。
-- 长按：用系统浏览器打开 DSM 管理页（URL 由地址 + 端口 + 协议拼出，不单独配置）。
+- 长按：用系统浏览器打开 DSM 管理页。`dsmUrl` 非空且为有效 HTTP(S) URL 时优先使用；留空或非法时由地址 + 端口 + 协议拼出默认首页。
 - Inspector「测试连接」：用当前表单值（无需先保存）登录并拉取卷列表，回填卷下拉框；默认选中第一个卷。
 
 ## 3. DSM Web API 契约
@@ -59,6 +59,9 @@ DSM 7.3.2 实机事实（DS923+，非管理员账号）：`SYNO.DSM.Info` 与点
 | `password` | 空 | 字符串，最长 128 | 明文本机保存 |
 | `volumeId` | 空 | 字符串，最长 32 | 卷 1 的 id（如 `volume_1`）；空 = 第一个卷 |
 | `volumeId2` | 空 | 字符串，最长 32 | 卷 2 的 id；空 = 不显示第二行；与卷 1 相同则去重 |
+| `capacityMetric1` | `percent` | `percent` / `total` / `used` / `free` | 容量行左侧值 |
+| `capacityMetric2` | `used` | 同上，且不得与第一项重复 | 容量行右侧值 |
+| `dsmUrl` | 空 | 最长 2048 的 HTTP(S) URL，不允许内嵌账号密码 | 长按打开的自定义 DSM 页面；空或非法回退默认首页 |
 | `tempChart` | `line` | `line` / `bars` | 温度历史图表样式（折线默认 / 柱状） |
 | `pollSec` | `60` | 15–3600 | 轮询间隔（秒） |
 | `theme` | `mint` | 公共主题 key | 键面主题 |
@@ -79,21 +82,20 @@ DSM 7.3.2 实机事实（DS923+，非管理员账号）：`SYNO.DSM.Info` 与点
 ```text
 ┌──────────────┐
 │Synology xwing│  头部：Synology 官方 wordmark（矢量，基线 59）+ 机器名 16px 亮色右对齐（截 9 字符，避开 wordmark）
-│[🌡]DS923+ 78°│  行1：温度——行面板背景画温度历史图表（折线默认/柱状可选）+
-│              │       温度计图标 + 型号 15px 左置(x=78) + 温度数值 22px 右对齐(x=200，不贴边)
-│[💾]41% 6.5T/1│  行2：卷 1——按百分比背景填充 + 硬盘图标 +
-│              │       百分比 13px 左置(x=78) + 已用/总量 18px 右对齐(x=212)
-│[💾]0%  3.1G/1│  行3：卷 2（可选，settings.volumeId2）
+│[🌡]DS923+ 78°C│  行1：温度——行面板背景画温度历史图表（折线默认/柱状可选）+
+│               │       温度计图标 + 型号 15px 左置(x=78) + 温度数字和小号单位
+│[💾]41%   6.5T │  行2：卷 1——按百分比背景填充 + 硬盘图标 + 两项所选容量值
+│[💾]0%    3.1G │  行3：卷 2（可选，settings.volumeId2）
 └──────────────┘
 ```
 
 - 行布局对齐 systemstatus：行区间 80..214、gap 6、行数 2（单卷）或 3（双卷）均分行高，行面板 `x=44 w=170 rx=7`（panel 填充 + low 描边）、图标 x=54。
 - 机器名在头部右上角（`theme.text` 亮色、16px、右锚 214，wordmark 收在 x≈122 前互不重叠，截 9 字符）。
-- 型号与温度同一行：型号在前（左置 x=78、muted 15px），温度数值在后（右对齐 x=200、22px，留出面板内边距不贴边）。
+- 型号与温度同一行：型号在前（左置 x=78、muted 15px），`°C` 单位固定右锚 x=212，温度数字右锚 x=193，二者只保留约 4px 视觉间距，避免宽字号向左遮挡型号。温度数字与 systemstatus 同行数布局严格同字号：单卷两行时 34px，双卷三行时 29px；`°C` 独立使用 14px 小字号和主题强调色。
 - 温度历史：每次取数成功追加内存数组（上限 24 点，与 systemstatus `HISTORY_LIMIT` 对齐，不持久化），画在温度行面板内；纵轴刻度 `max(90, 峰值)`；折线含面积底纹，柱状 0.28 透明度，几何与 systemstatus `renderMetricHistory` 同构（各自持有）。
 - 温度分级：`temperatureSeverity` —— **>75°C `warn`、≥90°C `crit`**，DSM `temperature_warn` 兜底强制至少 warn；图标与图表恒取分级色，数值仅在告警/危险档改色（常温保持正文色）。
-- 容量填充色按用量分级：≥90% `crit`、≥80% `warn`、其余 `accent`；已用/总量为主文字（18px、右对齐 x=212、同温度改色规则），百分比为 muted 小字（13px、左置 x=78，紧跟硬盘图标）。填充为行面板内的矩形宽度（禁 clipPath）。
-- 容量单位二进制换算，`T`/`G` 一位小数（如 `6.5T/15.7T`）。
+- 容量填充色按用量分级：≥90% `crit`、≥80% `warn`、其余 `accent`；两项容量数字与同屏温度数字严格同字号，按设置顺序左右排列并标注稳定的 `data-capacity-metric`。填充为行面板内的矩形宽度（禁 clipPath）。
+- 容量单位二进制换算，`T` 保留一位小数，`G`/`M` 使用整数。`%` / `T` / `G` / `M` 与 systemstatus 的单位做法一致，从主数字拆开，统一使用 14px 小字号和主题强调色。
 - 刷新反馈：wordmark 左侧的圆形高亮（systemstatus 同款样式）。
 - `OFFLINE`：键面置灰语义——名称保留，主区显示「离线」（muted），底部显示最后成功更新的相对时间。
 - `ERROR`：主区显示「异常」（crit）+ 原因短语（认证失败 / 权限不足 / 接口异常），并画 `frameHighlight` crit 内框。
@@ -108,7 +110,7 @@ DSM 7.3.2 实机事实（DS923+，非管理员账号）：`SYNO.DSM.Info` 与点
 | `createState` | 水合持久化的 hostname/model/lastSeenAt（缺失降级为空），初始化会话与退避计数 |
 | `onReady` | 配置完整则启动首轮取数与轮询；不完整显示待配置 |
 | `onRun` | 短按手动刷新（5s 冷却） |
-| `onLongPress` | 打开 DSM 管理页（macOS `open`；其余平台跳过） |
+| `onLongPress` | 打开自定义 `dsmUrl`；留空或非法则打开默认 DSM 首页（macOS `open`；其余平台跳过） |
 | `onSettingsChanged` | 连接字段变化→清空会话、重置退避、立即重取；`volumeId`/`pollSec` 变化→重渲染/重排定时器 |
 | `onParamFromPlugin` | 处理 `__nasstatusProbe`（测试连接）并以 `__nasstatusProbeResult` 回推卷列表与诊断 |
 | `onDispose` | 清定时器、尽力 logout、flush 运行态 |
@@ -131,7 +133,7 @@ DSM 7.3.2 实机事实（DS923+，非管理员账号）：`SYNO.DSM.Info` 与点
 ## 10. 完成与验收
 
 - manifest、action 模块、Inspector、图标四层齐全并完成注册；本文档与 `base.md` 生产清单、`README.md` 索引同步。
-- 专项测试 `tests/nasstatus-action.test.js` 覆盖：API 响应解析（info/login/dsm/storage）、错误分类三态、卷选择、容量格式化、退避序列、短按冷却、长按 URL 拼装、各显示态渲染结构；`testing` 导出全部加 `nas` 前缀防撞。
+- 专项测试 `tests/nasstatus-action.test.js` 覆盖：API 响应解析（info/login/dsm/storage）、错误分类三态、卷选择、容量两项去重与格式化、退避序列、短按冷却、自定义/回退长按 URL、各显示态渲染结构与字号；`testing` 导出全部加 `nas` 前缀防撞。
 - 根目录 `npm test` 全绿。
 - `restart` 同步宿主后实机验证：在线渲染、拔线/停 DSM 的离线态、错密码的异常态、测试连接回填卷下拉。
 

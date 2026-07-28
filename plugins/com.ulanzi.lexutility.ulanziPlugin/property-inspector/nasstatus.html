@@ -87,6 +87,24 @@
             </select>
           </div>
           <div class="field">
+            <label data-localize="Capacity values (left and right)">Capacity values (left and right)</label>
+            <div class="field-row">
+              <select id="capacityMetric1" name="capacityMetric1" aria-label="Left capacity value">
+                <option value="percent" data-localize="Percentage">Percentage</option>
+                <option value="total" data-localize="Total capacity">Total capacity</option>
+                <option value="used" data-localize="Used capacity">Used capacity</option>
+                <option value="free" data-localize="Remaining capacity">Remaining capacity</option>
+              </select>
+              <select id="capacityMetric2" name="capacityMetric2" aria-label="Right capacity value">
+                <option value="percent" data-localize="Percentage">Percentage</option>
+                <option value="total" data-localize="Total capacity">Total capacity</option>
+                <option value="used" data-localize="Used capacity">Used capacity</option>
+                <option value="free" data-localize="Remaining capacity">Remaining capacity</option>
+              </select>
+            </div>
+            <div class="hint" data-localize="Choose exactly two different values. The order controls the key display.">Choose exactly two different values. The order controls the key display.</div>
+          </div>
+          <div class="field">
             <label for="tempChart" data-localize="Temperature history chart">Temperature history chart</label>
             <select id="tempChart" name="tempChart">
               <option value="line" data-localize="Line chart (default)">Line chart (default)</option>
@@ -96,6 +114,11 @@
           <div class="field">
             <label for="displayName" data-localize="Display name (optional)">Display name (optional)</label>
             <input id="displayName" name="displayName" maxlength="40" autocomplete="off" placeholder="Leave blank to use the NAS hostname" data-localize="Leave blank to use the NAS hostname">
+          </div>
+          <div class="field">
+            <label for="dsmUrl" data-localize="Custom DSM URL (optional)">Custom DSM URL (optional)</label>
+            <input id="dsmUrl" name="dsmUrl" type="url" maxlength="2048" autocomplete="off" placeholder="https://nas.example.com:5001/" data-localize="https://nas.example.com:5001/">
+            <div class="hint" data-localize="Long press opens this URL. Leave blank to use the NAS address and port above.">Long press opens this URL. Leave blank to use the NAS address and port above.</div>
           </div>
           <div class="field">
             <label for="pollSec" data-localize="Refresh interval (s)">Refresh interval (s)</label>

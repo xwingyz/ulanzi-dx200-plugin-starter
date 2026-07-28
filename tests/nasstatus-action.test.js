@@ -8,12 +8,16 @@ const {
   nasApplyResult,
   nasBackoffDelay,
   nasBuildBaseUrl,
+  nasBuildDsmPageUrl,
   nasFetchWithRetry,
   nasFormatBytes,
+  nasFormatCapacityMetric,
   nasHandleLongPress,
   nasHandleShortPress,
   nasHydrateState,
   nasIsCompleteSettings,
+  nasNormalizeCapacityMetrics,
+  nasNormalizeDsmUrl,
   nasParseApiInfo,
   nasParseDsmInfo,
   nasParseVolumes,
@@ -324,7 +328,7 @@ test('nasstatus temperature severity turns above 75°C and honors the DSM warn f
 
 // ---- 设置与运行态 ----
 
-test('nasstatus settings normalize ports, intervals and completeness', () => {
+test('nasstatus settings normalize ports, intervals, capacity metrics and completeness', () => {
   const defaults = ACTION_CONFIGS.nasstatus.defaults;
   const normalized = ACTION_CONFIGS.nasstatus.normalizeSettings({
     nasHost: ' 192.168.1.10 ',
@@ -339,6 +343,14 @@ test('nasstatus settings normalize ports, intervals and completeness', () => {
   assert.equal(normalized.useHttps, 'true');
   assert.equal(normalized.pollSec, '15');
   assert.equal(normalized.volumeId2, '');
+  assert.deepEqual(
+    nasNormalizeCapacityMetrics({ capacityMetric1: 'total', capacityMetric2: 'total' }),
+    { capacityMetric1: 'total', capacityMetric2: 'percent' },
+  );
+  assert.deepEqual(
+    nasNormalizeCapacityMetrics({ capacityMetric1: 'free', capacityMetric2: 'used' }),
+    { capacityMetric1: 'free', capacityMetric2: 'used' },
+  );
   assert.equal(normalized.tempChart, 'line');
   assert.equal(
     ACTION_CONFIGS.nasstatus.normalizeSettings({ tempChart: 'bars' }, defaults).tempChart,
@@ -354,6 +366,17 @@ test('nasstatus settings normalize ports, intervals and completeness', () => {
 
   assert.equal(nasBuildBaseUrl({ nasHost: 'nas.local', nasPort: '5000', useHttps: 'false' }), 'http://nas.local:5000');
   assert.equal(nasBuildBaseUrl({ nasHost: 'nas.local', nasPort: '5001', useHttps: 'true' }), 'https://nas.local:5001');
+  assert.equal(nasNormalizeDsmUrl('https://nas.example.com:5001/webman/'), 'https://nas.example.com:5001/webman/');
+  assert.equal(nasNormalizeDsmUrl('ftp://nas.example.com/file'), '');
+  assert.equal(nasNormalizeDsmUrl('https://user:secret@nas.example.com/'), '', 'URL 不得内嵌凭据');
+  assert.equal(
+    nasBuildDsmPageUrl({ dsmUrl: 'https://nas.example.com/webman/', nasHost: 'nas.local', nasPort: '5001', useHttps: 'true' }),
+    'https://nas.example.com/webman/',
+  );
+  assert.equal(
+    nasBuildDsmPageUrl({ dsmUrl: '', nasHost: 'nas.local', nasPort: '5001', useHttps: 'true' }),
+    'https://nas.local:5001/',
+  );
 });
 
 test('nasstatus hydrates persisted identity and degrades invalid payloads', () => {
@@ -387,11 +410,13 @@ test('nasstatus long press opens the DSM url on macOS only', () => {
   };
   nasHandleLongPress(instance(), { spawnFn, platform: 'darwin' });
   assert.deepEqual(spawned, [['open', 'https://192.168.1.10:5001/']]);
+  nasHandleLongPress(instance({ dsmUrl: 'https://nas.example.com/webman/' }), { spawnFn, platform: 'darwin' });
+  assert.deepEqual(spawned.at(-1), ['open', 'https://nas.example.com/webman/']);
 
   nasHandleLongPress(instance(), { spawnFn, platform: 'win32' });
-  assert.equal(spawned.length, 1, '非 macOS 平台跳过');
+  assert.equal(spawned.length, 2, '非 macOS 平台跳过');
   nasHandleLongPress(instance({ nasHost: '' }), { spawnFn, platform: 'darwin' });
-  assert.equal(spawned.length, 1, '缺地址时跳过');
+  assert.equal(spawned.length, 2, '缺地址时跳过');
 });
 
 test('nasstatus probe replies volume options and never echoes credentials', async () => {
@@ -425,9 +450,12 @@ test('nasstatus renders online face with name, temperature and capacity row', ()
   assert.match(svg, /DiskStat…/);
   assert.match(svg, /DS920\+/, '型号显示在温度行');
   assert.match(svg, /°C/);
+  assert.match(svg, /data-capacity-metric="percent"/);
+  assert.match(svg, /data-capacity-metric="used"/);
   assert.match(svg, />45</);
-  assert.match(svg, />%</);
-  assert.match(svg, /3\.2T\/7\.1T/);
+  assert.match(svg, />%<\/tspan>/);
+  assert.match(svg, />3\.2<\/tspan><tspan data-role="unit" font-size="14"[^>]*>T</);
+  assert.equal(nasFormatCapacityMetric('free', { totalBytes: 7.1 * TIB, usedBytes: 3.2 * TIB }).value, '3.9');
   assert.match(svg, /data-row="temperature"/);
   assert.match(svg, /data-row="storage"/);
 });
@@ -456,12 +484,15 @@ test('nasstatus renders distinct offline, error and config states', () => {
   assert.match(english, /Last online/);
 });
 
-test('nasstatus temperature above 75 renders the value in warning color', () => {
+test('nasstatus temperature and capacity values match systemstatus row-count font sizes', () => {
   const { THEMES } = __testing;
   const hot = decode(ACTION_CONFIGS.nasstatus.render(instance({}, { connectionState: 'ONLINE', temperature: 80 })));
-  assert.match(hot, new RegExp(`fill="${THEMES.mint.warn}" font-weight="800"><tspan font-size="22">80<`), '>75°C 数值应取 warn 色');
+  assert.match(hot, new RegExp(`data-role="temperature-value" x="193"[^>]*fill="${THEMES.mint.warn}" font-size="34" font-weight="800">80<`), '>75°C 数值应紧贴右侧单位并取 warn 色');
+  assert.match(hot, /data-role="unit" x="212"[^>]*font-size="14"[^>]*>°C</, '温度单位固定在行右侧');
+  assert.match(hot, /data-capacity-metric="percent"[^>]*><tspan font-size="34">45</);
+  assert.match(hot, /data-role="unit"[^>]*font-size="14"/);
   const cool = decode(ACTION_CONFIGS.nasstatus.render(instance({}, { connectionState: 'ONLINE', temperature: 42 })));
-  assert.match(cool, new RegExp(`fill="${THEMES.mint.text}" font-weight="800"><tspan font-size="22">42<`), '常温数值保持正文色');
+  assert.match(cool, new RegExp(`data-role="temperature-value" x="193"[^>]*fill="${THEMES.mint.text}" font-size="34" font-weight="800">42<`), '常温数值保持正文色');
 });
 
 test('nasstatus renders temperature history as line by default and bars on demand', () => {
@@ -483,10 +514,23 @@ test('nasstatus renders a second storage row when volume 2 is configured', () =>
     instance({ volumeId2: 'volume_2' }, { connectionState: 'ONLINE', volumes }),
   ));
   assert.equal((two.match(/data-row="storage"/g) || []).length, 2);
-  assert.match(two, /3\.2T\/7\.1T/);
-  assert.match(two, /1\.0T\/2\.0T/);
+  assert.match(two, /data-capacity-metric="percent"[^>]*><tspan font-size="29">45</);
+  assert.match(two, /data-capacity-metric="used"[^>]*><tspan font-size="29">3\.2/);
+  assert.match(two, /data-capacity-metric="used"[^>]*><tspan font-size="29">1\.0/);
   const one = decode(ACTION_CONFIGS.nasstatus.render(instance({}, { connectionState: 'ONLINE', volumes })));
   assert.equal((one.match(/data-row="storage"/g) || []).length, 1);
+});
+
+test('nasstatus renders the configured two capacity values in order', () => {
+  const svg = decode(ACTION_CONFIGS.nasstatus.render(instance(
+    { capacityMetric1: 'total', capacityMetric2: 'free' },
+    { connectionState: 'ONLINE' },
+  )));
+  const totalAt = svg.indexOf('data-capacity-metric="total"');
+  const freeAt = svg.indexOf('data-capacity-metric="free"');
+  assert.ok(totalAt > 0 && freeAt > totalAt);
+  assert.match(svg, /data-capacity-metric="total"[^>]*><tspan font-size="34">7\.1/);
+  assert.match(svg, /data-capacity-metric="free"[^>]*><tspan font-size="34">3\.9/);
 });
 
 test('nasstatus falls back to model when hostname is unavailable', () => {

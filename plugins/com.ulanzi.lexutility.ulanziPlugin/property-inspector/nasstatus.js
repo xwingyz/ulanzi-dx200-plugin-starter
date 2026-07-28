@@ -1,4 +1,4 @@
-const NASSTATUS_FIELDS = withLanguageField(['displayName', 'nasHost', 'nasPort', 'useHttps', 'username', 'password', 'volumeId', 'volumeId2', 'tempChart', 'pollSec', 'theme', 'frameSize', 'showFrame']);
+const NASSTATUS_FIELDS = withLanguageField(['displayName', 'nasHost', 'nasPort', 'useHttps', 'username', 'password', 'volumeId', 'volumeId2', 'capacityMetric1', 'capacityMetric2', 'dsmUrl', 'tempChart', 'pollSec', 'theme', 'frameSize', 'showFrame']);
 const NASSTATUS_VOLUME_SELECTS = ['volumeId', 'volumeId2'];
 const NASSTATUS_PROBE_PARAM = '__nasstatusProbe';
 const NASSTATUS_PROBE_RESULT_PARAM = '__nasstatusProbeResult';
@@ -81,6 +81,15 @@ function initNasStatusInspector() {
       flashInspectorFeedback('saved');
     });
     form.addEventListener('input', () => autosave());
+    ['capacityMetric1', 'capacityMetric2'].forEach((fieldId) => {
+      document.getElementById(fieldId).addEventListener('change', (event) => {
+        const otherId = fieldId === 'capacityMetric1' ? 'capacityMetric2' : 'capacityMetric1';
+        const other = document.getElementById(otherId);
+        if (other.value === event.target.value) {
+          other.value = [...other.options].find((option) => option.value !== event.target.value)?.value || '';
+        }
+      });
+    });
     bindThemeButtons(commitSettings);
     bindLanguageSelection(commitSettings, () => {
       fillVolumeOptions(lastVolumes);

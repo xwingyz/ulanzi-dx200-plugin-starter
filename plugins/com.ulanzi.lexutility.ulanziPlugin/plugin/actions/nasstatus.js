@@ -10,6 +10,8 @@ const MANUAL_COOLDOWN_MS = 5_000;
 const BACKOFF_DELAYS_MS = [60_000, 120_000];
 const PROBE_PARAM = '__nasstatusProbe';
 const PROBE_RESULT_PARAM = '__nasstatusProbeResult';
+const CAPACITY_METRICS = Object.freeze(['percent', 'total', 'used', 'free']);
+const DEFAULT_CAPACITY_METRICS = Object.freeze(['percent', 'used']);
 
 // 会话失效错误码：清 sid 重登一次；105 是权限不足，重登也救不了，单独归类。
 const SESSION_EXPIRED_CODES = new Set([106, 107, 119]);
@@ -85,6 +87,38 @@ export function createNasStatusAction(runtime) {
     const host = cleanString(settings.nasHost);
     const port = normalizeNumberString(settings.nasPort, '5001', 1, 65535);
     return `${scheme}://${host}:${port}`;
+  }
+
+  function normalizeDsmUrl(value) {
+    const raw = cleanString(value).slice(0, 2048);
+    if (!raw) return '';
+    try {
+      const url = new URL(raw);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+      return url.toString();
+    } catch {
+      return '';
+    }
+  }
+
+  function buildDsmPageUrl(settings = {}) {
+    const customUrl = normalizeDsmUrl(settings.dsmUrl);
+    if (customUrl) return customUrl;
+    return cleanString(settings.nasHost) ? `${buildBaseUrl(settings)}/` : '';
+  }
+
+  function normalizeCapacityMetrics(settings = {}) {
+    const first = CAPACITY_METRICS.includes(settings.capacityMetric1)
+      ? settings.capacityMetric1
+      : DEFAULT_CAPACITY_METRICS[0];
+    let second = CAPACITY_METRICS.includes(settings.capacityMetric2)
+      ? settings.capacityMetric2
+      : DEFAULT_CAPACITY_METRICS[1];
+    if (second === first) {
+      second = DEFAULT_CAPACITY_METRICS.find((metric) => metric !== first)
+        || CAPACITY_METRICS.find((metric) => metric !== first);
+    }
+    return { capacityMetric1: first, capacityMetric2: second };
   }
 
   // ---------------------------------------------------------------- HTTP
@@ -320,6 +354,29 @@ export function createNasStatusAction(runtime) {
     return `${Math.round(value / 2 ** 20)}M`;
   }
 
+  function formatBytesParts(bytes) {
+    const value = finiteNumber(bytes);
+    if (value == null || value < 0) return { value: '--', unit: '' };
+    const tib = value / 2 ** 40;
+    if (tib >= 1) return { value: tib.toFixed(1), unit: 'T' };
+    const gib = value / 2 ** 30;
+    if (gib >= 1) return { value: String(Math.round(gib)), unit: 'G' };
+    return { value: String(Math.round(value / 2 ** 20)), unit: 'M' };
+  }
+
+  function formatCapacityMetric(metric, volume) {
+    if (metric === 'percent') {
+      const percent = usagePercent(volume);
+      return { value: percent == null ? '--' : String(percent), unit: '%' };
+    }
+    const bytes = metric === 'total'
+      ? volume?.totalBytes
+      : metric === 'free'
+        ? Math.max(0, (volume?.totalBytes || 0) - (volume?.usedBytes || 0))
+        : volume?.usedBytes;
+    return formatBytesParts(bytes);
+  }
+
   function usagePercent(volume) {
     if (!volume || !volume.totalBytes) return null;
     return Math.max(0, Math.min(100, Math.round((volume.usedBytes / volume.totalBytes) * 100)));
@@ -482,12 +539,13 @@ export function createNasStatusAction(runtime) {
   function handleLongPress(instance, options = {}) {
     const spawnFn = options.spawnFn ?? spawn;
     const platform = options.platform ?? process.platform;
-    if (platform !== 'darwin' || !cleanString(instance.settings.nasHost)) {
+    const targetUrl = buildDsmPageUrl(instance.settings);
+    if (platform !== 'darwin' || !targetUrl) {
       return;
     }
     try {
       // SDK 桥接层没有插件主动打开 URL 的通道（openurl 是宿主→插件方向），走系统 open。
-      const child = spawnFn('open', [`${buildBaseUrl(instance.settings)}/`], { stdio: 'ignore' });
+      const child = spawnFn('open', [targetUrl], { stdio: 'ignore' });
       child.on?.('error', () => {});
       child.unref?.();
     } catch {
@@ -595,11 +653,7 @@ export function createNasStatusAction(runtime) {
     return `<g data-chart-type="line" data-history-count="${values.length}"><polygon points="${area}" fill="${color}" opacity="0.15"/><polyline points="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.64"/></g>`;
   }
 
-  // 已用/未用与机器名共用的正文字号。18px 经排布实测：行宽 170 里
-  // 图标(54..74) + 「6.5T/15.7T」(≈95px, 右锚 182) + 百分比(右锚 212) 互不重叠。
-  const ROW_TEXT_SIZE = 18;
-
-  function renderTemperatureRow(y, height, instance, theme) {
+  function renderTemperatureRow(y, height, instance, theme, valueSize) {
     const severity = temperatureSeverity(instance.temperature, instance.temperatureWarn);
     const color = usageColor(severity, theme);
     const valueColor = severity === 'normal' ? theme.text : color;
@@ -607,7 +661,8 @@ export function createNasStatusAction(runtime) {
     const value = instance.temperature == null ? '--' : String(Math.round(instance.temperature));
     const chartType = normalizeChoice(instance.settings.tempChart, 'line', ['line', 'bars']);
     const chart = renderTempChart(instance.tempHistory, { x: 44, y, width: 170, height }, color, chartType);
-    // 型号与温度同行：型号靠左紧跟图标，温度居右但不贴边（右锚 200，留出面板内边距）。
+    // 型号与温度同行：型号靠左紧跟图标；单位固定在最右侧，数值右锚到单位左边，
+    // 中间只留约 4px 视觉间距，避免宽字号向左侵占型号区域。
     const model = clipText(instance.model, 8);
     const modelText = model
       ? `<text x="78" y="${(centerY + 4.5).toFixed(1)}" text-anchor="start" fill="${theme.muted}" font-size="15" font-weight="800">${escapeXml(model)}</text>`
@@ -618,11 +673,17 @@ export function createNasStatusAction(runtime) {
         ${chart}
         ${renderThermoIcon(centerY, color)}
         ${modelText}
-        <text x="200" y="${(centerY + 22 * 0.34).toFixed(1)}" text-anchor="end" fill="${valueColor}" font-weight="800"><tspan font-size="22">${escapeXml(value)}</tspan><tspan font-size="12" fill="${theme.muted}"> °C</tspan></text>
+        <text data-role="temperature-value" x="193" y="${(centerY + valueSize * 0.34).toFixed(1)}" text-anchor="end" fill="${valueColor}" font-size="${valueSize}" font-weight="800">${escapeXml(value)}</text>
+        <text data-role="unit" x="212" y="${(centerY + 5).toFixed(1)}" text-anchor="end" fill="${theme.accent}" font-size="14" font-weight="700">°C</text>
       </g>`;
   }
 
-  function renderStorageRow(y, height, volume, theme, language) {
+  function renderCapacityValue(metric, volume, centerX, centerY, valueSize, valueColor, theme) {
+    const display = formatCapacityMetric(metric, volume);
+    return `<text data-capacity-metric="${metric}" x="${centerX}" y="${(centerY + valueSize * 0.34).toFixed(1)}" text-anchor="middle" fill="${valueColor}" font-weight="800"><tspan font-size="${valueSize}">${escapeXml(display.value)}</tspan><tspan data-role="unit" font-size="14" fill="${theme.accent}">${escapeXml(display.unit)}</tspan></text>`;
+  }
+
+  function renderStorageRow(y, height, volume, theme, language, valueSize, capacityMetrics) {
     const centerY = y + height / 2;
     if (!volume) {
       return `
@@ -641,8 +702,8 @@ export function createNasStatusAction(runtime) {
         ${rowPanel(y, height, theme)}
         <rect x="45" y="${(y + 1).toFixed(1)}" width="${fillWidth}" height="${(height - 2).toFixed(1)}" rx="6" fill="${color}" opacity="0.26"/>
         ${renderDiskIcon(centerY, color)}
-        <text x="78" y="${(centerY + 4.5).toFixed(1)}" text-anchor="start" fill="${theme.muted}" font-weight="700"><tspan font-size="13">${percent}</tspan><tspan font-size="11">%</tspan></text>
-        <text x="212" y="${(centerY + ROW_TEXT_SIZE * 0.34).toFixed(1)}" text-anchor="end" fill="${valueColor}" font-size="${ROW_TEXT_SIZE}" font-weight="800">${escapeXml(`${formatBytes(volume.usedBytes)}/${formatBytes(volume.totalBytes)}`)}</text>
+        ${renderCapacityValue(capacityMetrics[0], volume, 111, centerY, valueSize, valueColor, theme)}
+        ${renderCapacityValue(capacityMetrics[1], volume, 180, centerY, valueSize, valueColor, theme)}
       </g>`;
   }
 
@@ -690,9 +751,12 @@ export function createNasStatusAction(runtime) {
       const top = 80;
       const bottom = 214;
       const rowHeight = (bottom - top - gap * (rowCount - 1)) / rowCount;
+      const valueSize = rowCount === 2 ? 34 : 29;
+      const normalizedCapacity = normalizeCapacityMetrics(settings);
+      const capacityMetrics = [normalizedCapacity.capacityMetric1, normalizedCapacity.capacityMetric2];
       const rows = [
-        renderTemperatureRow(top, rowHeight, instance, theme),
-        ...storageRows.map((volume, index) => renderStorageRow(top + (index + 1) * (rowHeight + gap), rowHeight, volume, theme, language)),
+        renderTemperatureRow(top, rowHeight, instance, theme, valueSize),
+        ...storageRows.map((volume, index) => renderStorageRow(top + (index + 1) * (rowHeight + gap), rowHeight, volume, theme, language, valueSize, capacityMetrics)),
       ];
       body = rows.join('');
     }
@@ -722,6 +786,9 @@ export function createNasStatusAction(runtime) {
       password: '',
       volumeId: '',
       volumeId2: '',
+      capacityMetric1: DEFAULT_CAPACITY_METRICS[0],
+      capacityMetric2: DEFAULT_CAPACITY_METRICS[1],
+      dsmUrl: '',
       tempChart: 'line',
       pollSec: '60',
       theme: 'mint',
@@ -729,6 +796,7 @@ export function createNasStatusAction(runtime) {
       showFrame: 'true',
     },
     normalizeSettings: (settings, defaults) => ({
+      ...normalizeCapacityMetrics(settings),
       displayName: cleanString(settings.displayName).slice(0, 40),
       nasHost: cleanString(settings.nasHost).slice(0, 253),
       nasPort: normalizeNumberString(settings.nasPort, defaults.nasPort, 1, 65535),
@@ -737,6 +805,7 @@ export function createNasStatusAction(runtime) {
       password: cleanString(settings.password).slice(0, 128),
       volumeId: cleanString(settings.volumeId).slice(0, 32),
       volumeId2: cleanString(settings.volumeId2).slice(0, 32),
+      dsmUrl: normalizeDsmUrl(settings.dsmUrl),
       tempChart: normalizeChoice(settings.tempChart, defaults.tempChart, ['line', 'bars']),
       pollSec: normalizeNumberString(settings.pollSec, defaults.pollSec, 15, 3600),
     }),
@@ -820,14 +889,18 @@ export function createNasStatusAction(runtime) {
       nasApplyResult: applyResult,
       nasBackoffDelay: backoffDelay,
       nasBuildBaseUrl: buildBaseUrl,
+      nasBuildDsmPageUrl: buildDsmPageUrl,
       nasFetchNasStatus: fetchNasStatus,
       nasFetchWithRetry: fetchWithRetry,
       nasFormatAge: formatAge,
       nasFormatBytes: formatBytes,
+      nasFormatCapacityMetric: formatCapacityMetric,
       nasHandleLongPress: handleLongPress,
       nasHandleShortPress: handleShortPress,
       nasHydrateState: hydrateState,
       nasIsCompleteSettings: isCompleteSettings,
+      nasNormalizeCapacityMetrics: normalizeCapacityMetrics,
+      nasNormalizeDsmUrl: normalizeDsmUrl,
       nasParseApiInfo: parseApiInfo,
       nasParseDsmInfo: parseDsmInfo,
       nasParseVolumes: parseVolumes,
