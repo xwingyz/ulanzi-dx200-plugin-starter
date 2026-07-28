@@ -3,6 +3,19 @@ import { test } from 'node:test';
 
 import { __testing as testing } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
 
+function estimateBoldStatusTextWidth(text, fontSize) {
+  const units = [...text].reduce((sum, character) => {
+    if (/\s/.test(character)) return sum + 0.28;
+    if (/[ilIjtfr1]/.test(character)) return sum + 0.32;
+    if (/[MW@%]/.test(character)) return sum + 0.9;
+    if (/[A-Z]/.test(character)) return sum + 0.68;
+    if (/[0-9]/.test(character)) return sum + 0.58;
+    if (/[\u0000-\u007f]/.test(character)) return sum + 0.56;
+    return sum + 1;
+  }, 0);
+  return units * Number(fontSize) * 1.05;
+}
+
 test('bambustatus maps detailed preparation stages to stable localization keys with a raw fallback', () => {
   assert.equal(testing.stageLabel({ mc_print_stage: 1 }), 'Auto bed leveling');
   assert.equal(testing.stageLabel({ mc_print_stage: 14 }), 'Cleaning the nozzle');
@@ -360,13 +373,23 @@ test('bambustatus shows only a detailed preparation stage and advances the print
   };
   const preparing = { ...base, liveStatus: 'PREPARING', stage: 'Auto bed leveling' };
   const preparingSvg = Buffer.from(config.render(preparing).split(',')[1], 'base64').toString('utf8');
-  assert.match(preparingSvg, /data-bambu-status-line="single"[^>]*>自动调平热床<\/text>/);
+  assert.match(preparingSvg, /data-bambu-status-line="single"[^>]*>热床调平<\/text>/);
   assert.doesNotMatch(preparingSvg, /准备中| · /);
   assert.equal((preparingSvg.match(/data-bambu-status-line=/g) || []).length, 1);
 
   const genericPreparing = { ...base, liveStatus: 'PREPARING', stage: 'Preparing to print' };
   const genericSvg = Buffer.from(config.render(genericPreparing).split(',')[1], 'base64').toString('utf8');
   assert.match(genericSvg, /data-bambu-status-line="single"[^>]*>准备中<\/text>/);
+
+  const paused = { ...base, liveStatus: 'PAUSED', stage: 'Paused: filament runout' };
+  const pausedSvg = Buffer.from(config.render(paused).split(',')[1], 'base64').toString('utf8');
+  assert.match(pausedSvg, /data-bambu-status-line="single"[^>]*>耗材用尽<\/text>/);
+  assert.doesNotMatch(pausedSvg, /已暂停|暂停：| · /);
+
+  const offline = { ...base, connectionState: 'OFFLINE', lastSeenAt: null };
+  const offlineSvg = Buffer.from(config.render(offline).split(',')[1], 'base64').toString('utf8');
+  assert.match(offlineSvg, /data-bambu-status-line="single"[^>]*>离线<\/text>/);
+  assert.doesNotMatch(offlineSvg, /No data yet|暂无数据| · /);
 
   const running = { ...base, liveStatus: 'RUNNING', printAnimationFrame: 0 };
   testing.applyPrintReport(running, { gcode_state: 'RUNNING', mc_percent: 10 }, 10_000);
@@ -376,4 +399,51 @@ test('bambustatus shows only a detailed preparation stage and advances the print
   assert.match(firstSvg, /data-print-animation-frame="1"/);
   assert.match(secondSvg, /data-print-animation-frame="2"/);
   testing.dropPersistedState(context);
+});
+
+test('bambustatus built-in status lines fit the 164-unit visual budget in English and Chinese', () => {
+  const config = testing.ACTION_CONFIGS.bambustatus;
+  const cases = [
+    ['config-required', { connectionState: 'CONFIG_REQUIRED' }],
+    ['connecting', { connectionState: 'CONNECTING' }],
+    ['incompatible', { connectionState: 'INCOMPATIBLE' }],
+    ['offline', { connectionState: 'OFFLINE', lastSeenAt: Date.now() - 59 * 60_000 }],
+    ['idle', { connectionState: 'ONLINE', liveStatus: 'IDLE' }],
+    ['finished', { connectionState: 'ONLINE', liveStatus: 'FINISHED', elapsedSec: 35 * 60 }],
+    ['failed', { connectionState: 'ONLINE', liveStatus: 'FAILED' }],
+    ['preparing', { connectionState: 'ONLINE', liveStatus: 'PREPARING', stage: '' }],
+    ['paused', { connectionState: 'ONLINE', liveStatus: 'PAUSED', stage: '' }],
+  ];
+  for (let code = 1; code <= 21; code += 1) {
+    const stage = testing.stageLabel({ mc_print_stage: code });
+    cases.push([`preparing-${code}`, {
+      connectionState: 'ONLINE', liveStatus: 'PREPARING', stage, elapsedSec: 60, remainingSec: 3600,
+    }]);
+    cases.push([`paused-${code}`, {
+      connectionState: 'ONLINE', liveStatus: 'PAUSED', stage, elapsedSec: 60, remainingSec: 3600,
+    }]);
+  }
+
+  for (const uiLanguage of ['en', 'zh_CN']) {
+    for (const [name, patch] of cases) {
+      const context = `com.ulanzi.ulanzistudio.lexutility.bambustatus___width-${uiLanguage}-${name}`;
+      const instance = {
+        context,
+        active: false,
+        settings: { ...config.defaults, uiLanguage },
+        ...config.createState({ context }),
+        ...patch,
+      };
+      const svg = Buffer.from(config.render(instance).split(',')[1], 'base64').toString('utf8');
+      const match = svg.match(/<text data-bambu-status-line="single"[^>]*font-size="([0-9.]+)"[^>]*>([^<]*)<\/text>/);
+      assert.ok(match, `${uiLanguage}/${name} should render one status line`);
+      const [, fontSize, text] = match;
+      assert.doesNotMatch(text, /…/, `${uiLanguage}/${name} should not truncate built-in copy`);
+      assert.ok(
+        estimateBoldStatusTextWidth(text, fontSize) <= 164,
+        `${uiLanguage}/${name} is too wide: "${text}" at ${fontSize}px`,
+      );
+      testing.dropPersistedState(context);
+    }
+  }
 });

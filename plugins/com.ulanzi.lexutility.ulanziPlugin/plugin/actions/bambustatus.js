@@ -15,6 +15,8 @@ const PASSIVE_REDRAW_MS = 30_000;
 const COMPLETION_HOLD_MS = 3 * 60_000;
 const MANUAL_REFRESH_FEEDBACK_MS = 650;
 const RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
+const STATUS_TEXT_MAX_WIDTH = 164;
+const STATUS_FONT_SIZES = [34, 32, 30, 28, 26, 24, 22, 20, 18];
 const SCAN_PARAM = '__bambustatusScan';
 const SCAN_RESULT_PARAM = '__bambustatusDiscovery';
 const DIAG_PARAM = '__bambustatusDiag';
@@ -60,6 +62,46 @@ function cleanString(value) {
 function clipText(value, maxLength) {
   const text = cleanString(value);
   return text.length > maxLength ? `${text.slice(0, Math.max(1, maxLength - 1))}…` : text;
+}
+
+function statusGlyphUnits(character) {
+  if (/\s/.test(character)) return 0.28;
+  if (/[ilIjtfr1]/.test(character)) return 0.32;
+  if (/[MW@%]/.test(character)) return 0.9;
+  if (/[A-Z]/.test(character)) return 0.68;
+  if (/[0-9]/.test(character)) return 0.58;
+  if (/[\u0000-\u007f]/.test(character)) return 0.56;
+  return 1;
+}
+
+function estimateStatusTextWidth(value, fontSize) {
+  const units = [...cleanString(value)]
+    .reduce((sum, character) => sum + statusGlyphUnits(character), 0);
+  return units * Number(fontSize) * 1.05;
+}
+
+function truncateStatusText(value, fontSize, maxWidth = STATUS_TEXT_MAX_WIDTH) {
+  const text = cleanString(value);
+  if (estimateStatusTextWidth(text, fontSize) <= maxWidth) return text;
+  let fitted = '';
+  for (const character of text) {
+    if (estimateStatusTextWidth(`${fitted}${character}…`, fontSize) > maxWidth) break;
+    fitted += character;
+  }
+  return `${fitted}…`;
+}
+
+function fitStatusText(value) {
+  const text = cleanString(value);
+  const fontSize = STATUS_FONT_SIZES.find(
+    (candidate) => estimateStatusTextWidth(text, candidate) <= STATUS_TEXT_MAX_WIDTH,
+  ) || STATUS_FONT_SIZES.at(-1);
+  const fittedText = truncateStatusText(text, fontSize);
+  return {
+    text: fittedText,
+    fontSize,
+    estimatedWidth: estimateStatusTextWidth(fittedText, fontSize),
+  };
 }
 
 function normalizeModel(value) {
@@ -371,6 +413,16 @@ function formatAge(timestamp, now = Date.now(), translate = (key) => key) {
   if (seconds < 60) return translate('%ss ago').replace('%s', String(seconds));
   if (seconds < 3600) return translate('%sm ago').replace('%s', String(Math.floor(seconds / 60)));
   return translate('%sh ago').replace('%s', String(Math.floor(seconds / 3600)));
+}
+
+function formatAgeShort(timestamp, now = Date.now(), translate = (key) => key) {
+  if (!Number.isFinite(timestamp)) return '';
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (seconds < 60) return translate('%ss short').replace('%s', String(Math.min(59, seconds)));
+  if (seconds < 3600) {
+    return translate('%sm short').replace('%s', String(Math.min(59, Math.floor(seconds / 60))));
+  }
+  return translate('%sh short').replace('%s', String(Math.min(99, Math.floor(seconds / 3600))));
 }
 
 export function createBambuStatusAction(runtime) {
@@ -747,22 +799,20 @@ export function createBambuStatusAction(runtime) {
       IDLE: [t('Idle', language), ''],
       PREPARING: [preparingDetail || t('Preparing', language), ''],
       PAUSED: [
-        t('Paused', language),
         data.stage && data.stage !== 'Preparing to print'
           ? localizeStage(data.stage, 'Print paused')
-          : t('Print paused', language),
+          : t('Paused', language),
+        '',
       ],
       FINISHED: [t('Finished', language), ''],
-      FAILED: [t('Print failed', language), t('Check the printer', language)],
+      FAILED: [t('Print failed', language), ''],
     };
     const lineText = (primary, secondary = '') => {
-      const combined = secondary ? `${primary} · ${secondary}` : primary;
-      return clipText(combined, 23);
+      return cleanString(secondary ? `${primary} · ${secondary}` : primary);
     };
     const renderStatusLine = (text, color = theme.text) => {
-      const length = [...text].length;
-      const fontSize = length > 19 ? 20 : length > 14 ? 24 : length > 10 ? 28 : 34;
-      return `<text data-bambu-status-line="single" x="128" y="158" text-anchor="middle" fill="${color}" font-size="${fontSize}" font-weight="800">${escapeXml(text)}</text>`;
+      const fitted = fitStatusText(text);
+      return `<text data-bambu-status-line="single" data-bambu-status-width="${fitted.estimatedWidth.toFixed(1)}" x="128" y="158" text-anchor="middle" fill="${color}" font-size="${fitted.fontSize}" font-weight="800">${escapeXml(fitted.text)}</text>`;
     };
     const renderTimeIcon = (kind, x) => kind === 'estimated'
       ? `<g data-bambu-time-icon="estimated" transform="translate(${x} 198)" fill="none" stroke="${theme.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle r="7"/><path d="M0 -3.8 V0 L3.6 2.1"/></g>`
@@ -788,15 +838,15 @@ export function createBambuStatusAction(runtime) {
     if (instance.manualRefreshing) {
       body = `<text data-manual-refresh-feedback="active" x="128" y="158" text-anchor="middle" fill="${theme.text}" font-size="44" font-weight="800">...</text>`;
     } else if (instance.connectionState === 'CONFIG_REQUIRED') {
-      body = renderStatusLine(lineText(t('Setup required', language), t('Open the Inspector to scan', language)));
+      body = renderStatusLine(t('Setup required', language));
     } else if (instance.connectionState === 'CONNECTING') {
       body = renderStatusLine(t('Connecting', language));
     } else if (instance.connectionState === 'INCOMPATIBLE') {
-      body = renderStatusLine(lineText(t('Local status unavailable', language), t('Keep cloud mode', language)), theme.warn);
+      body = renderStatusLine(t('Status unavailable', language), theme.warn);
     } else if (instance.connectionState === 'OFFLINE') {
       body = renderStatusLine(lineText(
-        t('Disconnected', language),
-        `${t('Last update', language)} ${formatAge(instance.lastSeenAt, Date.now(), (key) => t(key, language))}`,
+        t('Offline', language),
+        formatAgeShort(instance.lastSeenAt, Date.now(), (key) => t(key, language)),
       ), theme.crit);
     } else if (status === 'RUNNING') {
       body = `
@@ -906,8 +956,11 @@ export function createBambuStatusAction(runtime) {
       deriveTimes,
       estimatedTotalSeconds,
       formatAge,
+      formatAgeShort,
       formatDuration,
       formatDurationParts,
+      estimateStatusTextWidth,
+      fitStatusText,
       hydrateSnapshot,
       isCompleteSettings,
       mergeDiscovery,
