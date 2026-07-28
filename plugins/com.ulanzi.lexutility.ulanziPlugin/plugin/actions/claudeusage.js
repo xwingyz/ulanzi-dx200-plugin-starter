@@ -31,6 +31,7 @@ export function createClaudeUsageAction(runtime) {
   const OAUTH_BETA = 'oauth-2025-04-20';
   const REQUEST_TIMEOUT_MS = 12_000;
   const MANUAL_COOLDOWN_MS = 10_000;
+  const OPEN_CLI_COOLDOWN_MS = 2_000;
   const STATE_VERSION = 1;
 
   // 手动刷新：短按时主动 spawn `claude` 让 CLI 用 refreshToken 自行刷新钥匙串凭据
@@ -104,6 +105,31 @@ export function createClaudeUsageAction(runtime) {
     }
   }
 
+  // 是否还有可用于恢复的凭据。登出时钥匙串里 accessToken / refreshToken 会双双清空
+  // （只剩 scopes、subscriptionType 等残留元数据）。注意 accessToken 过期时其字符串仍
+  // 保留（可被 CLI 刷新），所以「任一存在」即值得尝试刷新，只有两者皆空才是真正登出。
+  function hasClaudeCredential(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return false;
+    }
+    try {
+      const cred = JSON.parse(raw.trim())?.claudeAiOauth;
+      if (!cred || typeof cred !== 'object') {
+        return false;
+      }
+      const hasAccess = typeof cred.accessToken === 'string' && cred.accessToken.length > 0;
+      const hasRefresh = typeof cred.refreshToken === 'string' && cred.refreshToken.length > 0;
+      return hasAccess || hasRefresh;
+    } catch {
+      return false;
+    }
+  }
+
+  async function hasClaudeLogin(options = {}) {
+    const readRaw = options.readRaw ?? runSecurity;
+    return hasClaudeCredential(await readRaw());
+  }
+
   // ---------------------------------------------------------------- CLI 发现与刷新
 
   function isExecutable(candidate, fsImpl = fs) {
@@ -141,8 +167,19 @@ export function createClaudeUsageAction(runtime) {
   }
 
   // 尽力而为：失败也不抛，让调用方照常走一次拉取——刷新只是「更可能拿到新鲜数据」，
-  // 不是拉取的前置条件。stdio 全丢弃，只关心退出码；超时就杀掉，绝不让它挂住按键。
-  function runClaudeRefresh(options = {}) {
+  // 不是拉取的前置条件。先判登录：CLI 未登录时 `claude -p` 只会打印 "Not logged in"
+  // 却仍以 0 退出（无法据退出码识别），跑它纯属浪费一次 spawn；直接跳过并回 NOT_LOGGED_IN，
+  // 随后的 fetch 会照常给出 NO_TOKEN / "Sign in"。
+  async function runClaudeRefresh(options = {}) {
+    const hasLogin = options.hasLogin ?? hasClaudeLogin;
+    if (!(await hasLogin())) {
+      return { ok: false, reason: 'NOT_LOGGED_IN' };
+    }
+    return spawnClaudeRefresh(options);
+  }
+
+  // stdio 全丢弃，只关心退出码；超时就杀掉，绝不让它挂住按键。
+  function spawnClaudeRefresh(options = {}) {
     return new Promise((resolve) => {
       const spawnFn = options.spawnFn ?? spawn;
       const resolveCommand = options.resolveCommand ?? resolveClaudeCommand;
@@ -386,11 +423,15 @@ export function createClaudeUsageAction(runtime) {
     // 倒计时以 options.nowMs 为参照钟，而不是各自现调 Date.now()——同一次 render 的各行
     // 共用同一时刻，测试也能注入固定 now 消除取整漂移（见 development-rules §4「测试必须确定性」）。
     const tail = formatCountdown(row.resetsAt, options.nowMs);
+    // 刷新中把百分比替换成 `…`，等拉取回来再显示新值——给用户「正在取新数」的明确信号，
+    // 而不是让旧数字杵在那里让人以为没反应。倒计时是本地推算的，仍照常显示。
     return renderMeterRow(geometry, theme, {
       percent: row.percent,
       color: severityColor(row.severity, theme, options.severityColors),
       label: row.label,
-      value: `${row.percent}%`,
+      // 用 ASCII `...` 而非 `…`：renderMeterRow 的数字/单位分栏正则把 `[\d.]+` 当数字，
+      // 三个点会走大字号分支，和百分比同等视觉重量；单个 `…` 会掉进小字号量纲分支。
+      value: options.refreshing ? '...' : `${row.percent}%`,
       tail,
       tailColor: countdownColor(tail, theme),
       showBar: options.showBar,
@@ -431,6 +472,12 @@ export function createClaudeUsageAction(runtime) {
     }
   }
 
+  // 需要重新登录：读不到 token（登出）。即便还留着上次的陈旧数据也照样进登录提示——
+  // 没 token 就拉不到新值，继续显示旧百分比只会误导。单击此态直接打开 CLI 让用户登录。
+  function needsLogin(instance) {
+    return instance.displayState === 'NO_TOKEN' || instance.lastErrorKind === 'NO_TOKEN';
+  }
+
   function renderClaudeUsageIcon(instance, nowOverride) {
     const theme = themeFor(instance.settings);
     const frame = frameFor(instance.settings);
@@ -461,19 +508,23 @@ export function createClaudeUsageAction(runtime) {
     const labelX = boxX + 2 + markSize + 12;
     const groundLine = `<line x1="${boxX}" y1="${headerBaseline}" x2="${boxX + boxWidth}" y2="${headerBaseline}" stroke="${theme.low}" stroke-width="1.6" opacity="0.7"/>`;
 
+    // 登录提示优先于陈旧数据：登出时不显示旧百分比，整块换成 Sign in 提示（单击打开 CLI）。
+    const loginNeeded = needsLogin(instance);
+
     let body = '';
-    if (hasData) {
+    if (!loginNeeded && hasData) {
       const gap = 6;
       const rowHeight = (bodyBottom - bodyTop - gap * (rows.length - 1)) / rows.length;
       body = rows.map((row, index) => renderDataRow(
         row,
         { x: boxX, y: bodyTop + index * (rowHeight + gap), width: boxWidth, height: rowHeight },
         theme,
-        { showBar, severityColors, nowMs },
+        { showBar, severityColors, nowMs, refreshing: instance.refreshing },
       )).join('');
     } else {
-      const copy = ERROR_COPY[state] || ERROR_COPY.PENDING;
-      const color = state === 'PENDING' ? theme.muted : theme.warn;
+      const errState = loginNeeded ? 'NO_TOKEN' : state;
+      const copy = ERROR_COPY[errState] || ERROR_COPY.PENDING;
+      const color = errState === 'PENDING' ? theme.muted : theme.warn;
       body = `
         ${renderErrorGlyph(copy.glyph, 128, 140, color)}
         <text x="128" y="188" text-anchor="middle" fill="${color}" font-size="22" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(t(copy.text, language))}</text>`;
@@ -489,7 +540,7 @@ export function createClaudeUsageAction(runtime) {
     // 说不清原因的琥珀点。图标本身回答"要不要动手"——bang=重新登录、offline=网络、
     // wait=被限流。AUTH / NO_TOKEN 需要用户去刷新凭据，用 crit 提级；其余是暂时性
     // 故障，用 warn。
-    const staleBadge = !instance.refreshing && instance.displayState === 'STALE' && hasData
+    const staleBadge = !instance.refreshing && !loginNeeded && instance.displayState === 'STALE' && hasData
       ? (() => {
         const kind = instance.lastErrorKind || 'AUTH';
         const glyph = (ERROR_COPY[kind] || ERROR_COPY.AUTH).glyph;
@@ -659,10 +710,44 @@ export function createClaudeUsageAction(runtime) {
     return run(instance, { immediateRender: true });
   }
 
-  // 短按冷却：claude 刷新会 spawn 进程、真实消耗一点额度，连点毫无意义还会堆进程；
-  // 冷却窗口内直接忽略。
+  // 打开交互式 claude 终端：写一个临时 .command 用系统 open 拉起（走 LaunchServices，
+  // 不需要 Automation 授权，比 osascript 控制 Terminal 更稳）。未登录时交互式 claude 会
+  // 自行引导登录，因此「登录」与「打开 CLI」共用同一入口。冷却去重，避免双击在登出态
+  // （单击已开一次）又被 onDoublePress 开出第二个窗口。
+  function openClaudeCli(instance, options = {}) {
+    const now = options.now ?? Date.now();
+    const spawnFn = options.spawnFn ?? spawn;
+    const writeFile = options.writeFile ?? ((p, c) => fs.writeFileSync(p, c, { mode: 0o755 }));
+    const resolveCommand = options.resolveCommand ?? resolveClaudeCommand;
+    if (process.platform !== 'darwin') {
+      return undefined;
+    }
+    if (instance.lastOpenCliAt && now - instance.lastOpenCliAt < OPEN_CLI_COOLDOWN_MS) {
+      return undefined;
+    }
+    instance.lastOpenCliAt = now;
+    try {
+      const spec = resolveCommand(REFRESH_COMMAND);
+      const bin = spec ? spec.resolved : REFRESH_COMMAND;
+      const scriptPath = options.scriptPath ?? path.join(os.tmpdir(), 'lex-claude-cli.command');
+      // exec 让 claude 顶替这个 shell 占住 TTY，成为可交互会话；quote 兜住带空格的路径。
+      writeFile(scriptPath, `#!/bin/zsh\nexec "${bin}"\n`);
+      const child = spawnFn('open', [scriptPath], { stdio: 'ignore' });
+      child.on?.('error', () => {});
+      child.unref?.();
+    } catch {
+      // 打不开就算了，不该让一个副作用把按键拖进错误态。
+    }
+    return undefined;
+  }
+
+  // 短按：需要登录时直接打开 CLI 让用户登录；否则跑手动刷新。刷新有冷却——claude 刷新
+  // 会 spawn 进程、真实消耗一点额度，连点毫无意义还会堆进程；冷却窗口内直接忽略。
   function handleShortPress(instance, options = {}) {
     const now = options.now ?? Date.now();
+    if (needsLogin(instance)) {
+      return (options.openCli ?? openClaudeCli)(instance, { now });
+    }
     const run = options.run ?? runManualRefresh;
     if (instance.lastManualAt && now - instance.lastManualAt < MANUAL_COOLDOWN_MS) {
       return undefined;
@@ -743,9 +828,11 @@ export function createClaudeUsageAction(runtime) {
       refreshing: false,
       requestId: 0,
       lastManualAt: 0,
+      lastOpenCliAt: 0,
       ...hydrateState(readPersistedState(instance.context)),
     }),
     onRun: (instance) => handleShortPress(instance),
+    onDoublePress: (instance) => openClaudeCli(instance),
     onLongPress: (instance) => handleLongPress(instance),
     onReady: (instance) => {
       if (process.platform !== 'darwin') {
@@ -788,9 +875,13 @@ export function createClaudeUsageAction(runtime) {
       applyResult,
       extractAccessToken,
       fetchUsage,
+      hasClaudeCredential,
+      hasClaudeLogin,
       handleLongPress,
       handleShortPress,
       hydrateState,
+      needsLogin,
+      openClaudeCli,
       parseUsage,
       readScopedLimit,
       resolveClaudeCommand,

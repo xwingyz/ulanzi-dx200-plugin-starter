@@ -10,7 +10,11 @@ const {
   fetchUsage,
   formatCountdown,
   handleShortPress,
+  hasClaudeCredential,
+  hasClaudeLogin,
   hydrateState,
+  needsLogin,
+  openClaudeCli,
   parseUsage,
   readScopedLimit,
   resolveClaudeCommand,
@@ -295,40 +299,79 @@ test('resolveClaudeCommand searches PATH then the fallback bin dirs, and wraps b
   assert.equal(resolveClaudeCommand('claude', { fsImpl: { statSync: () => { throw new Error('x'); } }, pathEnv: '' }), null);
 });
 
+test('hasClaudeCredential treats an empty token pair as logged out', () => {
+  const wrap = (cred) => JSON.stringify({ claudeAiOauth: cred });
+  // 登录中：accessToken 在（即便过期其串仍在）。
+  assert.equal(hasClaudeCredential(wrap({ accessToken: 'sk-live' })), true);
+  // 过期但可恢复：只剩 refreshToken 也算有凭据，值得尝试刷新。
+  assert.equal(hasClaudeCredential(wrap({ accessToken: '', refreshToken: 'rt' })), true);
+  // 登出：两者皆空，只剩残留元数据。
+  assert.equal(hasClaudeCredential(wrap({ accessToken: '', refreshToken: '', subscriptionType: 'pro' })), false);
+  assert.equal(hasClaudeCredential(wrap({})), false);
+  for (const junk of ['', '   ', 'not json', '{}', null, undefined]) {
+    assert.equal(hasClaudeCredential(junk), false, `should reject ${JSON.stringify(junk)}`);
+  }
+});
+
+test('runClaudeRefresh skips the spawn entirely when the CLI is logged out', async () => {
+  let spawned = false;
+  const result = await runClaudeRefresh({
+    hasLogin: async () => false,
+    // 若真去 spawn 就让测试炸——未登录时绝不该起进程。
+    resolveCommand: () => { spawned = true; return { command: 'claude', prefixArgs: [] }; },
+    spawnFn: () => { spawned = true; return {}; },
+  });
+  assert.deepEqual(result, { ok: false, reason: 'NOT_LOGGED_IN' });
+  assert.equal(spawned, false, '登出时必须跳过 CLI 发现与 spawn，不浪费进程与额度');
+
+  // hasClaudeLogin 走注入的 readRaw：整串凭据空 → 未登录。
+  assert.equal(await hasClaudeLogin({ readRaw: async () => JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '' } }) }), false);
+  assert.equal(await hasClaudeLogin({ readRaw: async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk' } }) }), true);
+});
+
 test('runClaudeRefresh maps the child lifecycle to a best-effort result and never throws', async () => {
+  // 缓冲式假子进程：runClaudeRefresh 现在先 await hasLogin 才注册 child.on，
+  // 因此 emit 可能先于 on 发生——事件先记下，on 注册时若已 emit 过就立即补发，
+  // 让断言不依赖 spawn 的微任务时序。
   const fakeChild = () => {
-    const h = {};
-    return { on(ev, cb) { h[ev] = cb; return this; }, emit(ev, ...a) { h[ev]?.(...a); }, kill() { this.killed = true; } };
+    const h = {}; const fired = {};
+    return {
+      on(ev, cb) { h[ev] = cb; if (ev in fired) cb(...fired[ev]); return this; },
+      emit(ev, ...a) { fired[ev] = a; h[ev]?.(...a); },
+      kill() { this.killed = true; },
+    };
   };
   const spec = { command: 'claude', prefixArgs: [], resolved: '/bin/claude' };
+  // 已登录时才进入进程生命周期分支；这里统一注入 hasLogin=true 只测 spawn 后半段。
+  const refresh = (opts) => runClaudeRefresh({ hasLogin: async () => true, ...opts });
 
   // 解析不到 CLI：直接 NO_CLI，连 spawn 都不发生。
-  assert.deepEqual(await runClaudeRefresh({ resolveCommand: () => null }), { ok: false, reason: 'NO_CLI' });
+  assert.deepEqual(await refresh({ resolveCommand: () => null }), { ok: false, reason: 'NO_CLI' });
 
   // 退出码 0 → ok；非 0 → EXIT。
   let child = fakeChild();
-  let p = runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child });
+  let p = refresh({ resolveCommand: () => spec, spawnFn: () => child });
   child.emit('close', 0);
   assert.deepEqual(await p, { ok: true });
 
   child = fakeChild();
-  p = runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child });
+  p = refresh({ resolveCommand: () => spec, spawnFn: () => child });
   child.emit('close', 1);
   assert.deepEqual(await p, { ok: false, reason: 'EXIT' });
 
   // spawn 抛异常 / 子进程 error 事件都归为 SPAWN_FAILED。
   assert.deepEqual(
-    await runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => { throw new Error('boom'); } }),
+    await refresh({ resolveCommand: () => spec, spawnFn: () => { throw new Error('boom'); } }),
     { ok: false, reason: 'SPAWN_FAILED' },
   );
   child = fakeChild();
-  p = runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child });
+  p = refresh({ resolveCommand: () => spec, spawnFn: () => child });
   child.emit('error', new Error('spawn'));
   assert.deepEqual(await p, { ok: false, reason: 'SPAWN_FAILED' });
 
   // 挂住不退出：超时杀掉进程，绝不让按键永远卡在刷新态。
   child = fakeChild();
-  const timedOut = await runClaudeRefresh({ resolveCommand: () => spec, spawnFn: () => child, timeoutMs: 5 });
+  const timedOut = await refresh({ resolveCommand: () => spec, spawnFn: () => child, timeoutMs: 5 });
   assert.deepEqual(timedOut, { ok: false, reason: 'TIMEOUT' });
   assert.equal(child.killed, true);
 });
@@ -458,9 +501,10 @@ test('a lingering STALE state shows the failure reason as a badge, colour-graded
   // OK 时没有徽章——徽章是"拉取正在失败"的信号，成功态不该出现。
   assert.ok(!decode(instance({ ...rows, displayState: 'OK' })).includes('scale(0.5)'));
 
-  // 需要用户动手的失败（AUTH / NO_TOKEN）用 crit 提级——这正是当初那次 token
-  // 过期 44 小时、键面却看不出该去重登的场景。徽章存在性在这里断言。
-  for (const kind of ['AUTH', 'NO_TOKEN']) {
+  // 需要用户动手的失败（AUTH）用 crit 提级——这正是当初那次 token 过期 44 小时、键面
+  // 却看不出该去重登的场景。徽章存在性在这里断言。（NO_TOKEN 不在此列：登出走登录提示，
+  // 不再显示陈旧数字+徽章，见下一条测试。）
+  for (const kind of ['AUTH']) {
     assert.ok(decode(instance({ ...rows, displayState: 'STALE', lastErrorKind: kind })).includes('scale(0.5)'),
       `${kind} should draw a badge`);
   }
@@ -478,9 +522,83 @@ test('a lingering STALE state shows the failure reason as a badge, colour-graded
       `${kind} badge should be warn-coloured, not crit`);
   }
 
-  // 对称地收紧 crit 那两个：也只看徽章本身。
-  for (const kind of ['AUTH', 'NO_TOKEN']) {
+  // 对称地收紧 crit：也只看徽章本身。
+  for (const kind of ['AUTH']) {
     const badge = badgeGroup(decode(instance({ ...rows, displayState: 'STALE', lastErrorKind: kind })));
     assert.ok(badge.includes(theme.crit), `${kind} badge should be crit-coloured`);
   }
+});
+
+test('logged out shows a login prompt in place of percentages, even with stale data', () => {
+  const decode = (i) => Buffer.from(config.render(i).split(',')[1], 'base64').toString('utf8');
+  const rows = { weekly: limit('W', 66), fiveHour: limit('5H', 57) };
+
+  // NO_TOKEN（登出）即便还留着上次数据，也不显示旧百分比，而是整块换成 Sign in 提示，
+  // 且不叠 STALE 角标。displayState 直报 NO_TOKEN 与「有陈旧数据 + lastErrorKind NO_TOKEN」
+  // 两条路径都要进登录提示。
+  for (const inst of [
+    instance({ ...rows, displayState: 'NO_TOKEN' }),
+    instance({ ...rows, displayState: 'STALE', lastErrorKind: 'NO_TOKEN' }),
+  ]) {
+    const svg = decode(inst);
+    assert.ok(svg.includes('>Sign in<'), 'must show the login prompt');
+    assert.ok(!svg.includes('>66<') && !svg.includes('>57<'), 'stale percentages must be hidden behind the login prompt');
+    assert.ok(!svg.includes('scale(0.5)'), 'no stale badge under the login prompt');
+    assert.equal(needsLogin(inst), true);
+  }
+
+  // AUTH 仍走陈旧数字+徽章（token 可能只是过期、可刷新），不算「需要登录」。
+  assert.equal(needsLogin(instance({ ...rows, displayState: 'STALE', lastErrorKind: 'AUTH' })), false);
+});
+
+test('while refreshing, percentages read as ... until the fetch returns', () => {
+  const decode = (i) => Buffer.from(config.render(i).split(',')[1], 'base64').toString('utf8');
+  const rows = { weekly: limit('W', 66), fiveHour: limit('5H', 57) };
+
+  const idle = decode(instance({ ...rows, displayState: 'OK' }));
+  assert.ok(idle.includes('>66<') && idle.includes('>57<'), 'idle shows real numbers');
+  assert.ok(!idle.includes('>...<'), 'idle has no placeholder');
+
+  const busy = decode(instance({ ...rows, displayState: 'OK', refreshing: true }));
+  // 百分比换成 ...，旧数字不再出现；倒计时不受影响仍在。
+  assert.ok(!busy.includes('>66<') && !busy.includes('>57<'), 'refreshing hides the stale numbers');
+  assert.equal((busy.match(/>\.\.\.</g) || []).length, 2, 'both rows show the ... placeholder');
+});
+
+test('double press opens the Claude CLI, deduped so a logged-out double-open cannot spawn twice', () => {
+  const writes = []; const opens = [];
+  const deps = {
+    writeFile: (p, c) => writes.push([p, c]),
+    spawnFn: (cmd, args) => { opens.push([cmd, args]); return { on() {}, unref() {} }; },
+    resolveCommand: () => ({ resolved: '/opt/homebrew/bin/claude' }),
+  };
+  const inst = instance({ lastOpenCliAt: 0 });
+
+  openClaudeCli(inst, { ...deps, now: 1000 });
+  assert.equal(opens.length, 1, 'first open goes through');
+  assert.equal(opens[0][0], 'open');
+  assert.match(writes[0][0], /\.command$/, 'writes a .command script');
+  assert.ok(writes[0][1].includes('exec "/opt/homebrew/bin/claude"'), 'script execs the resolved claude');
+
+  // 冷却窗口内的第二次（双击第二拍 / onDoublePress）被吞掉，不开第二个窗口。
+  openClaudeCli(inst, { ...deps, now: 1500 });
+  assert.equal(opens.length, 1, 'a second open inside the cooldown is swallowed');
+
+  // 冷却过后可再次打开。
+  openClaudeCli(inst, { ...deps, now: 1000 + 2_000 });
+  assert.equal(opens.length, 2, 'reopens once the cooldown expires');
+});
+
+test('short press opens the CLI when login is needed, otherwise refreshes', () => {
+  let opened = 0; let refreshed = 0;
+  const openCli = () => { opened += 1; };
+  const run = () => { refreshed += 1; };
+
+  // 登出：单击直接开 CLI 让用户登录，不进刷新。
+  handleShortPress(instance({ displayState: 'NO_TOKEN', lastManualAt: 0 }), { openCli, run, now: 1000 });
+  assert.deepEqual([opened, refreshed], [1, 0]);
+
+  // 正常态：单击走刷新，不开 CLI。
+  handleShortPress(instance({ displayState: 'OK', lastManualAt: 0 }), { openCli, run, now: 1000 });
+  assert.deepEqual([opened, refreshed], [1, 1]);
 });

@@ -1,7 +1,7 @@
 # Claude Usage 功能与技术规范
 
 状态：持续维护
-最后代码核对：2026-07-26
+最后代码核对：2026-07-28
 action key：`claudeusage`
 UUID：`com.ulanzi.ulanzistudio.lexutility.claudeusage`
 
@@ -23,10 +23,12 @@ Claude Usage 在单个 DX200 键面上同时显示 Claude 订阅额度的 5 小�
 ## 2. 用户功能
 
 - 按设定间隔自动拉取额度，键面按更短的间隔本地重绘倒计时。
-- 短按松开后立即拉取一次，带最小反馈时长与冷却保护。
+- 短按松开（正常态）：先亮起刷新角标、百分比暂置为 `...`，触发一次凭据刷新（见 §3.1）后立即拉取，带冷却保护；拉回后 `...` 换成新值。
+- 短按松开（需要登录时）：不刷新，直接打开交互式 claude 终端让用户登录（见 §8 `openClaudeCli`）。
+- 双击：打开交互式 claude 终端（`onDoublePress`）。与登出态单击共用同一入口，2 秒冷却去重避免双击开出两个窗口。
 - 按住至少 600ms 显示反色确认，松开后打开官方用量页面。
 - 三行数据按窗口时长排序，短窗口在前（5H → W → 模型周限）。
-- 拉取失败时按失败原因显示不同的错误标识；已有历史数据时保留上次数值并叠加陈旧标记。
+- 拉取失败时按失败原因显示不同的错误标识；已有历史数据时保留上次数值并叠加陈旧标记。**登出（`NO_TOKEN`）例外**：不显示陈旧数字，整块换成 Sign in 登录提示（见 §5）。
 
 ## 3. 取数契约
 
@@ -37,7 +39,17 @@ security find-generic-password -s "Claude Code-credentials" -a <当前用户> -w
 → JSON.claudeAiOauth.accessToken
 ```
 
-只读取，**不写回、不刷新**。`accessToken` 生命周期约 1 小时，由用户正常使用 Claude Code 时的 CLI 自身刷新维持新鲜；action 绝不 spawn CLI、也绝不用 `refreshToken` 换新，避免与 CLI 争抢 refresh token 轮换而导致用户掉线。
+读取时**不写回钥匙串**。`accessToken` 生命周期约 1 小时；被动路径（自动轮询与 GET 拉取）只读取，读到即用、读不到即报错，不做任何刷新。
+
+**主动刷新（仅短按触发，非轮询）**：`accessToken` 过期后若用户长时间不用 Claude Code，CLI 不会自行刷新，键面会一直停在过期 → `AUTH`/`STALE`。短按时后台跑一次
+
+```text
+claude -p "ping" --model haiku --max-turns 1   （cwd=临时目录，stdio 丢弃，45s 超时）
+```
+
+让 **CLI 自己**用 `refreshToken` 刷新钥匙串凭据（凭据生命周期仍归 CLI 管，插件从不写钥匙串、也从不直接用 `refreshToken` 换新），顺带真实消耗极小一点额度来「激活」。锁死 `haiku` 把消耗压到最小，`--max-turns 1` 杜绝工具循环。刷新为尽力而为：CLI 找不到 / 超时 / 非零退出都不抛，照常继续拉取（旧 token 也许仍可用，不行就照常降级 `STALE`）。
+
+**未登录短路**：先读钥匙串判定 `accessToken` / `refreshToken` 是否双双为空（登出时二者清空，只剩 `scopes`、`subscriptionType` 等残留元数据）。皆空即视为 CLI 未登录，**直接跳过 spawn** 返回 `NOT_LOGGED_IN`，不浪费一次进程与额度——因为 `claude -p` 未登录时只打印 `Not logged in` 却仍以 0 退出，无法据退出码识别。随后的 GET 拉取会照常给出 `NO_TOKEN` / “Sign in”。注意 `accessToken` 过期时其字符串仍在（可被 CLI 刷新），故「任一存在」即值得尝试刷新，只有整串凭据皆空才是真正登出。
 
 ### 3.2 接口
 
@@ -88,15 +100,16 @@ Inspector 采用 400ms 自动保存，开关与主题按钮立即提交，并提
 | 态 | 触发 | 键面表现 |
 | --- | --- | --- |
 | `OK` | 拉取成功 | 正常数据行 |
-| `STALE` | 有历史数据，本次拉取失败 | 保留上次数值 + 右上角琥珀色陈旧点 |
-| `NO_TOKEN` | 钥匙串无凭据 | 钥匙图标 + `Sign in` |
+| 刷新中 | `instance.refreshing`（短按刷新期间） | 百分比置为 `...`（倒计时不变）+ 右上角循环箭头角标 |
+| `STALE` | 有历史数据，本次拉取失败（`NO_TOKEN` 除外） | 保留上次数值 + 右上角失败原因角标（AUTH/NO_TOKEN 用 crit，其余 warn） |
+| 需要登录 | `displayState==='NO_TOKEN'` 或 `lastErrorKind==='NO_TOKEN'` | 钥匙图标 + `Sign in`；**即便有陈旧数据也不显示旧百分比**，不叠陈旧角标；单击直接打开 CLI 登录 |
 | `AUTH` | HTTP 401 / 403 且无历史 | 感叹号 + `Re-auth` |
 | `NETWORK` | 请求异常 / 超时且无历史 | 断线图标 + `Offline` |
 | `RATE_LIMITED` | HTTP 429 且无历史 | 沙漏图标 + `Slow down` |
 | `PENDING` | 首次拉取尚未返回 | 标记 + 占位横线 |
 | `UNSUPPORTED` | 非 macOS | 标记 + `macOS only` |
 
-只要曾成功拉取过，任何失败都优先降级为 `STALE` 而非错误页——额度不使用就不会上涨，陈旧值仍然有参考价值。失败的**具体原因**始终写入日志并回显到 Inspector 诊断面板。
+只要曾成功拉取过，任何失败都优先降级为 `STALE` 而非错误页——额度不使用就不会上涨，陈旧值仍然有参考价值。**唯一例外是登出（`NO_TOKEN`）**：没有 token 就拉不到新值，继续显示旧百分比只会误导，因此 `needsLogin` 优先于陈旧数据，整块换成登录提示。`AUTH` 不算「需要登录」——token 可能只是过期、可被短按刷新恢复，仍走陈旧数字 + 角标。失败的**具体原因**始终写入日志并回显到 Inspector 诊断面板。
 
 ## 6. 品牌标记
 
@@ -152,18 +165,23 @@ severity 映射：`normal → ok`，`warning → warn`，`critical → crit`。`
 | --- | --- |
 | `createState` | 初始化显示态，水合上次成功数据 |
 | `onReady` | 安排拉取与重绘两个独立定时器；无历史时立即首拉 |
-| `onRun` | 短按立即拉取，10 秒冷却 |
+| `onRun` | 短按：需要登录时 `openClaudeCli`；否则亮刷新角标（百分比→`...`）→ 跑一次凭据刷新（见 §3.1，未登录则跳过）→ 立即拉取，10 秒冷却 |
+| `onDoublePress` | `openClaudeCli`：打开交互式 claude 终端；2 秒冷却去重 |
 | `onLongPress` | 打开 `usageUrl` |
 | `onParamFromPlugin` | 收到 `__claudeusageProbe` 控制命令时跑一次诊断并回推 `__claudeusageDiag` |
 | `onSettingsChanged` | 间隔变化重启对应定时器；其余仅触发重绘 |
 | `onDispose` | 取消在途请求与两个定时器，落盘当前运行态 |
 | `render` | 依据 settings + state 纯函数产出 SVG data URL |
 
-定时器 slot：`claudeusagePoll`（网络拉取）、`claudeusageRedraw`（本地重绘）、`claudeusageFeedback`（手动刷新最小反馈时长）。
+定时器 slot：`claudeusagePoll`（网络拉取）、`claudeusageRedraw`（本地重绘）。
 
 `onRun` / `onLongPress` 为异步时必须 return Promise。
 
-长按打开网页走系统 `open` 命令而非 SDK：桥接层只有 `send` / `sendParamFromPlugin` / `setBaseDataIcon` / `toast`，`openurl` 是宿主→插件方向的命令，**插件没有主动打开 URL 的通道**。该 action 本就仅支持 macOS，且已经要 spawn `security` 读钥匙串，`open` 属同类系统调用。
+**双击的框架语义**：框架在第一拍即执行 `onRun`，双击窗口（默认 300ms）内的第二拍再补派 `onDoublePress`（见 [base.md](../base.md) 派发逻辑）。故正常态双击会先跑一次刷新再开 CLI（可接受，与 bambustatus 同构）；登出态双击第一拍 `onRun` 已开 CLI，第二拍 `onDoublePress` 由 `openClaudeCli` 的 2 秒冷却吞掉，不会开出第二个窗口。
+
+`openClaudeCli`：写一个临时 `.command`（内容 `exec "<claude 绝对路径>"`）用系统 `open` 拉起，走 LaunchServices 打开交互式 claude 终端——刻意不用 `osascript` 控制 Terminal，避免 Automation 授权这一失败面。未登录时交互式 claude 会自行引导登录，故「登录」与「打开 CLI」共用同一入口。
+
+长按打开网页、打开 CLI 均走系统 `open` 命令而非 SDK：桥接层只有 `send` / `sendParamFromPlugin` / `setBaseDataIcon` / `toast`，`openurl` 是宿主→插件方向的命令，**插件没有主动打开 URL 的通道**。该 action 本就仅支持 macOS，且已经要 spawn `security` 读钥匙串，`open` 属同类系统调用。
 
 `usageUrl` 默认值 `https://claude.ai/settings/usage` 已实测：会重定向到 `claude.ai/new#settings/usage` 并打开设置内的 Usage 面板，其中 Current session / All models / <模型名> 三行恰好对应本 action 的 `5H` / `W` / `W?`。
 
