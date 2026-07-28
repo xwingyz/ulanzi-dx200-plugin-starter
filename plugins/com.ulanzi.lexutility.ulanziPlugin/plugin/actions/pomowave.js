@@ -218,11 +218,14 @@ function playPomodoroPhaseEndCue(instance, { autoStart = false } = {}) {
           if (instance.cueProcess === processHandle) {
             instance.cueProcess = null;
           }
+          if (error) {
+            stopPomodoroCue(instance);
+            return;
+          }
           if (!instance.cueRepeating) {
             return;
           }
-          const delay = error ? 1000 : POMODORO_CUE_REPEAT_DELAY_MS;
-          setInstanceTimeout(instance, 'pomodoroCue', playNext, delay);
+          setInstanceTimeout(instance, 'pomodoroCue', playNext, POMODORO_CUE_REPEAT_DELAY_MS);
         },
       });
       instance.cueProcess = processHandle;
@@ -236,8 +239,24 @@ function playPomodoroPhaseEndCue(instance, { autoStart = false } = {}) {
   if (repeat) {
     playNext();
   } else {
+    const generation = instance.cueGeneration;
+    let processHandle = null;
     try {
-      instance.cueProcess = playPomodoroCue(instance.settings, { onComplete: () => { instance.cueProcess = null; } });
+      processHandle = playPomodoroCue(instance.settings, {
+        onComplete: (error) => {
+          if (instance.cueGeneration !== generation) {
+            return;
+          }
+          if (error) {
+            stopPomodoroCue(instance);
+            return;
+          }
+          if (instance.cueProcess === processHandle) {
+            instance.cueProcess = null;
+          }
+        },
+      });
+      instance.cueProcess = processHandle;
     } catch {
       instance.cueProcess = null;
     }
@@ -278,7 +297,9 @@ function stopAudioProcess(instance, processKey, generationKey, timerSlot) {
   clearInstanceTimeout(instance, timerSlot);
   const processHandle = instance[processKey];
   instance[processKey] = null;
-  if (processHandle && typeof processHandle.kill === 'function' && !processHandle.killed) {
+  // ChildProcess.killed 仅表示曾发送过信号；SIGSTOP 后也会变 true，不能据此省略 SIGTERM。
+  const exited = processHandle?.exited === true || processHandle?.exitCode != null;
+  if (processHandle && typeof processHandle.kill === 'function' && !exited) {
     try {
       processHandle.kill();
     } catch {
@@ -298,7 +319,9 @@ function pausePomodoroBackground(instance) {
   }
   if (platform() === 'darwin') {
     try {
-      instance.backgroundProcess.kill('SIGSTOP');
+      if (instance.backgroundProcess.kill('SIGSTOP') === false) {
+        throw new Error('background player rejected SIGSTOP');
+      }
       instance.backgroundPaused = true;
       return;
     } catch {
@@ -306,6 +329,16 @@ function pausePomodoroBackground(instance) {
     }
   }
   stopPomodoroBackground(instance);
+}
+
+function windowsBackgroundPlaybackCommand(audioPath, volume) {
+  const encodedPath = Buffer.from(audioPath, 'utf8').toString('base64');
+  const safeVolume = Math.max(0, Math.min(100, Math.round(Number(volume) || 0)));
+  const script = `$audioPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}')); $player = New-Object -ComObject WMPlayer.OCX; $player.URL = $audioPath; $player.settings.volume = ${safeVolume}; $player.settings.setMode('loop', $true); $player.controls.play(); while ($true) { Start-Sleep -Seconds 1 }`;
+  return {
+    command: 'powershell',
+    args: ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+  };
 }
 
 function backgroundPlaybackCommand(sound, volume) {
@@ -317,8 +350,7 @@ function backgroundPlaybackCommand(sound, volume) {
     return { command: 'afplay', args: ['-v', String(volume / 100), audioPath] };
   }
   if (platform() === 'win32') {
-    const script = "$player = New-Object -ComObject WMPlayer.OCX; $player.URL = $args[0]; $player.settings.volume = [int]$args[1]; $player.settings.setMode('loop', $true); $player.controls.play(); while ($true) { Start-Sleep -Seconds 1 }";
-    return { command: 'powershell', args: ['-NoProfile', '-Command', script, audioPath, String(volume)] };
+    return windowsBackgroundPlaybackCommand(audioPath, volume);
   }
   return { command: 'ffplay', args: ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-volume', String(volume), audioPath] };
 }
@@ -338,7 +370,9 @@ function startPomodoroBackground(instance, options = {}) {
   }
   if (instance.backgroundPaused && instance.backgroundProcess && platform() === 'darwin') {
     try {
-      instance.backgroundProcess.kill('SIGCONT');
+      if (instance.backgroundProcess.kill('SIGCONT') === false) {
+        throw new Error('background player rejected SIGCONT');
+      }
       instance.backgroundPaused = false;
       return instance.backgroundProcess;
     } catch {
@@ -683,14 +717,16 @@ function reconcilePomodoroSettings(instance, previousSettings) {
     previousSettings.backgroundRandom !== instance.settings.backgroundRandom ||
     previousSettings.backgroundVolume !== instance.settings.backgroundVolume;
 
-  if (changedBackground && instance.phase === 'focus' && instance.running) {
-    // 运行中变更来源、随机或音量立即重启；随机开关变化时为当前轮生成一次确定选择。
+  if (changedBackground && instance.phase === 'focus') {
+    // 暂停时也要丢弃旧句柄并更新选择；只有运行中立即重启。
     selectPomodoroBackground(instance, {
       force: previousSettings.backgroundRandom !== instance.settings.backgroundRandom ||
         (!isEnabled(instance.settings.backgroundRandom) && previousSettings.backgroundSound !== instance.settings.backgroundSound),
     });
     stopPomodoroBackground(instance);
-    startPomodoroBackground(instance);
+    if (instance.running) {
+      startPomodoroBackground(instance);
+    }
     flushPomodoroState(instance);
   }
 
@@ -951,9 +987,12 @@ const config = {
     onReady: (instance) => {
       initializePomodoroInstance(instance);
       if (instance.running) {
+        const wasRunningFocus = instance.phase === 'focus';
         // 先按时钟对齐再续排定时器：睡眠唤醒/进程重启期间流逝的时间在这里一次性追平。
         tickPomodoro(instance);
-        if (instance.phase === 'focus' && instance.running) {
+        // 过期 break/done 推进至 focus 时，startPomodoroPhase 已经启动背景音；
+        // 只有原本就是同一运行中 focus 才在这里补启一次。
+        if (wasRunningFocus && instance.phase === 'focus' && instance.running) {
           startPomodoroBackground(instance);
           flushPomodoroState(instance);
         }
@@ -1024,6 +1063,7 @@ const config = {
       selectPomodoroBackground,
       backgroundAudioPath,
       backgroundPlaybackCommand,
+      windowsBackgroundPlaybackCommand,
     },
   };
 }

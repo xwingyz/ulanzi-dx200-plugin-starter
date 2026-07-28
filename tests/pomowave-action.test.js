@@ -443,6 +443,163 @@ test('pomowave safely drops v1 state and audio failures or phase changes cannot 
   assert.notEqual(processHandle, phaseProcess);
 });
 
+test('pomowave encodes Windows background playback without exposing paths in argv', () => {
+  const { testing } = createPomowaveAction(createRuntime({ platform: 'win32' }));
+  const audioPath = "C:\\Users\\A B\\O'Neill\\rain.mp3";
+  const plan = testing.windowsBackgroundPlaybackCommand(audioPath, 42.6);
+  assert.equal(plan.command, 'powershell');
+  assert.deepEqual(plan.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-EncodedCommand']);
+  assert.equal(plan.args.length, 4, '原始路径不得作为尾随 argv 传入');
+  assert.equal(plan.args.join(' ').includes(audioPath), false);
+  const script = Buffer.from(plan.args[3], 'base64').toString('utf16le');
+  const encodedPath = script.match(/FromBase64String\('([^']+)'\)/)?.[1];
+  assert.ok(encodedPath);
+  assert.equal(Buffer.from(encodedPath, 'base64').toString('utf8'), audioPath);
+  assert.match(script, /\$player\.settings\.volume = 43;/);
+  assert.match(script, /\$player\.URL = \$audioPath;/);
+
+  const packagedPlan = testing.backgroundPlaybackCommand('rain', 35);
+  assert.equal(packagedPlan.command, 'powershell');
+  assert.deepEqual(packagedPlan.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-EncodedCommand']);
+  assert.equal(packagedPlan.args.length, 4);
+});
+
+test('pomowave terminates a SIGSTOP background process on stop and dispose', () => {
+  const signals = [];
+  const makeHandle = () => ({
+    killed: false,
+    exitCode: null,
+    kill(signal = 'SIGTERM') {
+      signals.push(signal);
+      this.killed = true;
+      return true;
+    },
+  });
+  const { config, testing } = createPomowaveAction(createRuntime({ player: () => makeHandle() }));
+  const instance = createInstance(config, {
+    active: true, phase: 'focus', running: true, totalSec: 1500, remainingSec: 1500, phaseEndAt: Date.now() + 1_500_000,
+  });
+
+  testing.startPomodoroBackground(instance);
+  testing.pausePomodoroBackground(instance);
+  testing.stopPomodoroBackground(instance);
+  assert.deepEqual(signals, ['SIGSTOP', 'SIGTERM']);
+
+  instance.running = true;
+  testing.startPomodoroBackground(instance);
+  testing.pausePomodoroBackground(instance);
+  config.onDispose(instance);
+  assert.deepEqual(signals, ['SIGSTOP', 'SIGTERM', 'SIGSTOP', 'SIGTERM']);
+});
+
+test('pomowave cue errors immediately stop all repeat scheduling and stale callbacks stay inert', () => {
+  const callbacks = [];
+  const { config, testing } = createPomowaveAction(createRuntime({
+    player: (_command, _args, callback) => {
+      callbacks.push(callback);
+      return { killed: false, exitCode: null, kill() { this.killed = true; return true; } };
+    },
+  }));
+  for (const cueDuration of ['continuous', '180']) {
+    const instance = createInstance(config, { settings: { ...config.defaults, soundEnabled: 'true', cueDuration } });
+    testing.playPomodoroPhaseEndCue(instance, { autoStart: false });
+    const callback = callbacks.at(-1);
+    const generation = instance.cueGeneration;
+    callback(new Error('audio device failed'));
+    assert.equal(instance.cueRepeating, false);
+    assert.equal(instance.cueProcess, null);
+    assert.equal(instance.timers?.has('pomodoroCue') ?? false, false);
+    assert.equal(instance.timers?.has('pomodoroCueLimit') ?? false, false);
+    assert.equal(instance.cueGeneration, generation + 1);
+    callback(null);
+    assert.equal(instance.timers?.has('pomodoroCue') ?? false, false, '失效 generation 的回调不得重排');
+  }
+
+  const automatic = createInstance(config, { settings: { ...config.defaults, soundEnabled: 'true' } });
+  testing.playPomodoroPhaseEndCue(automatic, { autoStart: true });
+  const automaticGeneration = automatic.cueGeneration;
+  callbacks.at(-1)(new Error('automatic cue failed'));
+  assert.equal(automatic.cueGeneration, automaticGeneration + 1);
+  assert.equal(automatic.cueProcess, null);
+});
+
+test('pomowave updates paused focus background settings without restart until resume', () => {
+  const signals = [];
+  const starts = [];
+  const originalRandom = Math.random;
+  Math.random = () => 0.34;
+  try {
+    const { config, testing } = createPomowaveAction(createRuntime({
+      player: (_command, args) => {
+        starts.push(args);
+        return {
+          killed: false,
+          exitCode: null,
+          kill(signal = 'SIGTERM') { signals.push(signal); this.killed = true; return true; },
+        };
+      },
+    }));
+    const instance = createInstance(config, {
+      active: true, phase: 'focus', running: true, totalSec: 1500, remainingSec: 1200, phaseEndAt: Date.now() + 1_200_000,
+    });
+    testing.startPomodoroBackground(instance);
+    testing.togglePomodoro(instance);
+    const fixedBefore = { ...instance.settings };
+    instance.settings = { ...instance.settings, backgroundSound: 'ocean' };
+    config.onSettingsChanged(instance, fixedBefore);
+    assert.deepEqual(signals, ['SIGSTOP', 'SIGTERM']);
+    assert.equal(instance.selectedBackgroundSound, 'ocean');
+    assert.equal(starts.length, 1, '暂停期改固定音源不得立即重启');
+
+    testing.togglePomodoro(instance);
+    assert.match(starts.at(-1).at(-1), /ocean\.mp3$/);
+    testing.togglePomodoro(instance);
+    const randomBefore = { ...instance.settings };
+    instance.settings = { ...instance.settings, backgroundSound: 'none', backgroundRandom: 'true' };
+    config.onSettingsChanged(instance, randomBefore);
+    assert.equal(instance.selectedBackgroundSound, 'forest');
+    assert.equal(starts.length, 2, '暂停期改随机开关不得立即重启');
+
+    testing.togglePomodoro(instance);
+    assert.match(starts.at(-1).at(-1), /forest\.mp3$/);
+    testing.togglePomodoro(instance);
+    const volumeBefore = { ...instance.settings };
+    instance.settings = { ...instance.settings, backgroundVolume: '66' };
+    config.onSettingsChanged(instance, volumeBefore);
+    assert.equal(starts.length, 3, '暂停期改音量不得立即重启');
+    testing.togglePomodoro(instance);
+    assert.match(starts.at(-1).at(-1), /forest\.mp3$/);
+    assert.equal(starts.at(-1)[1], '0.66');
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('pomowave onReady starts background once when overdue break or done advances into focus', () => {
+  for (const phase of ['shortBreak', 'done']) {
+    const starts = [];
+    const runtime = createRuntime({ player: (_command, args) => {
+      starts.push(args);
+      return { killed: false, exitCode: null, kill() { this.killed = true; return true; } };
+    } });
+    const { config } = createPomowaveAction(runtime);
+    const instance = createInstance(config, {
+      context: `on-ready-${phase}`,
+      active: true,
+      phase,
+      running: true,
+      totalSec: phase === 'done' ? 4 : 300,
+      remainingSec: 0,
+      phaseEndAt: Date.now() - 1_000,
+    });
+    runtime.instances.set(instance.context, instance);
+    config.onReady(instance);
+    assert.equal(instance.phase, 'focus');
+    assert.equal(instance.running, true);
+    assert.equal(starts.length, 1, `${phase} 逾期推进不得二次启动背景音`);
+  }
+});
+
 test('pomowave dispose stops isolated cue, background and preview channels', () => {
   const { config } = createPomowaveAction(createRuntime());
   const stopped = [];
