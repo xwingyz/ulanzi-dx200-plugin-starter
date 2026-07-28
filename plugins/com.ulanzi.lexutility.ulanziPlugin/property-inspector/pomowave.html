@@ -14,7 +14,7 @@
       p { margin: 0 0 14px; color: var(--muted); }
       .field { display: grid; gap: 6px; margin-bottom: 12px; }
       label { color: var(--muted); }
-      input { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; color: var(--text); padding: 10px 12px; }
+      input, select { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #0b1220; color: var(--text); padding: 10px 12px; }
       input[type="hidden"] { display: none; }
       input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -92,13 +92,17 @@
               </div>
               <input id="soundEnabled" name="soundEnabled" type="checkbox" checked>
             </label>
-            <label class="toggle" for="repeatManualCue">
-              <div>
-                <strong data-localize="Continuous cue">Continuous cue</strong>
-                <span data-localize="Repeat while waiting for manual start; stop when the key is pressed">Repeat while waiting for manual start; stop when the key is pressed</span>
-              </div>
-              <input id="repeatManualCue" name="repeatManualCue" type="checkbox">
-            </label>
+            <div class="field">
+              <label for="cueDuration" data-localize="Reminder duration">Reminder duration</label>
+              <select id="cueDuration" name="cueDuration">
+                <option value="continuous" data-localize="Continuous">Continuous</option>
+                <option value="60" data-localize="1 minute">1 minute</option>
+                <option value="180" data-localize="3 minutes">3 minutes</option>
+                <option value="300" data-localize="5 minutes">5 minutes</option>
+                <option value="600" data-localize="10 minutes">10 minutes</option>
+              </select>
+              <div class="hint" data-localize="Repeat only while waiting for a manual start; automatic transitions play once.">Repeat only while waiting for a manual start; automatic transitions play once.</div>
+            </div>
             <label class="toggle" for="autoStartBreaks">
               <div>
                 <strong data-localize="Auto break">Auto break</strong>
@@ -114,11 +118,39 @@
               <input id="autoStartFocus" name="autoStartFocus" type="checkbox" checked>
             </label>
           </div>
+          <div class="field">
+            <label for="backgroundSound" data-localize="Focus background sound">Focus background sound</label>
+            <select id="backgroundSound" name="backgroundSound">
+              <option value="none" data-localize="None">None</option>
+              <option value="rain" data-localize="Rain">Rain</option>
+              <option value="fireplace" data-localize="Fireplace">Fireplace</option>
+              <option value="forest" data-localize="Forest">Forest</option>
+              <option value="ocean" data-localize="Ocean">Ocean</option>
+              <option value="cafe" data-localize="Cafe">Cafe</option>
+              <option value="brownNoise" data-localize="Brown noise">Brown noise</option>
+            </select>
+          </div>
+          <label class="toggle" for="backgroundRandom">
+            <div>
+              <strong data-localize="Random background">Random background</strong>
+              <span data-localize="Choose one background sound for each new focus round">Choose one background sound for each new focus round</span>
+            </div>
+            <input id="backgroundRandom" name="backgroundRandom" type="checkbox">
+          </label>
+          <div class="field">
+            <label for="backgroundVolume" data-localize="Background volume">Background volume</label>
+            <input id="backgroundVolume" name="backgroundVolume" type="range" min="0" max="100" step="1" value="35">
+            <div class="hint"><span id="backgroundVolumeValue">35</span>%</div>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="previewBackgroundSound" type="button" data-localize="Preview background">Preview background</button>
+            <button class="ghost-btn" id="stopPreviewBackgroundSound" type="button" data-localize="Stop preview">Stop preview</button>
+          </div>
           <div class="action-row">
             <button class="ghost-btn" id="skipPhase" type="button" data-localize="Skip phase">Skip phase</button>
             <button class="ghost-btn" id="resetTimer" type="button" data-localize="Reset timer">Reset timer</button>
           </div>
-          <p class="pi-note gesture-note" data-localize="Single click: start, pause, resume, or confirm the next phase. Double click: perform the single-click action twice. Long press: restart a full focus session or skip a pending break.">Single click: start, pause, resume, or confirm the next phase. Double click: perform the single-click action twice. Long press: restart a full focus session or skip a pending break.</p>
+          <p class="pi-note gesture-note" data-localize="Single click: start, pause, resume, or confirm the next phase. Double click: skip the phase currently shown before the first click. Long press: reset to a full paused focus while keeping completed rounds.">Single click: start, pause, resume, or confirm the next phase. Double click: skip the phase currently shown before the first click. Long press: reset to a full paused focus while keeping completed rounds.</p>
           <hr class="pi-divider">
           <div class="field">
             <label for="theme" data-localize="Theme">Theme</label>

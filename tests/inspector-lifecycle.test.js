@@ -83,6 +83,13 @@ function createHarness(entryFile) {
     ['uiLanguage', new FakeElement({ id: 'uiLanguage', value: 'auto' })],
     ['graphMode', new FakeElement({ id: 'graphMode', value: 'bars' })],
     ['soundStyle', new FakeElement({ id: 'soundStyle', value: 'glass' })],
+    ['cueDuration', new FakeElement({ id: 'cueDuration', value: '180' })],
+    ['backgroundSound', new FakeElement({ id: 'backgroundSound', value: 'rain' })],
+    ['backgroundRandom', new FakeElement({ id: 'backgroundRandom', type: 'checkbox' })],
+    ['backgroundVolume', new FakeElement({ id: 'backgroundVolume', value: '35' })],
+    ['backgroundVolumeValue', new FakeElement({ id: 'backgroundVolumeValue', value: '35' })],
+    ['previewBackgroundSound', new FakeElement({ id: 'previewBackgroundSound' })],
+    ['stopPreviewBackgroundSound', new FakeElement({ id: 'stopPreviewBackgroundSound' })],
     ['resetTimer', new FakeElement({ id: 'resetTimer' })],
   ]);
   const selectors = new Map();
@@ -396,15 +403,33 @@ test('pomowave sound button commits the style then auditions it', () => {
   assert.equal(harness.sends.at(-2).settings.soundStyle, 'bell');
 });
 
-test('pomowave inspector submits the manual-stage continuous cue setting', () => {
+test('pomowave inspector submits bounded cue and background settings', () => {
   const harness = createHarness('pomowave.js');
   harness.callbacks.connected[0]();
-  harness.elements.get('repeatManualCue').type = 'checkbox';
-  harness.elements.get('repeatManualCue').checked = true;
+  harness.elements.get('cueDuration').value = '600';
+  harness.elements.get('backgroundSound').value = 'ocean';
+  harness.elements.get('backgroundRandom').checked = true;
+  harness.elements.get('backgroundVolume').value = '67';
 
   harness.form.dispatchEvent({ type: 'submit' });
 
-  assert.equal(harness.sends.at(-1).settings.repeatManualCue, 'true');
+  assert.equal(harness.sends.at(-1).settings.cueDuration, '600');
+  assert.equal(harness.sends.at(-1).settings.backgroundSound, 'ocean');
+  assert.equal(harness.sends.at(-1).settings.backgroundRandom, 'true');
+  assert.equal(harness.sends.at(-1).settings.backgroundVolume, '67');
+  assert.equal('repeatManualCue' in harness.sends.at(-1).settings, false);
+});
+
+test('pomowave inspector auditions and stops the selected background without submitting timer settings', () => {
+  const harness = createHarness('pomowave.js');
+  harness.callbacks.connected[0]();
+  harness.elements.get('backgroundSound').value = 'forest';
+
+  harness.elements.get('previewBackgroundSound').dispatchEvent({ type: 'click' });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.sends.at(-1).settings)), { previewBackgroundSound: 'forest' });
+
+  harness.elements.get('stopPreviewBackgroundSound').dispatchEvent({ type: 'click' });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.sends.at(-1).settings)), { stopPreviewBackgroundSound: 'true' });
 });
 
 test('bambustatus applies discovery without resubmitting a cached result', () => {

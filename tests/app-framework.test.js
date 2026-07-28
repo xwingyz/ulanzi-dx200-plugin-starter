@@ -1275,7 +1275,7 @@ test('lex utility: pomowave key art drops the title and shows a tomato only off 
   assert.ok(!done.includes('translate(128 78)'), 'done must not draw the tomato');
 });
 
-test('lex utility: pomowave short press toggles and long press restarts the focus', () => {
+test('lex utility: pomowave short press toggles and long press resets to paused full focus', () => {
   const t0 = Date.now();
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___tap___t1';
   const instance = createPomodoroInstance(context, {
@@ -1294,14 +1294,14 @@ test('lex utility: pomowave short press toggles and long press restarts the focu
   const t1 = t0 + 600;
   lexTesting.handlePomodoroLongPress(instance, { now: t1 });
   assert.equal(instance.phase, 'focus');
-  assert.equal(instance.running, true);
+  assert.equal(instance.running, false);
   assert.equal(instance.remainingSec, 1500);
   assert.equal(instance.totalSec, 1500);
   assert.equal(instance.completedFocusRounds, 2);
-  assert.equal(instance.phaseEndAt, t1 + 1500 * 1000);
+  assert.equal(instance.phaseEndAt, null);
 
   lexTesting.handlePomodoroShortPress(instance, { now: t1 + 10 });
-  assert.equal(instance.running, false);
+  assert.equal(instance.running, true);
 
   lexTesting.clearInstanceTimeout(instance, 'pomodoro');
   lexTesting.dropPersistedState(context);
@@ -1389,7 +1389,7 @@ test('lex utility: pomowave awaiting short press confirms and starts the phase',
   lexTesting.dropPersistedState(context);
 });
 
-test('lex utility: pomowave long press while awaiting a break skips to a fresh focus', () => {
+test('lex utility: pomowave long press while awaiting a break resets to a paused full focus', () => {
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t4';
   const t0 = Date.now();
   const instance = manualStartInstance(context, {
@@ -1403,7 +1403,7 @@ test('lex utility: pomowave long press while awaiting a break skips to a fresh f
 
   lexTesting.handlePomodoroLongPress(instance, { now: t0 + 600 });
   assert.equal(instance.phase, 'focus');
-  assert.equal(instance.running, true);
+  assert.equal(instance.running, false);
   assert.equal(instance.awaiting, false);
   assert.equal(instance.completedFocusRounds, 2, 'rounds preserved through the skip');
 
@@ -1451,12 +1451,13 @@ test('lex utility: pomowave cue plan honours preview override and enabled toggle
   assert.equal(plan({ soundEnabled: 'true', soundStyle: 'purr' }), 'purr');
 });
 
-test('lex utility: pomowave repeats cues only while awaiting manual phase start', () => {
+test('lex utility: pomowave repeats manual cues for every configured duration and never for auto-start', () => {
   const shouldRepeat = lexTesting.shouldRepeatPomodoroCue;
 
-  assert.equal(shouldRepeat({ repeatManualCue: 'true' }, { autoStart: false }), true);
-  assert.equal(shouldRepeat({ repeatManualCue: 'false' }, { autoStart: false }), false);
-  assert.equal(shouldRepeat({ repeatManualCue: 'true' }, { autoStart: true }), false);
+  assert.equal(shouldRepeat({ cueDuration: 'continuous' }, { autoStart: false }), true);
+  assert.equal(shouldRepeat({ cueDuration: '60' }, { autoStart: false }), true);
+  assert.equal(shouldRepeat({ cueDuration: '600' }, { autoStart: false }), true);
+  assert.equal(shouldRepeat({ cueDuration: '180' }, { autoStart: true }), false);
 });
 
 // 既有 commit 用例要么显式传 instances、要么以 feedbackCompleted:false 短路，

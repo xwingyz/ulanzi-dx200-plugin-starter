@@ -1,7 +1,7 @@
 # PomoWave 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-27
+最后代码核对：2026-07-28
 action key：`pomowave`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.pomowave`
 
@@ -23,12 +23,13 @@ PomoWave 是可跨睡眠和插件重启恢复的番茄钟。它在专注、短�
 
 - idle 短按：开始一段完整专注。
 - 运行中短按：暂停；暂停中短按：从冻结剩余时间恢复。
-- 按住至少 600ms 时显示反色确认，松开后执行长按：把当前工作重启为一段完整专注，保留已经完成的专注轮次。
+- 按住至少 600ms 时显示反色确认，松开后执行长按：停止提示音和背景音，把当前工作重置为一段完整、**暂停**的专注，保留已经完成的专注轮次；下一次单击才开始。
 - 等待下一阶段时短按：确认并从完整时长开始该阶段。
 - 等待进入休息时长按：直接重启为新专注，相当于跳过休息。
 - Inspector“跳过阶段”：视同当前阶段自然完成；专注仍计入轮次，但不播放提示音。idle 时无动作，done 时回到初始状态。
 - Inspector“重置计时”：清空当前循环、轮次和计时状态，回到 idle。
-- 点选提示音样式时立即试听；试听忽略总声音开关，但不改变计时状态。
+- 双击沿用共享 `dispatchShortPress`：第一次短按立即执行，同时保存按前阶段快照；第二次短按成立后静默跳过快照阶段。focus 计一轮，休息不计；awaiting 跳过显示的阶段；idle 保持 idle；done 回到初始状态。
+- 点选提示音样式时立即试听；背景音提供独立的试听/停止试听，所有试听都不改变计时状态。
 
 ## 3. 设置契约
 
@@ -43,7 +44,10 @@ PomoWave 是可跨睡眠和插件重启恢复的番茄钟。它在专注、短�
 | `showFrame` | `true` | `true` / `false` | 是否绘制公共边框 |
 | `soundStyle` | `glass` | `glass` / `hero` / `purr` / `submarine` | 提示音样式 |
 | `soundEnabled` | `true` | 字符串布尔值 | 阶段结束是否发声 |
-| `repeatManualCue` | `false` | 字符串布尔值 | 手动确认阶段时是否循环提示 |
+| `cueDuration` | `180` | `continuous` / `60` / `180` / `300` / `600` | 仅 awaiting 手动开始时循环提示的最长秒数；自动衔接仍只响一次 |
+| `backgroundSound` | `rain` | `none` / `rain` / `fireplace` / `forest` / `ocean` / `cafe` / `brownNoise` | 专注背景音固定选择 |
+| `backgroundRandom` | `false` | 字符串布尔值 | 每个新 focus 轮次从六种声音中随机选择一次 |
+| `backgroundVolume` | `35` | `0..100` 的数字字符串 | 背景音及其试听的音量 |
 | `autoStartBreaks` | `true` | 字符串布尔值 | 专注结束后是否自动开始休息 |
 | `autoStartFocus` | `true` | 字符串布尔值 | 休息/完成后是否自动开始专注 |
 
@@ -75,30 +79,31 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 
 `remainingSec` 只作为暂停/空闲时冻结值和渲染缓存。tick 对齐下一个整秒边界，调度误差不会累计；系统睡眠或插件重启后，`onReady` 立即按墙上时钟追平，已经超时则推进阶段。
 
-运行态版本为 `v: 1`，保存：`phase`、`running`、`remainingSec`、`totalSec`、`completedFocusRounds`、`phaseEndAt`。只在阶段转换、暂停/恢复、重置、设置重算和 dispose 时写盘，不逐秒写盘。版本不符或非法 phase 降级为初始状态。
+运行态版本为 `v: 2`，保存：`phase`、`running`、`remainingSec`、`totalSec`、`completedFocusRounds`、`phaseEndAt`、`selectedBackgroundSound`。随机结果只在真正进入新 focus 轮次时生成，暂停/恢复及重启继续使用同一选择；旧版本、非法 phase 或残缺数据安全降级为初始状态。只在阶段转换、暂停/恢复、重置、设置重算和 dispose 时写盘，不逐秒写盘。
 
 ## 6. 提示音
 
-- macOS 使用 `afplay` 播放系统声音；Windows 使用 PowerShell beep；其他平台回退终端 bell。
-- 自动开始下一阶段时只播一次。
-- 只有阶段停在 `awaiting` 且 `repeatManualCue=true` 时循环播放，直到确认、跳过、重置或销毁。
-- 播放器句柄、重复标记和 generation 都是实例运行态；generation 使旧播放器回调失效，避免跨阶段重新排音。
-- `onDispose` 必须停止提示音后再 flush 状态。
+- 提示音仍使用 macOS `afplay`、Windows PowerShell beep 与其他平台终端 bell。自动开始下一阶段时只播一次；awaiting 依 `cueDuration` 循环，到期只停声、不离开 awaiting；`continuous` 直到用户操作或销毁。
+- 背景音仅在 `focus + running` 时播放。macOS 使用 `afplay`，Windows 使用 Windows Media Player COM，其他平台尝试 `ffplay`；平台或播放器不可用时静默降级。暂停优先续播，不能续播则恢复时从同一音源起点重播；运行中改音源、随机或音量立即重启。
+- 提示、背景、试听是独立的实例通道，分别持有子进程、generation、播放/暂停标记与实例定时器；背景试听至多 15 秒，`Stop preview` 可提前停止。generation 使旧回调失效。播放失败仅停止该音频通道，不改变计时、不显示 ERR。
+- 背景资源位于 `assets/audio/pomowave/`，六项 Freesound CC0 公开 HQ preview 的来源、作者、日期与文件身份见同目录 `CREDITS.md`；预览 MP3 原样保留，未转码、截断、归一化或淡化，兼容 macOS 和 Windows 系统播放器。
+- `onDispose` 停止三个音频通道后再 flush 状态。
 
 ## 7. 生命周期与定时器
 
 | 钩子 | 行为 |
 | --- | --- |
-| `createState` | 创建阶段/计时/轮次/提示音状态并水合持久化运行态 |
+| `createState` | 创建阶段/计时/轮次及三路音频通道状态并水合持久化运行态 |
 | `onReady` | 初始化缺失值；运行中立即按当前时钟对齐并续排 tick |
-| `onRun` | 处理短按与 awaiting 确认交互 |
-| `onLongPress` | 重启完整专注；awaiting 休息时等价于跳过休息 |
-| `onSettingsChanged` | 按比例重算当前阶段时长 |
-| `onParamFromPlugin` | 处理 `previewSound`、`resetTimer`、`skipPhase` 控制命令 |
-| `onDispose` | 停止声音并同步落盘 |
+| `onRun` | 保存按前阶段快照，处理短按与 awaiting 确认交互 |
+| `onDoublePress` | 使用快照静默跳过，不自行识别双击 |
+| `onLongPress` | 重置为完整暂停 focus，保留已完成轮次并停止音频 |
+| `onSettingsChanged` | 按比例重算当前阶段时长；运行中的 focus 变更背景设置立即重启播放器 |
+| `onParamFromPlugin` | 处理提示试听、背景试听/停止、`resetTimer`、`skipPhase` 控制命令 |
+| `onDispose` | 停止提示/背景/试听并同步落盘 |
 | `render` | 生成阶段 SVG data URL |
 
-定时器 slot：`pomodoro`（tick 或 awaiting 闪烁复用）、`pomodoroCue`（循环提示）。
+定时器 slot：`pomodoro`（tick 或 awaiting 闪烁复用）、`pomodoroCue` 与 `pomodoroCueLimit`（循环提示及上限）、`pomodoroBackground`、`pomodoroPreview`。
 
 ## 8. 键面显示
 
@@ -113,7 +118,10 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 - 墙钟计时、睡眠间隔追平、暂停冻结与恢复 deadline。
 - 状态序列化/水合、跳过语义、idle/done 边界。
 - 短按/长按、awaiting 确认与跳过休息。
-- 自动衔接与手动衔接、提示音开关/试听/循环规则。
+- 自动衔接单次提示、awaiting 提示的 continuous/60/180/300/600 上限与清理。
+- 长按暂停式重置、按前快照双击边界（idle/done/awaiting/阶段）。
+- 背景固定与随机选择、同轮/重启稳定性、音量、暂停恢复、设置变更、失败与销毁清理。
+- Inspector、新旧设置升级、多语言、音频资源和 credits 一致性。
 - 各主题阶段色、进度方向、awaiting 闪烁和末段告警。
 
 修改阶段图、长按语义、计时事实源、运行态字段或提示音生命周期时，应同步本文件并扩充 `tests/app-framework.test.js`；修改 Inspector 控制命令时还应更新 `tests/inspector-lifecycle.test.js`。

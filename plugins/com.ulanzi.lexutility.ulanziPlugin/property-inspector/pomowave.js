@@ -8,7 +8,10 @@ const POMOWAVE_FIELDS = withLanguageField([
   'showFrame',
   'soundStyle',
   'soundEnabled',
-  'repeatManualCue',
+  'cueDuration',
+  'backgroundSound',
+  'backgroundRandom',
+  'backgroundVolume',
   'autoStartBreaks',
   'autoStartFocus',
 ]);
@@ -21,6 +24,11 @@ function syncPomowaveButtons() {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
+}
+
+function syncPomowaveBackgroundVolume() {
+  const value = document.getElementById('backgroundVolume').value || '0';
+  document.getElementById('backgroundVolumeValue').textContent = value;
 }
 
 function initPomowaveInspector() {
@@ -69,6 +77,20 @@ function initPomowaveInspector() {
       });
     });
 
+    document.getElementById('previewBackgroundSound').addEventListener('click', () => {
+      autosave.flush();
+      $UD.sendParamFromPlugin({
+        previewBackgroundSound: document.getElementById('backgroundSound').value,
+      }, currentContext);
+    });
+
+    document.getElementById('stopPreviewBackgroundSound').addEventListener('click', () => {
+      autosave.flush();
+      $UD.sendParamFromPlugin({ stopPreviewBackgroundSound: 'true' }, currentContext);
+    });
+
+    document.getElementById('backgroundVolume').addEventListener('input', syncPomowaveBackgroundVolume);
+
     document.getElementById('resetTimer').addEventListener('click', () => {
       autosave.flush();
       $UD.sendParamFromPlugin({ resetTimer: 'true' }, currentContext);
@@ -88,6 +110,7 @@ function initPomowaveInspector() {
       autosave.cancel();
     });
     syncPomowaveButtons();
+    syncPomowaveBackgroundVolume();
   }
 
   $UD.connect('com.ulanzi.ulanzistudio.lexutility.pomowave');
@@ -102,6 +125,7 @@ function initPomowaveInspector() {
     currentContext = message.context || currentContext;
     applySettings(POMOWAVE_FIELDS, message.param || {});
     syncPomowaveButtons();
+    syncPomowaveBackgroundVolume();
     void applyLanguageSelection();
   }
 
