@@ -461,6 +461,14 @@ test('pomowave distributes every declared CC0 preview background with honest cre
   const expected = ['rain', 'fireplace', 'forest', 'ocean', 'cafe', 'brownNoise'];
   const credits = fs.readFileSync(path.join(audioDir, 'CREDITS.md'), 'utf8');
   const publicPreviewIds = ['595717_2530992', '852107_18387771', '723913_2008500', '852826_17997500', '540299_10965608', '737409_16041797'];
+  const originalUploadNames = [
+    '595717__lynks__soft-rain-loop.ogg',
+    '852107__myloop__fireplace.wav',
+    '723913__magnesus__forest-birds-ambient-seamless-loop.wav',
+    '852826__kkenny101__gentle-ocean-waves-loop.wav',
+    '540299__aidansamuel__cofee-shop-ambience.wav',
+    '737409__tracyradio__brown-noise.mp3',
+  ];
   const previewSha256 = {
     rain: 'c42458d0383b82d5b03e09650ae3db75368d14f51702acf28c8125a23eadfa73',
     fireplace: 'ac83ce6f89fff58e547c0e49d29eb77fab8556f0fee3a558c8ce87d464969d96',
@@ -478,7 +486,8 @@ test('pomowave distributes every declared CC0 preview background with honest cre
   for (const [index, sound] of expected.entries()) {
     assert.ok(credits.includes(`\`${sound}.mp3\``));
     assert.match(credits, new RegExp(publicPreviewIds[index]));
-    assert.match(credits, /2026-07-28; page title recorded, original-upload filename not asserted/);
+    assert.match(credits, new RegExp(originalUploadNames[index].replaceAll('.', '\\.')));
+    assert.match(credits, /2026-07-28/);
     assert.equal(createHash('sha256').update(fs.readFileSync(path.join(audioDir, `${sound}.mp3`))).digest('hex'), previewSha256[sound]);
   }
 });
