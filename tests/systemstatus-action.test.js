@@ -7,13 +7,16 @@ import { createSystemStatusAction } from '../plugins/com.ulanzi.lexutility.ulanz
 const {
   ACTION_CONFIGS,
   readPersistedState,
-  systemStatusCollectSample,
   systemStatusAppendHistory,
   systemStatusChartTypeForMetric,
+  systemStatusCollectIdentity,
+  systemStatusCollectSample,
+  systemStatusFormatVersion,
   systemStatusHydrateState,
   systemStatusNetworkRates,
   systemStatusNormalizeLhmUrl,
   systemStatusNormalizeMetricSlots,
+  systemStatusOpenMonitor,
   systemStatusParseLhmMetrics,
   systemStatusParseMacGpuUtilization,
   systemStatusRenderIcon,
@@ -33,6 +36,7 @@ function instance(settings = {}, values = {}) {
     context: 'com.ulanzi.ulanzistudio.lexutility.systemstatus___test___key',
     active: false,
     platform: 'darwin',
+    systemVersion: 'Tahoe 26.6',
     settings: { ...defaults, ...settings },
     values: { cpu: 42, ram: 68, gpu: 31, temperature: 57.5, upload: 1_500_000, download: 24_000_000, ...values },
     history: {
@@ -99,6 +103,69 @@ test('macOS IORegistry parser reads the highest available GPU utilization field'
   const output = '"PerformanceStatistics" = {"Tiler Utilization %"=22,"Renderer Utilization %"=38,"Device Utilization %"=35}';
   assert.equal(systemStatusParseMacGpuUtilization(output), 38);
   assert.equal(systemStatusParseMacGpuUtilization('no compatible sensor'), null);
+});
+
+test('system identity formats current macOS and Windows versions for the header', async () => {
+  assert.equal(
+    systemStatusFormatVersion({ distro: 'macOS', codename: 'Tahoe', release: '26.6' }, 'darwin'),
+    'Tahoe 26.6',
+  );
+  assert.equal(
+    systemStatusFormatVersion({
+      distro: 'Microsoft Windows 11 Pro',
+      codename: '24H2',
+      release: '10.0.26100',
+    }, 'win32'),
+    'Windows 11 24H2',
+  );
+  assert.equal(
+    systemStatusFormatVersion({ distro: 'macOS', codename: '', release: '26.6' }, 'darwin'),
+    'macOS 26.6',
+  );
+
+  const identity = await systemStatusCollectIdentity({
+    platform: 'darwin',
+    si: { osInfo: async () => ({ distro: 'macOS', codename: 'Tahoe', release: '26.6' }) },
+  });
+  assert.deepEqual(identity, { platform: 'darwin', versionLabel: 'Tahoe 26.6' });
+});
+
+test('long press opens the native system monitor on macOS and Windows', async () => {
+  const calls = [];
+  const execFile = (command, args, options, callback) => {
+    calls.push({ command, args, options });
+    callback(null);
+  };
+
+  assert.equal(
+    await systemStatusOpenMonitor({ platform: 'darwin', execFile }),
+    'Activity Monitor',
+  );
+  assert.equal(
+    await systemStatusOpenMonitor({ platform: 'win32', execFile }),
+    'Task Manager',
+  );
+  assert.deepEqual(
+    calls.map(({ command, args }) => ({ command, args })),
+    [
+      { command: '/usr/bin/open', args: ['-b', 'com.apple.ActivityMonitor'] },
+      { command: 'taskmgr.exe', args: [] },
+    ],
+  );
+  assert.ok(calls.every(({ options }) => options.windowsHide === true && options.timeout === 4_000));
+  await assert.rejects(
+    systemStatusOpenMonitor({ platform: 'linux', execFile }),
+    /not supported/,
+  );
+
+  let hookPlatform = '';
+  const action = createSystemStatusAction({
+    openSystemMonitor: async ({ platform }) => {
+      hookPlatform = platform;
+    },
+  });
+  await action.config.onLongPress({ platform: 'win32' });
+  assert.equal(hookPlatform, 'win32');
 });
 
 test('network counters exclude internal and virtual interfaces and calculate per-second rates', () => {
@@ -189,10 +256,11 @@ test('network rows use compact direction icons and distinct 15px units', () => {
   assert.doesNotMatch(svg, />UP<\/text>|>DOWN<\/text>/);
 });
 
-test('header shows only the current platform mark without sampling status badges', () => {
+test('header shows the current platform version without SYSTEM or sampling status badges', () => {
   const macSvg = decode(systemStatusRenderIcon(instance()));
   const windowsInstance = instance();
   windowsInstance.platform = 'win32';
+  windowsInstance.systemVersion = 'Windows 11 24H2';
   windowsInstance.sampling = true;
   const windowsSvg = decode(systemStatusRenderIcon(windowsInstance));
 
@@ -202,7 +270,9 @@ test('header shows only the current platform mark without sampling status badges
   assert.match(windowsSvg, /data-platform-mark="windows"/);
   assert.match(windowsSvg, /data-platform-mark="windows"[^>]*translate\(45 43\)/);
   assert.doesNotMatch(windowsSvg, /data-platform-mark="macos"/);
-  assert.doesNotMatch(`${macSvg}${windowsSvg}`, />LIVE<|>SCAN<|>STALE<|>WAIT<\/text>/);
+  assert.match(macSvg, /data-system-version="true"[^>]*>Tahoe 26\.6<\/text>/);
+  assert.match(windowsSvg, /data-system-version="true"[^>]*font-size="15"[^>]*>Windows 11 24H2<\/text>/);
+  assert.doesNotMatch(`${macSvg}${windowsSvg}`, />SYSTEM<|>系统<|>LIVE<|>SCAN<|>STALE<|>WAIT<\/text>/);
 });
 
 test('manual refresh brightens the platform mark and adds a restrained halo', () => {

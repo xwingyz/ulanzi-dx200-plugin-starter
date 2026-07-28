@@ -1,7 +1,7 @@
 # System Status Action 规格
 
 状态：已实现
-最后代码核对：2026-07-26
+最后代码核对：2026-07-28
 action key：`systemstatus`
 UUID：`com.ulanzi.ulanzistudio.lexutility.systemstatus`
 
@@ -39,8 +39,9 @@ Inspector 以三个有序下拉槽位表达“最多 3 项”；第二、第三�
 | 钩子 | 行为 |
 | --- | --- |
 | `createState` | 创建当前实例的采样状态与网络基线，并从 `action-state.json` 安全水合最近 24 条历史 |
-| `onReady` | 立即采样并登记实例定时器 |
+| `onReady` | 并行读取一次系统身份、立即采样并登记实例定时器 |
 | `onRun` | 取消待执行的轮询计时并手动立即采样；采样期间点亮系统标志，完成后恢复并重新安排轮询 |
+| `onLongPress` | 在长按成立后的 `keyup` 打开系统监视工具：macOS 打开“活动监视器”，Windows 打开“任务管理器” |
 | `onSettingsChanged` | 采样间隔或数据源变化时重置网络基线并重新调度 |
 | `onDispose` | 同步补刷尚未落盘的历史；不发起新探测，定时器由框架统一回收 |
 | `render` | 依据归一化 settings + 当前 state 纯函数生成 SVG data URL |
@@ -50,7 +51,7 @@ Inspector 以三个有序下拉槽位表达“最多 3 项”；第二、第三�
 ## 5. 键面显示
 
 - 全部内容经公共 `renderThemeBackdrop`、`frameFor`、`frameContent` 输出，复用 `THEMES`。
-- 顶部左上角显示系统标志，右侧显示 `SYSTEM` 标题：macOS 使用苹果矢量标志，Windows 使用视窗矢量标志；不显示 `LIVE`、`SCAN`、`WAIT`、`STALE` 等采样状态胶囊。
+- 顶部左上角显示系统标志，右侧显示当前系统版本，不再显示 `SYSTEM`：macOS 使用苹果矢量标志及系统代号 + 版本号（例如 `Tahoe 26.6`），Windows 使用视窗矢量标志及精简系统名 + 版本代号（例如 `Windows 11 24H2`）。系统身份通过 `systeminformation.osInfo()` 在实例首次就绪时读取一次，不进入周期采样；读取失败时退化为 `macOS` 或 `Windows`。头部不显示 `LIVE`、`SCAN`、`WAIT`、`STALE` 等采样状态胶囊。
 - 手动按键刷新期间，系统标志由主题 `accent` 提亮为主文字色，并显示低透明度圆形光晕；反馈至少保持 300ms，且必须等采样完成后才恢复原色。自动轮询不显示该反馈。
 - 主区显示 1～3 行指标卡；CPU、RAM、GPU、温度、上传、下载均使用约 20～22px 的独立线性矢量图标，不再显示 `CPU`、`RAM`、`TEMP`、`NET` 等文字标签。每行同时保留主数值和单位，字号随行数调整但主数值不小于 24px。
 - 原有单值背景进度条统一替换为最近 24 条趋势图：CPU、RAM、GPU、CPU 温度默认使用柱状图，上传与下载默认使用折线图；图表置于指标卡背景层，使用当前语义色的中低透明度版本，不遮挡图标、数值与单位。
@@ -64,7 +65,8 @@ Inspector 以三个有序下拉槽位表达“最多 3 项”；第二、第三�
 - CPU/RAM/网络差分及 LibreHardwareMonitor 树解析使用固定夹具测试，不依赖测试机实时数值。
 - 1/2/3 行渲染均输出合法 SVG，不含 `undefined` / `NaN`，且主数值字号满足下限。
 - 历史追加、24 条截断、安全水合与序列化有单元测试；柱状图/折线图默认映射及 24 点 SVG 结构有渲染测试。
-- macOS / Windows 左上角标志及采样状态文字移除有双平台结构测试；六类指标的矢量图标和趋势图加深后的透明度有结构测试。
+- macOS / Windows 左上角标志、系统版本格式、`SYSTEM` 与采样状态文字移除有双平台结构测试；六类指标的矢量图标和趋势图加深后的透明度有结构测试。
+- 长按启动器使用固定命令参数测试：macOS 通过 `open -b com.apple.ActivityMonitor`，Windows 启动 `taskmgr.exe`；不支持的平台明确失败。
 - 手动刷新测试覆盖立即高亮、采样完成后恢复、轮询重新调度，以及与自动采样重叠时排队补刷。
 - manifest、action 注册、Inspector、静态图标与本规格保持一致。
 - 完整 `npm test` 通过；因新增 action identity 和主进程模块，桌面验收使用 `restart`。

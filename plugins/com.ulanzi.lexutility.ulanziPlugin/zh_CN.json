@@ -65,7 +65,7 @@
     "Single click: refresh Codex usage. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the configured usage page.": "单击：刷新 Codex 用量。双击：等同单击，第二次刷新受冷却限制。长按：打开已配置的用量页面。",
     "Single click: refresh printer status. Double click: refresh once and open Bambu Studio. Long press: open the selected MakerWorld site.": "单击：刷新打印机状态。双击：刷新一次并打开 Bambu Studio。长按：打开所选 MakerWorld 站点。",
     "Single click: refresh NAS status. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the DSM page on macOS.": "单击：刷新 NAS 状态。双击：等同单击，第二次刷新受冷却限制。长按：在 macOS 上打开 DSM 页面。",
-    "Single click: refresh system metrics. Double click: request two consecutive manual refreshes. Long press: not assigned.": "单击：刷新系统指标。双击：连续请求两次手动刷新。长按：未设置。",
+    "Single click: refresh system metrics. Double click: request two consecutive manual refreshes. Long press: open Activity Monitor or Task Manager.": "单击：刷新系统指标。双击：连续请求两次手动刷新。长按：打开活动监视器或任务管理器。",
     "Single click: start, pause, or resume a break. Double click: perform the single-click action twice. Long press: skip a due reminder or cancel the current break.": "单击：开始、暂停或继续休息。双击：连续执行两次单击功能。长按：跳过到期提醒或取消当前休息。",
     "Network Speed Test": "网络测速",
     "Overview & schedule": "概览与计划",

@@ -87,6 +87,60 @@ function runFile(file, args, execFileImpl = execFile) {
   });
 }
 
+function formatSystemVersion(info, platform = process.platform) {
+  const release = String(info?.release || '').trim();
+  const codename = String(info?.codename || '').trim();
+  const distro = String(info?.distro || '').trim();
+
+  if (platform === 'darwin') {
+    const name = codename && codename.toLowerCase() !== 'macos' ? codename : 'macOS';
+    return [name, release].filter(Boolean).join(' ') || 'macOS';
+  }
+  if (platform === 'win32') {
+    const windowsName = distro.match(/Windows(?: Server)?\s+\d+(?:\.\d+)?/i)?.[0]
+      || distro.replace(/^Microsoft\s+/i, '').trim()
+      || 'Windows';
+    return [windowsName, codename || release].filter(Boolean).join(' ');
+  }
+  return [distro || platform, codename || release].filter(Boolean).join(' ');
+}
+
+async function collectSystemIdentity(options = {}) {
+  const si = options.si ?? systeminformation;
+  const platform = options.platform ?? process.platform;
+  const info = await settled(() => si.osInfo());
+  return {
+    platform,
+    versionLabel: formatSystemVersion(info, platform),
+  };
+}
+
+function runExternal(command, args, options = {}) {
+  const execFileImpl = options.execFile ?? execFile;
+  return new Promise((resolve, reject) => {
+    execFileImpl(command, args, { timeout: 4_000, windowsHide: true }, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function openSystemMonitor(options = {}) {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'darwin') {
+    await runExternal('/usr/bin/open', ['-b', 'com.apple.ActivityMonitor'], options);
+    return 'Activity Monitor';
+  }
+  if (platform === 'win32') {
+    await runExternal('taskmgr.exe', [], options);
+    return 'Task Manager';
+  }
+  throw new Error(`Opening the system monitor is not supported on ${platform}`);
+}
+
 function parseMacGpuUtilization(output) {
   const matches = [...String(output || '').matchAll(/"(?:Device|Renderer|Tiler) Utilization %"\s*=\s*(\d+(?:\.\d+)?)/g)];
   const values = matches.map((match) => percent(match[1])).filter((value) => value != null);
@@ -439,6 +493,14 @@ function platformMark(platform, color) {
   return `<g data-platform-mark="macos" fill="${color}" transform="translate(45 40) scale(0.92)"><path d="M16.3 5.5c1-1.2 1.6-2.9 1.4-4.5-1.5.1-3.2 1-4.2 2.2-.9 1-1.6 2.6-1.3 4.1 1.6.1 3.1-.7 4.1-1.8zM22.7 15.1c0-3.6 3-5.3 3.1-5.4-1.7-2.4-4.3-2.7-5.2-2.7-2.2-.2-4.3 1.3-5.4 1.3S12.4 7 10.6 7C8.3 7 6.1 8.4 4.9 10.5c-2.5 4.3-.7 10.7 1.8 14.2 1.2 1.7 2.6 3.7 4.4 3.6 1.8-.1 2.5-1.2 4.7-1.2 2.1 0 2.8 1.2 4.7 1.1 2 0 3.2-1.8 4.4-3.5 1.4-2 1.9-4 1.9-4.1-.1 0-4.1-1.6-4.1-5.5z"/></g>`;
 }
 
+function systemVersionFontSize(value) {
+  const length = Array.from(String(value || '')).length;
+  if (length <= 11) return 20;
+  if (length <= 14) return 18;
+  if (length <= 17) return 15;
+  return 13;
+}
+
 function renderSystemStatusIcon(instance, runtime) {
   const { escapeXml, frameContent, frameFor, renderThemeBackdrop, t, themeFor, toDataUrl } = runtime;
   const theme = themeFor(instance.settings);
@@ -452,6 +514,8 @@ function renderSystemStatusIcon(instance, runtime) {
   const bottom = 214;
   const rowHeight = (bottom - top - gap * (keys.length - 1)) / keys.length;
   const platformColor = instance.manualRefreshing ? backdrop.text : theme.accent;
+  const versionLabel = instance.systemVersion || (instance.platform === 'win32' ? 'Windows' : 'macOS');
+  const versionFontSize = systemVersionFontSize(versionLabel);
   const refreshFeedback = instance.manualRefreshing
     ? `<circle data-manual-refresh-feedback="active" cx="58" cy="54" r="18" fill="${theme.accent}" opacity="0.22"/><circle cx="58" cy="54" r="16" fill="none" stroke="${backdrop.text}" stroke-width="1.5" opacity="0.42"/>`
     : '';
@@ -487,7 +551,7 @@ function renderSystemStatusIcon(instance, runtime) {
   const inner = `
     ${refreshFeedback}
     ${platformMark(instance.platform, platformColor)}
-    <text x="82" y="59" fill="${backdrop.text}" font-size="20" font-weight="800" font-family="Arial,Helvetica,sans-serif">${escapeXml(t('SYSTEM', instance.settings.uiLanguage))}</text>
+    <text data-system-version="true" x="82" y="59" fill="${backdrop.text}" font-size="${versionFontSize}" font-weight="800" font-family="Arial,Helvetica,sans-serif">${escapeXml(versionLabel)}</text>
     ${rows}`;
   return toDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="392" height="392" viewBox="0 0 256 256">${backdrop.outer}${frameContent(frame, inner)}</svg>`);
 }
@@ -496,9 +560,11 @@ export function createSystemStatusAction(runtime) {
   const {
     clearInstanceTimeout,
     collectSystemSample: collectSample = collectSystemSample,
+    collectSystemIdentity: collectIdentity = collectSystemIdentity,
     delayInstance,
     instances: INSTANCES,
     normalizeNumberString,
+    openSystemMonitor: openMonitor = openSystemMonitor,
     readPersistedState,
     renderInstance,
     setInstanceTimeout,
@@ -586,6 +652,16 @@ export function createSystemStatusAction(runtime) {
     return sample(instance, { manualFeedback: true });
   }
 
+  async function loadSystemIdentity(instance) {
+    const identity = await collectIdentity({ platform: instance.platform });
+    if (INSTANCES.get(instance.context) !== instance) {
+      return;
+    }
+    instance.platform = identity.platform || instance.platform;
+    instance.systemVersion = identity.versionLabel || instance.systemVersion;
+    renderInstance(instance);
+  }
+
   const defaults = {
     metric1: 'cpu',
     metric2: 'ram',
@@ -610,6 +686,7 @@ export function createSystemStatusAction(runtime) {
       },
       createState: (instance) => ({
         platform: process.platform,
+        systemVersion: process.platform === 'win32' ? 'Windows' : 'macOS',
         values: Object.fromEntries(METRIC_KEYS.map((key) => [key, null])),
         ...hydrateSystemStatusState(readPersistedState(instance.context)),
         historyDirtySamples: 0,
@@ -624,10 +701,11 @@ export function createSystemStatusAction(runtime) {
         advancedSource: '',
       }),
       onRun: (instance) => runManualRefresh(instance),
+      onLongPress: (instance) => openMonitor({ platform: instance.platform }),
       onReady(instance) {
         if (!instance.started) {
           instance.started = true;
-          return sample(instance);
+          return Promise.all([loadSystemIdentity(instance), sample(instance)]);
         }
         return undefined;
       },
@@ -651,6 +729,8 @@ export function createSystemStatusAction(runtime) {
     },
     testing: {
       systemStatusCollectSample: collectSystemSample,
+      systemStatusCollectIdentity: collectSystemIdentity,
+      systemStatusFormatVersion: formatSystemVersion,
       systemStatusAppendHistory: appendSystemStatusHistory,
       systemStatusChartTypeForMetric: chartTypeForMetric,
       systemStatusFormatMetric: formatMetric,
@@ -658,6 +738,7 @@ export function createSystemStatusAction(runtime) {
       systemStatusNetworkRates: networkRates,
       systemStatusNormalizeLhmUrl: normalizeLhmUrl,
       systemStatusNormalizeMetricSlots: normalizeMetricSlots,
+      systemStatusOpenMonitor: openSystemMonitor,
       systemStatusParseLhmMetrics: parseLhmMetrics,
       systemStatusParseMacGpuUtilization: parseMacGpuUtilization,
       systemStatusRenderIcon: (instance) => renderSystemStatusIcon(instance, runtime),
