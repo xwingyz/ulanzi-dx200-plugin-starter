@@ -45,8 +45,8 @@ PomoWave 是可跨睡眠和插件重启恢复的番茄钟。它在专注、短�
 | `soundStyle` | `glass` | `glass` / `hero` / `purr` / `submarine` | 提示音样式 |
 | `soundEnabled` | `true` | 字符串布尔值 | 阶段结束是否发声 |
 | `cueDuration` | `180` | `continuous` / `60` / `180` / `300` / `600` | 仅 awaiting 手动开始时循环提示的最长秒数；自动衔接仍只响一次 |
-| `backgroundSound` | `rain` | `none` / `rain` / `fireplace` / `forest` / `ocean` / `cafe` / `brownNoise` | 专注背景音固定选择 |
-| `backgroundRandom` | `false` | 字符串布尔值 | 每个新 focus 轮次从六种声音中随机选择一次 |
+| `backgroundSound` | `rain` | `none` / `rain` / `fireplace` / `forest` / `ocean` / `cafe` / `brownNoise` | 随机关闭时的专注背景音固定选择 |
+| `backgroundRandom` | `false` | 字符串布尔值 | 每个新 focus 轮次从六种声音中随机选择一次；开启时优先于 `backgroundSound`，即使固定项为 `none` 也会抽取 |
 | `backgroundVolume` | `35` | `0..100` 的数字字符串 | 背景音及其试听的音量 |
 | `autoStartBreaks` | `true` | 字符串布尔值 | 专注结束后是否自动开始休息 |
 | `autoStartFocus` | `true` | 字符串布尔值 | 休息/完成后是否自动开始专注 |

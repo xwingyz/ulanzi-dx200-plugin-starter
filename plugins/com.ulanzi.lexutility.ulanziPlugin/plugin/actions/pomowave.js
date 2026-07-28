@@ -256,7 +256,7 @@ function normalizedBackgroundVolume(settings) {
 }
 
 function selectPomodoroBackground(instance, { force = false } = {}) {
-  if (!instance.settings || instance.settings.backgroundSound === 'none') {
+  if (!instance.settings) {
     instance.selectedBackgroundSound = 'none';
     return 'none';
   }
@@ -265,6 +265,8 @@ function selectPomodoroBackground(instance, { force = false } = {}) {
   }
   if (isEnabled(instance.settings.backgroundRandom)) {
     instance.selectedBackgroundSound = POMODORO_BACKGROUND_SOUNDS[Math.floor(Math.random() * POMODORO_BACKGROUND_SOUNDS.length)];
+  } else if (instance.settings.backgroundSound === 'none') {
+    instance.selectedBackgroundSound = 'none';
   } else {
     instance.selectedBackgroundSound = normalizeChoice(instance.settings.backgroundSound, 'rain', POMODORO_BACKGROUND_CHOICES);
   }
@@ -370,26 +372,22 @@ function stopPomodoroPreview(instance) {
   stopAudioProcess(instance, 'previewProcess', 'previewGeneration', 'pomodoroPreview');
 }
 
-function playPomodoroBackgroundPreview(instance, requestedSound) {
+function startPomodoroPreview(instance, startPlayback) {
   stopPomodoroPreview(instance);
-  const sound = normalizeChoice(requestedSound ?? instance.settings.backgroundSound, 'rain', POMODORO_BACKGROUND_CHOICES);
-  if (sound === 'none') {
-    return null;
-  }
-  const plan = backgroundPlaybackCommand(sound, normalizedBackgroundVolume(instance.settings));
-  if (!plan) {
-    return null;
-  }
   const generation = instance.previewGeneration;
   let processHandle = null;
   try {
-    processHandle = runPlayer(plan.command, plan.args, () => {
+    processHandle = startPlayback(() => {
       if (instance.previewGeneration === generation && instance.previewProcess === processHandle) {
         instance.previewProcess = null;
         instance.previewPlaying = false;
         clearInstanceTimeout(instance, 'pomodoroPreview');
       }
     });
+    if (!processHandle) {
+      instance.previewPlaying = false;
+      return null;
+    }
     instance.previewProcess = processHandle;
     instance.previewPlaying = true;
     setInstanceTimeout(instance, 'pomodoroPreview', () => {
@@ -400,8 +398,30 @@ function playPomodoroBackgroundPreview(instance, requestedSound) {
     return processHandle;
   } catch {
     instance.previewProcess = null;
+    instance.previewPlaying = false;
     return null;
   }
+}
+
+function playPomodoroCuePreview(instance, requestedStyle) {
+  return startPomodoroPreview(instance, (onComplete) => playPomodoroCue(instance.settings, {
+    style: requestedStyle,
+    ignoreEnabled: true,
+    onComplete,
+  }));
+}
+
+function playPomodoroBackgroundPreview(instance, requestedSound) {
+  const sound = normalizeChoice(requestedSound ?? instance.settings.backgroundSound, 'rain', POMODORO_BACKGROUND_CHOICES);
+  if (sound === 'none') {
+    stopPomodoroPreview(instance);
+    return null;
+  }
+  const plan = backgroundPlaybackCommand(sound, normalizedBackgroundVolume(instance.settings));
+  if (!plan) {
+    return null;
+  }
+  return startPomodoroPreview(instance, (onComplete) => runPlayer(plan.command, plan.args, onComplete));
 }
 
 // 剩余时间只有一个事实源：运行中看 phaseEndAt 与时钟的差，暂停/空闲看冻结的 remainingSec。
@@ -516,6 +536,7 @@ function scheduleBlink(instance) {
 function enterAwaitingPhase(instance, phase, options = {}) {
   const { playSound = true } = options;
   clearPomodoroTimer(instance);
+  stopPomodoroCue(instance);
   stopPomodoroBackground(instance);
   instance.phase = phase;
   instance.totalSec = pomodoroDurationSecFromSettings(instance.settings, phase);
@@ -738,6 +759,7 @@ function togglePomodoro(instance, now = Date.now()) {
 
 function skipPomodoroPhase(instance) {
   initializePomodoroInstance(instance);
+  stopPomodoroCue(instance);
   if (instance.phase === 'idle') {
     return;
   }
@@ -754,6 +776,7 @@ function skipPomodoroPhase(instance) {
 // 只作废当前这颗番茄，保留已完成轮次数（startPomodoroPhase 只在 done 阶段清零轮次）。
 function resetPomodoroWork(instance, now = Date.now()) {
   initializePomodoroInstance(instance);
+  stopPomodoroPreview(instance);
   startPomodoroPhase(instance, 'focus', { autoStart: false, playSound: false, now });
 }
 
@@ -943,7 +966,7 @@ const config = {
     onParamFromPlugin: (instance, param) => {
       if (param?.previewSound) {
         // PI 试听：播放点选样式，无视 soundEnabled，不改动计时状态。
-        playPomodoroCue(instance.settings, { style: param.previewSound, ignoreEnabled: true });
+        playPomodoroCuePreview(instance, param.previewSound);
         return;
       }
       if (param?.previewBackgroundSound) {
@@ -996,6 +1019,7 @@ const config = {
       stopPomodoroBackground,
       pausePomodoroBackground,
       playPomodoroBackgroundPreview,
+      playPomodoroCuePreview,
       stopPomodoroPreview,
       selectPomodoroBackground,
       backgroundAudioPath,

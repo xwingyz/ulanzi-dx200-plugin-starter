@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { createPomowaveAction } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/actions/pomowave.js';
 
-function createRuntime({ platform = 'darwin', player } = {}) {
+function createRuntime({ platform = 'darwin', player, persistedState = {} } = {}) {
   return {
     clearInstanceTimeout(instance, slot) {
       instance.timers?.delete(slot);
@@ -25,7 +25,7 @@ function createRuntime({ platform = 'darwin', player } = {}) {
       return Number.isFinite(number) && number >= min && number <= max ? String(number) : fallback;
     },
     platform: () => platform,
-    readPersistedState: () => ({}),
+    readPersistedState: () => persistedState,
     renderInstance: () => {},
     renderThemeBackdrop: () => ({ outer: '', low: '#222', text: '#fff' }),
     setInstanceTimeout(instance, slot, callback, ms) {
@@ -140,7 +140,7 @@ test('pomowave persists the selected background and only plays it for a running 
   assert.equal(starts.length, 1);
 });
 
-test('pomowave applies cue duration limits, keeps continuous cues open, and never loops auto transitions', () => {
+test('pomowave applies every cue duration limit, leaves awaiting intact at expiry, and never loops auto transitions', () => {
   const calls = [];
   const { config, testing } = createPomowaveAction(createRuntime({
     player: (command, args, callback) => {
@@ -148,14 +148,22 @@ test('pomowave applies cue duration limits, keeps continuous cues open, and neve
       return { killed: false, kill() { this.killed = true; } };
     },
   }));
-  const bounded = createInstance(config, { settings: { ...config.defaults, cueDuration: '600', soundEnabled: 'true' } });
-  testing.playPomodoroPhaseEndCue(bounded, { autoStart: false });
-  assert.equal(bounded.cueRepeating, true);
-  assert.equal(bounded.timers.get('pomodoroCueLimit').ms, 600_000);
-  testing.stopPomodoroCue(bounded);
-  assert.equal(bounded.cueProcess, null);
-  assert.equal(bounded.timers.has('pomodoroCue'), false);
-  assert.equal(bounded.timers.has('pomodoroCueLimit'), false);
+  for (const duration of ['60', '180', '300', '600']) {
+    const bounded = createInstance(config, {
+      awaiting: true,
+      phase: 'shortBreak',
+      settings: { ...config.defaults, cueDuration: duration, soundEnabled: 'true' },
+    });
+    testing.playPomodoroPhaseEndCue(bounded, { autoStart: false });
+    assert.equal(bounded.cueRepeating, true);
+    assert.equal(bounded.timers.get('pomodoroCueLimit').ms, Number(duration) * 1000);
+    bounded.timers.get('pomodoroCueLimit').callback();
+    assert.equal(bounded.cueProcess, null);
+    assert.equal(bounded.timers.has('pomodoroCue'), false);
+    assert.equal(bounded.timers.has('pomodoroCueLimit'), false);
+    assert.equal(bounded.awaiting, true, '提醒到期只停声，等待状态不应被推进');
+    assert.equal(bounded.phase, 'shortBreak');
+  }
 
   const continuous = createInstance(config, { settings: { ...config.defaults, cueDuration: 'continuous', soundEnabled: 'true' } });
   testing.playPomodoroPhaseEndCue(continuous, { autoStart: false });
@@ -166,7 +174,7 @@ test('pomowave applies cue duration limits, keeps continuous cues open, and neve
   testing.playPomodoroPhaseEndCue(automatic, { autoStart: true });
   assert.equal(automatic.cueRepeating, false);
   assert.equal(automatic.timers?.has('pomodoroCueLimit') ?? false, false);
-  assert.equal(calls.length, 3, 'each transition begins with exactly one cue playback');
+  assert.equal(calls.length, 6, '每种有界时长、continuous 和自动衔接各只启动一次播放');
 });
 
 test('pomowave background random selection is stable through pause and serialization, and audio failure is inert', () => {
@@ -227,6 +235,214 @@ test('pomowave background preview is isolated from the timer and has bounded cle
   assert.equal(instance.timers.has('pomodoroPreview'), false);
 });
 
+test('pomowave gives cue and background previews one killable instance channel, and long press clears all audio', () => {
+  const stopped = [];
+  const { config, testing } = createPomowaveAction(createRuntime({
+    player: (command) => ({
+      killed: false,
+      kill(signal) { stopped.push(`${command}:${signal || 'TERM'}`); this.killed = true; },
+    }),
+  }));
+  const instance = createInstance(config, {
+    active: true,
+    phase: 'focus',
+    running: true,
+    totalSec: 1500,
+    remainingSec: 700,
+    phaseEndAt: Date.now() + 700_000,
+    settings: { ...config.defaults, soundEnabled: 'true' },
+  });
+
+  config.onParamFromPlugin(instance, { previewSound: 'hero' });
+  const cuePreview = instance.previewProcess;
+  assert.ok(cuePreview);
+  assert.equal(instance.previewPlaying, true);
+  assert.equal(instance.timers.get('pomodoroPreview').ms, 15_000);
+
+  config.onParamFromPlugin(instance, { previewBackgroundSound: 'ocean' });
+  assert.equal(cuePreview.killed, true, '新试听必须终止上一个试听句柄');
+  const backgroundPreview = instance.previewProcess;
+  assert.ok(backgroundPreview);
+  testing.playPomodoroPhaseEndCue(instance, { autoStart: false });
+  const cue = instance.cueProcess;
+  testing.startPomodoroBackground(instance);
+  const background = instance.backgroundProcess;
+
+  testing.handlePomodoroLongPress(instance);
+  assert.equal(cue.killed, true);
+  assert.equal(background.killed, true);
+  assert.equal(backgroundPreview.killed, true);
+  assert.equal(instance.previewProcess, null);
+  assert.equal(instance.timers.has('pomodoroPreview'), false);
+  assert.ok(stopped.length >= 3);
+});
+
+test('pomowave clears awaiting cues when confirming, skipping, resetting, or disposing', () => {
+  const { config, testing } = createPomowaveAction(createRuntime({
+    player: () => ({ killed: false, kill() { this.killed = true; } }),
+  }));
+  const makeAwaiting = () => createInstance(config, {
+    active: true,
+    phase: 'shortBreak',
+    awaiting: true,
+    totalSec: 300,
+    remainingSec: 300,
+    settings: { ...config.defaults, soundEnabled: 'true' },
+  });
+
+  const confirmed = makeAwaiting();
+  testing.playPomodoroPhaseEndCue(confirmed, { autoStart: false });
+  const confirmCue = confirmed.cueProcess;
+  testing.handlePomodoroShortPress(confirmed);
+  assert.equal(confirmCue.killed, true);
+  assert.equal(confirmed.cueProcess, null);
+
+  const skipped = makeAwaiting();
+  testing.playPomodoroPhaseEndCue(skipped, { autoStart: false });
+  const skipCue = skipped.cueProcess;
+  testing.skipPomodoroPhase(skipped);
+  assert.equal(skipCue.killed, true);
+  assert.equal(skipped.cueProcess, null);
+
+  const reset = makeAwaiting();
+  testing.playPomodoroPhaseEndCue(reset, { autoStart: false });
+  const resetCue = reset.cueProcess;
+  config.onParamFromPlugin(reset, { resetTimer: 'true' });
+  assert.equal(resetCue.killed, true);
+  assert.equal(reset.cueProcess, null);
+
+  const disposed = makeAwaiting();
+  testing.playPomodoroPhaseEndCue(disposed, { autoStart: false });
+  const disposeCue = disposed.cueProcess;
+  config.onDispose(disposed);
+  assert.equal(disposeCue.killed, true);
+  assert.equal(disposed.cueProcess, null);
+});
+
+test('pomowave double press handles paused, awaiting, done, and break snapshots without count drift', () => {
+  const { config, testing } = createPomowaveAction(createRuntime());
+  const paused = createInstance(config, {
+    phase: 'focus', running: false, totalSec: 1500, remainingSec: 800, completedFocusRounds: 2,
+  });
+  testing.handlePomodoroShortPress(paused);
+  testing.handlePomodoroDoublePress(paused);
+  assert.equal(paused.phase, 'shortBreak');
+  assert.equal(paused.completedFocusRounds, 3);
+
+  const awaiting = createInstance(config, {
+    phase: 'shortBreak', awaiting: true, running: false, totalSec: 300, remainingSec: 300, completedFocusRounds: 3,
+  });
+  testing.handlePomodoroShortPress(awaiting);
+  testing.handlePomodoroDoublePress(awaiting);
+  assert.equal(awaiting.phase, 'focus');
+  assert.equal(awaiting.completedFocusRounds, 3);
+
+  const done = createInstance(config, {
+    phase: 'done', running: true, totalSec: 4, remainingSec: 4, completedFocusRounds: 4,
+  });
+  testing.handlePomodoroShortPress(done);
+  testing.handlePomodoroDoublePress(done);
+  assert.equal(done.phase, 'idle');
+  assert.equal(done.completedFocusRounds, 0);
+
+  const breakPhase = createInstance(config, {
+    phase: 'longBreak', running: true, totalSec: 900, remainingSec: 500, completedFocusRounds: 4,
+    phaseEndAt: Date.now() + 500_000,
+  });
+  testing.handlePomodoroShortPress(breakPhase);
+  testing.handlePomodoroDoublePress(breakPhase);
+  assert.equal(breakPhase.phase, 'done');
+  assert.equal(breakPhase.completedFocusRounds, 0);
+});
+
+test('pomowave random overrides none, redraws only for a new focus, and restarts immediately for live background changes', () => {
+  const starts = [];
+  const stopped = [];
+  const values = [0, 0.99, 0.5];
+  const originalRandom = Math.random;
+  Math.random = () => values.shift() ?? 0;
+  try {
+    const { config, testing } = createPomowaveAction(createRuntime({
+      player: (command, args) => {
+        starts.push({ command, args });
+        return { killed: false, kill() { stopped.push(args.at(-1)); this.killed = true; } };
+      },
+    }));
+    const instance = createInstance(config, {
+      active: true,
+      settings: { ...config.defaults, backgroundSound: 'none', backgroundRandom: 'true' },
+      phase: 'focus', running: true, totalSec: 1500, remainingSec: 1500, phaseEndAt: Date.now() + 1_500_000,
+    });
+    testing.startPomodoroBackground(instance);
+    assert.equal(instance.selectedBackgroundSound, 'rain');
+    assert.match(starts[0].args.at(-1), /rain\.mp3$/);
+
+    testing.pausePomodoroBackground(instance);
+    testing.startPomodoroBackground(instance);
+    assert.equal(instance.selectedBackgroundSound, 'rain', '暂停恢复不能重抽');
+
+    testing.resetPomodoroWork(instance);
+    assert.equal(instance.selectedBackgroundSound, 'brownNoise', '新 focus 轮次必须重抽，即使固定项是 none');
+
+    instance.running = true;
+    instance.phaseEndAt = Date.now() + 1_500_000;
+    testing.startPomodoroBackground(instance);
+    const previous = { ...instance.settings };
+    instance.settings = { ...instance.settings, backgroundRandom: 'false', backgroundSound: 'ocean', backgroundVolume: '77' };
+    config.onSettingsChanged(instance, previous);
+    assert.equal(stopped.length >= 1, true);
+    assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+    assert.equal(starts.at(-1).args[1], '0.77');
+
+    const beforeVolume = { ...instance.settings };
+    instance.settings = { ...instance.settings, backgroundVolume: '66' };
+    config.onSettingsChanged(instance, beforeVolume);
+    assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+    assert.equal(starts.at(-1).args[1], '0.66');
+
+    const beforeRandom = { ...instance.settings };
+    instance.settings = { ...instance.settings, backgroundSound: 'none', backgroundRandom: 'true' };
+    config.onSettingsChanged(instance, beforeRandom);
+    assert.equal(instance.selectedBackgroundSound, 'ocean');
+    assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('pomowave safely drops v1 state and audio failures or phase changes cannot leave background playback alive', () => {
+  const { config, testing } = createPomowaveAction(createRuntime({
+    persistedState: { v: 1, phase: 'focus', running: true, totalSec: 1500, remainingSec: 500, phaseEndAt: Date.now() + 500_000 },
+  }));
+  const hydrated = config.createState({ context: 'legacy' });
+  assert.equal(hydrated.phase, 'idle');
+  assert.equal(hydrated.running, false);
+
+  let callback;
+  const player = (command, _args, onComplete) => {
+    callback = onComplete;
+    return { killed: false, kill() { this.killed = true; } };
+  };
+  const action = createPomowaveAction(createRuntime({ player }));
+  const instance = createInstance(action.config, {
+    active: true, phase: 'focus', running: true, totalSec: 1500, remainingSec: 1000, phaseEndAt: Date.now() + 1_000_000,
+  });
+  action.testing.startPomodoroBackground(instance);
+  const processHandle = instance.backgroundProcess;
+  callback(new Error('player failed'));
+  assert.equal(instance.backgroundProcess, null);
+  assert.equal(instance.running, true);
+  assert.equal(instance.timers?.has('pomodoroBackground') ?? false, false);
+
+  action.testing.startPomodoroBackground(instance);
+  const phaseProcess = instance.backgroundProcess;
+  action.testing.skipPomodoroPhase(instance);
+  assert.equal(phaseProcess.killed, true);
+  assert.equal(instance.phase, 'shortBreak');
+  assert.equal(instance.backgroundProcess, null);
+  assert.notEqual(processHandle, phaseProcess);
+});
+
 test('pomowave dispose stops isolated cue, background and preview channels', () => {
   const { config } = createPomowaveAction(createRuntime());
   const stopped = [];
@@ -258,9 +474,11 @@ test('pomowave distributes every declared CC0 preview background with honest cre
   assert.ok(files.every((file) => fs.existsSync(file)), 'every selectable background has a packaged MP3');
   assert.ok(files.reduce((total, file) => total + fs.statSync(file).size, 0) <= 15 * 1024 * 1024);
   assert.match(credits, /public Freesound HQ \*\*preview\*\* MP3s/);
+  assert.match(credits, /by _lynks/);
   for (const [index, sound] of expected.entries()) {
     assert.ok(credits.includes(`\`${sound}.mp3\``));
     assert.match(credits, new RegExp(publicPreviewIds[index]));
+    assert.match(credits, /2026-07-28; page title recorded, original-upload filename not asserted/);
     assert.equal(createHash('sha256').update(fs.readFileSync(path.join(audioDir, `${sound}.mp3`))).digest('hex'), previewSha256[sound]);
   }
 });
