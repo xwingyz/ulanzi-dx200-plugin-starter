@@ -37,14 +37,21 @@
       .frame-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
       .frame-toggle { display: flex; gap: 7px; align-items: center; color: var(--muted); cursor: pointer; }
       .frame-toggle input { width: auto; min-height: 0; }
-      .stats { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-      .stats-summary { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; background: #071b20; }
-      .stats-summary div { padding: 9px 4px; border-right: 1px solid var(--line); }
+      .stats { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 0 0 14px; }
+      .stats-summary { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; background: #071b20; }
+      .stats-summary div { padding: 10px 3px; border-right: 1px solid var(--line); }
       .stats-summary div:last-child { border-right: 0; }
-      .stats-summary strong { display: block; color: var(--accent); font-size: 17px; }
-      .history { max-height: 150px; overflow: auto; }
-      .history-row { display: grid; grid-template-columns: 1fr repeat(4, 32px); gap: 4px; padding: 7px 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
-      .history-row span:not(:first-child) { text-align: right; }
+      .stats-summary strong { display: block; color: var(--accent); font-size: 18px; font-weight: 800; }
+      .stats-summary span { font-size: 10.5px; color: var(--muted); }
+      .streak-line { padding: 8px 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; text-align: center; }
+      .streak-line strong { color: var(--accent); font-weight: 800; }
+      .heatmap { display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; padding: 10px; border-top: 1px solid var(--line); }
+      .heatmap i { aspect-ratio: 1; border-radius: 3px; background: var(--line); opacity: 0.5; }
+      .heatmap i.l1 { background: var(--accent); opacity: 0.28; }
+      .heatmap i.l2 { background: var(--accent); opacity: 0.5; }
+      .heatmap i.l3 { background: var(--accent); opacity: 0.72; }
+      .heatmap i.l4 { background: var(--accent); opacity: 1; }
+      .heatmap i.bonus { box-shadow: inset 0 0 0 1.5px var(--text); }
       .action-row { display: flex; gap: 10px; margin-top: 12px; }
       .action-row button { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 800; cursor: pointer; }
       .save-btn { background: var(--accent); color: #06352d; }
@@ -59,9 +66,19 @@
     <div class="uspi-wrapper hidden">
       <div class="panel">
         <h1 data-localize="MicroBreak">MicroBreak</h1>
+        <div class="stats" id="statsPanel">
+          <div class="stats-summary">
+            <div><strong id="todayCompleted">0</strong><span data-localize="Today">Today</span></div>
+            <div><strong id="todayBonus">0</strong><span data-localize="Bonus">Bonus</span></div>
+            <div><strong id="weekGoalDays">0</strong><span data-localize="Goal days this week">Goal days this week</span></div>
+            <div><strong id="weekCompleted">0</strong><span data-localize="Done this week">Done this week</span></div>
+          </div>
+          <div class="streak-line"><span data-localize="Goal streak">Goal streak</span> <strong id="streak">0</strong> <span data-localize="days">days</span></div>
+          <div class="heatmap" id="heatmap"></div>
+        </div>
         <form id="property-inspector">
           <div class="field">
-            <span class="field-label" data-localize="Exercise groups (1–4, performed in this order)">Exercise groups (1–4, performed in this order)</span>
+            <span class="field-label" data-localize="Exercise groups (1–3, performed in this order)">Exercise groups (1–3, performed in this order)</span>
             <input id="groups" name="groups" type="hidden">
             <div class="group-list" id="groupList">
               <div class="group-row" data-group-row="eyes"><button class="group-toggle" type="button" data-group-key="eyes"><span aria-hidden="true">◉</span> <span data-localize="Eyes · Look far and blink">Eyes · Look far and blink</span></button><button class="icon-btn" type="button" data-move="up">↑</button><button class="icon-btn" type="button" data-move="down">↓</button></div>
@@ -84,6 +101,13 @@
             <div class="field"><label for="activeEnd" data-localize="Active period ends">Active period ends</label><input id="activeEnd" name="activeEnd" type="time"></div>
           </div>
           <div class="field">
+            <label class="toggle" for="lunchEnabled"><span data-localize="Skip lunch break">Skip lunch break</span><input id="lunchEnabled" name="lunchEnabled" type="checkbox"></label>
+          </div>
+          <div class="grid" id="lunchRange">
+            <div class="field"><label for="lunchStart" data-localize="Lunch starts">Lunch starts</label><input id="lunchStart" name="lunchStart" type="time"></div>
+            <div class="field"><label for="lunchEnd" data-localize="Lunch ends">Lunch ends</label><input id="lunchEnd" name="lunchEnd" type="time"></div>
+          </div>
+          <div class="field">
             <span class="field-label" data-localize="Active days">Active days</span>
             <input id="activeDays" name="activeDays" type="hidden">
             <div class="day-row">
@@ -94,12 +118,6 @@
           <div class="grid">
             <div class="field"><label for="repeatReminderMin" data-localize="Escalated reminder interval (min)">Escalated reminder interval (min)</label><input id="repeatReminderMin" name="repeatReminderMin" type="number" min="0" max="30"></div>
             <div class="field"><label data-localize="Sound">Sound</label><label class="toggle" for="soundEnabled"><span data-localize="Phase sound cue">Phase sound cue</span><input id="soundEnabled" name="soundEnabled" type="checkbox"></label></div>
-          </div>
-
-          <h2 data-localize="Last 30 health days">Last 30 health days</h2>
-          <div class="stats">
-            <div class="stats-summary"><div><strong id="todayCompleted">0</strong><span data-localize="Completed today">Completed today</span></div><div><strong id="todayBonus">0</strong><span data-localize="Bonus today">Bonus today</span></div><div><strong id="streak">0</strong><span data-localize="Goal streak">Goal streak</span></div></div>
-            <div class="history" id="history"><div class="history-row"><span data-localize="No records yet">No records yet</span></div></div>
           </div>
 
           <p class="pi-note gesture-note" data-localize="Single click: start, pause, or resume a break. Double click: perform the single-click action twice. Long press: skip a due reminder or cancel the current break.">Single click: start, pause, or resume a break. Double click: perform the single-click action twice. Long press: skip a due reminder or cancel the current break.</p>

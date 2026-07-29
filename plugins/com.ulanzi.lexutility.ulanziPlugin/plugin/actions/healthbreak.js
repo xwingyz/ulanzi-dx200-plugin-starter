@@ -33,6 +33,8 @@ export function createHealthBreakAction(runtime) {
   const ACTIVE_IDLE_LIMIT_MS = 5 * 60_000;
   const MAX_ACTIVE_DELTA_MS = 2_500;
   const DAY_MS = 86_400_000;
+  // 历史保留天数：供配置页 GitHub 风格活跃度网格用（约 13 周，一个季度）。
+  const HISTORY_DAYS = 91;
   const VALID_STATUSES = ['waiting', 'due', 'queued', 'running', 'paused', 'done'];
   const GROUP_KEYS = ['eyes', 'neck', 'hands', 'stand', 'breathe', 'pelvic'];
 
@@ -113,7 +115,7 @@ export function createHealthBreakAction(runtime) {
   }
 
   function selectedGroups(settings) {
-    return parseList(settings.groups, GROUP_KEYS, ['eyes', 'neck'], 4);
+    return parseList(settings.groups, GROUP_KEYS, ['eyes', 'neck'], 3);
   }
 
   function selectedDays(settings) {
@@ -132,9 +134,29 @@ export function createHealthBreakAction(runtime) {
     return `${year}-${month}-${day}`;
   }
 
+  // 本地周一 00:00 —— 本周达标统计以周一到周日为一周。
+  function startOfWeek(date) {
+    const local = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const mondayOffset = (local.getDay() + 6) % 7;
+    local.setDate(local.getDate() - mondayOffset);
+    return local;
+  }
+
   function minutesFromTime(value) {
     const [hours, minutes] = String(value).split(':').map(Number);
     return hours * 60 + minutes;
+  }
+
+  // 午休排除：只在时间已落入有效时段时再判定，因此与有效时段天然取交集
+  // （例如有效 09–18、午休配成 17–19，仅 17–18 被遮蔽）。午休窗按同日
+  // [start, end) 计算，start >= end（含相等）视为未配置，不遮蔽。
+  function withinLunch(settings, minute) {
+    if (!isEnabled(settings.lunchEnabled)) {
+      return false;
+    }
+    const start = minutesFromTime(settings.lunchStart);
+    const end = minutesFromTime(settings.lunchEnd);
+    return start < end && minute >= start && minute < end;
   }
 
   function healthWindowFor(settings, now = Date.now()) {
@@ -156,7 +178,7 @@ export function createHealthBreakAction(runtime) {
       anchor.setDate(anchor.getDate() - 1);
     }
 
-    if (!active || !selectedDays(settings).includes(anchor.getDay())) {
+    if (!active || withinLunch(settings, minute) || !selectedDays(settings).includes(anchor.getDay())) {
       return { active: false, dayKey: null };
     }
     return { active: true, dayKey: localDayKey(anchor) };
@@ -189,7 +211,7 @@ export function createHealthBreakAction(runtime) {
         byDay.set(clean.dayKey, clean);
       }
     }
-    return [...byDay.values()].sort((left, right) => left.dayKey.localeCompare(right.dayKey)).slice(-30);
+    return [...byDay.values()].sort((left, right) => left.dayKey.localeCompare(right.dayKey)).slice(-HISTORY_DAYS);
   }
 
   function archiveToday(instance) {
@@ -287,8 +309,23 @@ export function createHealthBreakAction(runtime) {
       }
       streak += 1;
     }
+    const weekStart = startOfWeek(new Date());
+    const mondayKey = localDayKey(weekStart);
+    const sundayKey = localDayKey(new Date(weekStart.getTime() + 6 * DAY_MS));
+    let weekCompleted = 0;
+    let weekGoalDays = 0;
+    for (const entry of history) {
+      if (entry.dayKey >= mondayKey && entry.dayKey <= sundayKey) {
+        weekCompleted += entry.completed || 0;
+        if ((entry.completed || 0) >= goal) {
+          weekGoalDays += 1;
+        }
+      }
+    }
     sendParamFromPlugin({
-      healthStats: JSON.stringify({ today: sanitizeStats(instance.today), history, streak }),
+      healthStats: JSON.stringify({
+        today: sanitizeStats(instance.today), history, streak, goal, weekCompleted, weekGoalDays,
+      }),
     }, instance.context);
   }
 
@@ -310,8 +347,10 @@ export function createHealthBreakAction(runtime) {
     }
     stopCue(instance);
     const platform = os.platform();
-    const macSounds = { reminder: 'Glass', start: 'Pop', complete: 'Glass', bright: 'Ping', high: 'Tink', low: 'Purr', soft: 'Morse' };
-    const windowsTones = { reminder: [880, 150], start: [660, 100], complete: [988, 180], bright: [784, 90], high: [698, 90], low: [440, 120], soft: [554, 80] };
+    // 音色偏柔和悦耳：提示用清亮铃声，节奏拍点(beat)用轻柔的水滴/气泡音，
+    // 避免久坐提醒变成刺耳的蜂鸣。beat 在运动阶段内按动作节奏反复播放。
+    const macSounds = { reminder: 'Glass', start: 'Bottle', complete: 'Glass', bright: 'Ping', high: 'Blow', low: 'Purr', soft: 'Tink', beat: 'Pop' };
+    const windowsTones = { reminder: [880, 150], start: [660, 100], complete: [988, 180], bright: [784, 90], high: [698, 90], low: [440, 120], soft: [554, 80], beat: [620, 55] };
     if (platform === 'darwin') {
       instance.cueProcess = execFile('afplay', [`/System/Library/Sounds/${macSounds[kind] || macSounds.soft}.aiff`], () => {
         instance.cueProcess = null;
@@ -380,6 +419,34 @@ export function createHealthBreakAction(runtime) {
 
   function stageFor(instance) {
     return instance.sessionPlan?.[instance.sessionStepIndex] || null;
+  }
+
+  // 运动阶段内的节奏拍点间隔（毫秒），0 表示该阶段不补拍。
+  // 次数类动作每次一拍；较长的计时保持类动作约每 2 秒一拍；呼吸/盆底这类
+  // 短促交替动作靠阶段切换音自身节奏即可，不再叠加拍点，避免过于吵闹。
+  function beatIntervalMs(stage) {
+    if (!stage) {
+      return 0;
+    }
+    if (stage.reps) {
+      return Math.max(600, Math.round(stage.durationMs / stage.reps));
+    }
+    return stage.durationMs >= 8_000 ? 2_000 : 0;
+  }
+
+  // 按已进行时长补齐应播放的拍点，只在运动进行且用户活动时调用。
+  function emitStageBeats(instance) {
+    const stage = stageFor(instance);
+    const interval = beatIntervalMs(stage);
+    if (interval <= 0) {
+      return;
+    }
+    const elapsed = Math.max(0, (stage.durationMs || 0) - instance.stageRemainingMs);
+    const due = Math.floor(elapsed / interval);
+    while (instance.stageBeatCount < due && instance.stageBeatCount < 1_000) {
+      instance.stageBeatCount += 1;
+      playCue(instance, 'beat');
+    }
   }
 
   function scheduleTick(instance, delay = 1_000) {
@@ -472,6 +539,7 @@ export function createHealthBreakAction(runtime) {
     instance.sessionPlan = buildSessionPlan(instance.settings);
     instance.sessionStepIndex = 0;
     instance.stageRemainingMs = instance.sessionPlan[0]?.durationMs || 1_000;
+    instance.stageBeatCount = 0;
     instance.healthStatus = 'running';
     instance.queueKind = null;
     instance.sessionWasBonus = instance.today.completed >= Number.parseInt(instance.settings.dailyGoal, 10);
@@ -530,6 +598,7 @@ export function createHealthBreakAction(runtime) {
       return false;
     }
     instance.stageRemainingMs = next.durationMs;
+    instance.stageBeatCount = 0;
     playCue(instance, next.cue);
     flushHealthBreakState(instance, true, now);
     return true;
@@ -635,6 +704,7 @@ export function createHealthBreakAction(runtime) {
           }
           instance.stageRemainingMs -= overshoot;
         }
+        emitStageBeats(instance);
       }
       renderInstance(instance);
       flushHealthBreakState(instance, false, now);
@@ -723,10 +793,103 @@ export function createHealthBreakAction(runtime) {
   }
 
   function groupLayout(groups) {
-    if (groups.length === 1) return [{ x: 104, y: 60, size: 48 }];
-    if (groups.length === 2) return [{ x: 66, y: 66, size: 46 }, { x: 144, y: 66, size: 46 }];
-    if (groups.length === 3) return [{ x: 53, y: 72, size: 42 }, { x: 107, y: 72, size: 42 }, { x: 161, y: 72, size: 42 }];
-    return [{ x: 72, y: 54, size: 40 }, { x: 144, y: 54, size: 40 }, { x: 72, y: 103, size: 40 }, { x: 144, y: 103, size: 40 }];
+    if (groups.length === 1) return [{ x: 102, y: 56, size: 54 }];
+    if (groups.length === 2) return [{ x: 60, y: 64, size: 50 }, { x: 148, y: 64, size: 50 }];
+    return [{ x: 48, y: 68, size: 46 }, { x: 105, y: 68, size: 46 }, { x: 162, y: 68, size: 46 }];
+  }
+
+  // ---- 护眼 / 颈椎大幅面指导图 ----
+  // 半具象线描，走 theme token，占满安全框上部主视觉区（约 y48..148），
+  // 逐帧（animFrame 0..3、约 2fps）用离散姿势表达动作，不依赖插值平滑。
+  function guideStroke(color, width = 6) {
+    return `fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`;
+  }
+
+  function renderEyeShape(theme, cx, cy, halfWidth, aperture) {
+    const c = theme.accent;
+    if (aperture <= 0.08) {
+      return `<path d="M${cx - halfWidth} ${cy} Q${cx} ${cy + 8} ${cx + halfWidth} ${cy}" ${guideStroke(c)}/>
+        <path d="M${cx - halfWidth + 8} ${cy + 10} l-4 8 M${cx} ${cy + 12} v9 M${cx + halfWidth - 8} ${cy + 10} l4 8" ${guideStroke(theme.muted, 4)}/>`;
+    }
+    const h = Math.max(4, Math.round(halfWidth * 0.62 * aperture));
+    const irisR = Math.min(h - 3, Math.round(halfWidth * 0.36));
+    const iris = irisR > 3
+      ? `<circle cx="${cx}" cy="${cy}" r="${irisR}" fill="${c}" stroke="none"/>
+         <circle cx="${cx}" cy="${cy}" r="${Math.max(2, Math.round(irisR * 0.42))}" fill="${theme.canvas}" stroke="none"/>`
+      : '';
+    return `<path d="M${cx - halfWidth} ${cy} Q${cx} ${cy - h} ${cx + halfWidth} ${cy} Q${cx} ${cy + h} ${cx - halfWidth} ${cy} Z" ${guideStroke(c)}/>${iris}`;
+  }
+
+  function guideEyesFar(theme, phase) {
+    const pulse = [0, 2, 4, 2][phase] || 0;
+    return `${renderEyeShape(theme, 92, 96, 36, 1)}
+      <path d="M124 96 H176" ${guideStroke(theme.muted, 4)} stroke-dasharray="2 11"/>
+      <circle cx="190" cy="96" r="${8 + pulse}" ${guideStroke(theme.muted, 4)}/>`;
+  }
+
+  function guideEyesBlink(theme, phase) {
+    const aperture = [1, 0.4, 0.04, 0.4][phase] ?? 1;
+    return renderEyeShape(theme, 128, 94, 46, aperture);
+  }
+
+  function guideNeckChin(theme, phase) {
+    const shift = [14, 7, 0, 7][phase] ?? 0;
+    const hx = 116 + shift;
+    const hy = 76;
+    const r = 25;
+    const c = theme.accent;
+    return `<circle cx="${hx}" cy="${hy}" r="${r}" ${guideStroke(c)}/>
+      <path d="M${hx + r - 3} ${hy - 4} l16 11 l-14 6" ${guideStroke(c, 5)}/>
+      <path d="M${hx - 4} ${hy + r - 2} q4 16 20 18" ${guideStroke(c)}/>
+      <path d="M92 142 h72" ${guideStroke(theme.muted, 5)}/>
+      <path d="M172 66 h-30 m9 -9 l-11 9 l11 9" ${guideStroke(theme.muted, 5)}/>`;
+  }
+
+  function guideNeckTurn(theme, phase, dir) {
+    const t = [0, 0.5, 1, 0.5][phase] ?? 0;
+    const sign = dir === 'left' ? -1 : 1;
+    const cx = 128;
+    const cy = 84;
+    const rx = 36;
+    const ry = 42;
+    const nx = cx + Math.round(sign * 24 * t);
+    const c = theme.accent;
+    const m = theme.muted;
+    return `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" ${guideStroke(c)}/>
+      <circle cx="${nx}" cy="${cy - 10}" r="4" fill="${c}" stroke="none"/>
+      <path d="M${nx} ${cy - 6} L${nx + sign * 18} ${cy + 1} L${nx} ${cy + 8} Z" fill="${c}" stroke="none"/>
+      <path d="M${cx - sign * 4} ${cy + ry + 10} q ${sign * 38} 15 ${sign * 62} -6" ${guideStroke(m, 5)}/>
+      <path d="M${cx + sign * 58} ${cy + ry + 2} l ${sign * 2} 13 l ${sign * -14} -5" ${guideStroke(m, 5)}/>`;
+  }
+
+  function guideNeckScapula(theme, phase) {
+    const squeeze = [0, 4, 9, 4][phase] ?? 0;
+    const c = theme.accent;
+    const m = theme.muted;
+    const gap = 26 - squeeze;
+    return `<path d="M128 50 v92" ${guideStroke(m, 4)} stroke-dasharray="2 9"/>
+      <path d="M74 68 q22 -12 42 4 l-8 40 q-24 6 -40 -8 z" ${guideStroke(c)}/>
+      <path d="M182 68 q-22 -12 -42 4 l8 40 q24 6 40 -8 z" ${guideStroke(c)}/>
+      <path d="M${108 - gap} 108 h-22" ${guideStroke(m, 5)}/>
+      <path d="M${108 - gap} 108 l9 -6 m-9 6 l9 6" ${guideStroke(m, 5)}/>
+      <path d="M${148 + gap} 108 h22" ${guideStroke(m, 5)}/>
+      <path d="M${148 + gap} 108 l-9 -6 m9 6 l-9 6" ${guideStroke(m, 5)}/>`;
+  }
+
+  // 运动态指导主视觉：eyes/neck 用专属大图，其余动作暂用放大的概览 glyph。
+  function renderGuideArt(stage, theme, phase) {
+    const key = stage?.groupKey;
+    const id = stage?.id;
+    if (key === 'eyes') {
+      return id === 'far' ? guideEyesFar(theme, phase) : guideEyesBlink(theme, phase);
+    }
+    if (key === 'neck') {
+      if (id === 'chin') return guideNeckChin(theme, phase);
+      if (id === 'right') return guideNeckTurn(theme, phase, 'right');
+      if (id === 'scapula') return guideNeckScapula(theme, phase);
+      return guideNeckTurn(theme, phase, 'left');
+    }
+    return groupGlyph(key || 'eyes', 92, 48, 72, theme.accent, theme.muted, phase);
   }
 
   function renderWaitingContent(instance, theme, window) {
@@ -754,9 +917,9 @@ export function createHealthBreakAction(runtime) {
       ? `${Math.min(stage.reps, Math.floor(elapsedRatio * stage.reps) + 1)}/${stage.reps}`
       : `${seconds}s`;
     const pause = instance.healthStatus === 'paused'
-      ? `<g fill="${theme.text}"><rect x="112" y="82" width="11" height="34" rx="3"/><rect x="133" y="82" width="11" height="34" rx="3"/></g>`
+      ? `<g fill="${theme.text}" opacity="0.92"><rect x="112" y="80" width="11" height="34" rx="3"/><rect x="133" y="80" width="11" height="34" rx="3"/></g>`
       : '';
-    return `${groupGlyph(stage.groupKey, 92, 48, 72, theme.accent, theme.muted, instance.animFrame)}
+    return `${renderGuideArt(stage, theme, instance.animFrame)}
       ${pause}
       <text x="128" y="155" text-anchor="middle" fill="${theme.text}" font-size="28" font-weight="800" font-family="Arial, sans-serif">${escapeXml(t(instance.healthStatus === 'paused' ? 'Paused' : stage.label, language))}</text>
       <text x="128" y="198" text-anchor="middle" fill="${theme.accent}" font-size="36" font-weight="800" font-family="Arial, sans-serif">${escapeXml(value)}</text>`;
@@ -814,6 +977,9 @@ export function createHealthBreakAction(runtime) {
       activeStart: '09:00',
       activeEnd: '18:00',
       activeDays: '0,1,2,3,4,5,6',
+      lunchEnabled: 'true',
+      lunchStart: '12:00',
+      lunchEnd: '14:00',
       repeatReminderMin: '5',
       soundEnabled: 'true',
       theme: 'mint',
@@ -827,6 +993,9 @@ export function createHealthBreakAction(runtime) {
       activeStart: normalizeTime(settings.activeStart, defaults.activeStart),
       activeEnd: normalizeTime(settings.activeEnd, defaults.activeEnd),
       activeDays: selectedDays({ activeDays: settings.activeDays ?? defaults.activeDays }).join(','),
+      lunchEnabled: normalizeBooleanString(settings.lunchEnabled, defaults.lunchEnabled),
+      lunchStart: normalizeTime(settings.lunchStart, defaults.lunchStart),
+      lunchEnd: normalizeTime(settings.lunchEnd, defaults.lunchEnd),
       repeatReminderMin: normalizeNumberString(settings.repeatReminderMin, defaults.repeatReminderMin, 0, 30),
       soundEnabled: normalizeBooleanString(settings.soundEnabled, defaults.soundEnabled),
     }),
@@ -843,6 +1012,7 @@ export function createHealthBreakAction(runtime) {
         sessionPlan: [],
         sessionStepIndex: 0,
         stageRemainingMs: 0,
+        stageBeatCount: 0,
         sessionWasBonus: false,
         lastTickAt: Date.now(),
         lastCheckpointAt: 0,
@@ -902,6 +1072,7 @@ export function createHealthBreakAction(runtime) {
     key: 'healthbreak',
     config,
     testing: {
+      healthBreakBeatInterval: beatIntervalMs,
       healthBreakBuildSessionPlan: buildSessionPlan,
       healthBreakHealthWindowFor: healthWindowFor,
       healthBreakHydrateState: hydrateHealthBreakState,

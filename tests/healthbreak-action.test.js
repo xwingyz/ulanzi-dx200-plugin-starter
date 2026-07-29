@@ -9,10 +9,10 @@ function localTimestamp(year, month, day, hours, minutes = 0) {
   return new Date(year, month - 1, day, hours, minutes).getTime();
 }
 
-test('healthbreak normalizes one to four unique built-in groups', () => {
+test('healthbreak normalizes one to three unique built-in groups', () => {
   assert.deepEqual(
     lexTesting.healthBreakNormalizeGroups({ groups: 'stand,eyes,stand,pelvic,hands,neck' }),
-    ['stand', 'eyes', 'pelvic', 'hands'],
+    ['stand', 'eyes', 'pelvic'],
   );
   assert.deepEqual(lexTesting.healthBreakNormalizeGroups({ groups: 'unknown' }), ['eyes', 'neck']);
 
@@ -23,6 +23,9 @@ test('healthbreak normalizes one to four unique built-in groups', () => {
     activeStart: 'bad',
     activeEnd: '23:15',
     activeDays: '1,3,3,6',
+    lunchEnabled: false,
+    lunchStart: 'bad',
+    lunchEnd: '13:45',
     repeatReminderMin: '-2',
     soundEnabled: false,
   }, config.defaults);
@@ -32,6 +35,9 @@ test('healthbreak normalizes one to four unique built-in groups', () => {
   assert.equal(normalized.activeStart, '09:00');
   assert.equal(normalized.activeEnd, '23:15');
   assert.equal(normalized.activeDays, '1,3,6');
+  assert.equal(normalized.lunchEnabled, 'false');
+  assert.equal(normalized.lunchStart, '12:00');
+  assert.equal(normalized.lunchEnd, '13:45');
   assert.equal(normalized.repeatReminderMin, '0');
   assert.equal(normalized.soundEnabled, 'false');
 });
@@ -62,10 +68,11 @@ test('healthbreak state hydrate pauses interrupted sessions and sanitizes histor
     intervalRemainingMs: 999_999_999,
     dueAt: 1234,
     today: { dayKey: '<script>', completed: 2.4, bonus: -1, skipped: 1, cancelled: 0 },
-    history: Array.from({ length: 35 }, (_, index) => ({
-      dayKey: `2026-06-${String(index + 1).padStart(2, '0')}`,
-      completed: index,
-    })),
+    history: Array.from({ length: 100 }, (_, index) => {
+      const date = new Date(2026, 0, 1 + index);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      return { dayKey: key, completed: index };
+    }),
     sessionStepIndex: 3,
     stageRemainingMs: 4_500,
   };
@@ -76,7 +83,7 @@ test('healthbreak state hydrate pauses interrupted sessions and sanitizes histor
   assert.equal(restored.today.dayKey, null);
   assert.equal(restored.today.completed, 2);
   assert.equal(restored.today.bonus, 0);
-  assert.equal(restored.history.length, 30);
+  assert.equal(restored.history.length, 91);
   assert.equal(restored.sessionStepIndex, 3);
   assert.equal(restored.stageRemainingMs, 4_500);
 
@@ -92,6 +99,7 @@ test('healthbreak waiting tick counts only the supplied active time', () => {
     ...config.defaults,
     activeStart: '00:00',
     activeEnd: '00:00',
+    lunchEnabled: 'false',
     intervalMin: '5',
   };
   const dayKey = lexTesting.healthBreakHealthWindowFor(settings, now).dayKey;
@@ -144,6 +152,55 @@ test('healthbreak short press starts, pauses and resumes; long press cancels', (
   assert.equal(instance.healthStatus, 'waiting');
   assert.equal(instance.today.cancelled, 1);
   lexTesting.clearInstanceTimeout(instance, 'healthbreak');
+});
+
+test('healthbreak lunch break masks only the overlap inside the active window', () => {
+  const settings = {
+    activeStart: '09:00', activeEnd: '18:00', activeDays: '0,1,2,3,4,5,6',
+    lunchEnabled: 'true', lunchStart: '12:00', lunchEnd: '14:00',
+  };
+  assert.equal(lexTesting.healthBreakHealthWindowFor(settings, localTimestamp(2026, 7, 22, 10)).active, true);
+  assert.equal(lexTesting.healthBreakHealthWindowFor(settings, localTimestamp(2026, 7, 22, 13)).active, false);
+  assert.equal(lexTesting.healthBreakHealthWindowFor(settings, localTimestamp(2026, 7, 22, 15)).active, true);
+
+  // 午休配到有效时段之外，仅在交集处生效：有效 09–13、午休 12–19 → 只有 12–13 被遮蔽。
+  const clipped = { ...settings, activeEnd: '13:00', lunchStart: '12:00', lunchEnd: '19:00' };
+  assert.equal(lexTesting.healthBreakHealthWindowFor(clipped, localTimestamp(2026, 7, 22, 11)).active, true);
+  assert.equal(lexTesting.healthBreakHealthWindowFor(clipped, localTimestamp(2026, 7, 22, 12, 30)).active, false);
+  assert.equal(lexTesting.healthBreakHealthWindowFor(clipped, localTimestamp(2026, 7, 22, 14)).active, false);
+
+  const off = { ...settings, lunchEnabled: 'false' };
+  assert.equal(lexTesting.healthBreakHealthWindowFor(off, localTimestamp(2026, 7, 22, 13)).active, true);
+});
+
+test('healthbreak beat cadence: per rep, gentle on long holds, silent on short stages', () => {
+  assert.equal(lexTesting.healthBreakBeatInterval({ reps: 10, durationMs: 20_000 }), 2_000);
+  assert.equal(lexTesting.healthBreakBeatInterval({ durationMs: 15_000 }), 2_000);
+  assert.equal(lexTesting.healthBreakBeatInterval({ durationMs: 6_000 }), 0);
+  assert.equal(lexTesting.healthBreakBeatInterval(null), 0);
+});
+
+test('healthbreak renders every eyes and neck guide frame without undefined or NaN', () => {
+  const settings = { ...config.defaults, groups: 'neck,eyes' };
+  const plan = lexTesting.healthBreakBuildSessionPlan(settings);
+  for (let step = 0; step < plan.length; step += 1) {
+    for (let frame = 0; frame < 4; frame += 1) {
+      const instance = {
+        settings,
+        healthStatus: 'running',
+        sessionPlan: plan,
+        sessionStepIndex: step,
+        stageRemainingMs: plan[step].durationMs,
+        animFrame: frame,
+        today: { completed: 0, bonus: 0 },
+        intervalRemainingMs: 0,
+      };
+      const dataUrl = lexTesting.healthBreakRenderIcon(instance);
+      const svg = Buffer.from(dataUrl.split(',')[1], 'base64').toString('utf8');
+      assert.ok(!svg.includes('undefined'), `stage ${step} frame ${frame} emitted undefined`);
+      assert.ok(!svg.includes('NaN'), `stage ${step} frame ${frame} emitted NaN`);
+    }
+  }
 });
 
 test('healthbreak completes automatically after the last guide stage', () => {

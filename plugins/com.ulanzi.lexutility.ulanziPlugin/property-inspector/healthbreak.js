@@ -5,6 +5,9 @@ const HEALTHBREAK_FIELDS = withLanguageField([
   'activeStart',
   'activeEnd',
   'activeDays',
+  'lunchEnabled',
+  'lunchStart',
+  'lunchEnd',
   'repeatReminderMin',
   'soundEnabled',
   'theme',
@@ -23,15 +26,6 @@ function parseUniqueList(value, allowed) {
     seen.add(item);
     return [item];
   });
-}
-
-function escapeHealthBreakHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
 
 function initHealthBreakInspector() {
@@ -77,18 +71,59 @@ function initHealthBreakInspector() {
     });
   }
 
+  function heatmapDayKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function renderHeatmap(history, goal) {
+    const container = document.getElementById('heatmap');
+    if (!container) return;
+    const byDay = new Map();
+    history.forEach((entry) => { if (entry && entry.dayKey) byDay.set(entry.dayKey, entry); });
+    const WEEKS = 13;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentMonday = new Date(today);
+    currentMonday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const start = new Date(currentMonday);
+    start.setDate(currentMonday.getDate() - (WEEKS - 1) * 7);
+    const cells = [];
+    for (let col = 0; col < WEEKS; col += 1) {
+      for (let row = 0; row < 7; row += 1) {
+        const date = new Date(start);
+        date.setDate(start.getDate() + col * 7 + row);
+        const key = heatmapDayKey(date);
+        const entry = date > today ? null : byDay.get(key);
+        const done = entry ? Number(entry.completed) || 0 : 0;
+        const bonus = entry ? Number(entry.bonus) || 0 : 0;
+        let cls = '';
+        if (done > 0) {
+          const ratio = goal > 0 ? done / goal : 1;
+          cls = ratio >= 1 ? 'l4' : ratio >= 0.67 ? 'l3' : ratio >= 0.34 ? 'l2' : 'l1';
+          if (ratio >= 1 && bonus > 0) cls += ' bonus';
+        }
+        cells.push(`<i class="${cls}" title="${key}${done ? ` · ✓${done}` : ''}"></i>`);
+      }
+    }
+    container.innerHTML = cells.join('');
+  }
+
   function renderStats(raw) {
     let stats;
     try { stats = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return; }
     if (!stats || typeof stats !== 'object') return;
     lastStats = stats;
-    document.getElementById('todayCompleted').textContent = String(stats.today?.completed || 0);
-    document.getElementById('todayBonus').textContent = String(stats.today?.bonus || 0);
-    document.getElementById('streak').textContent = String(stats.streak || 0);
-    const history = Array.isArray(stats.history) ? [...stats.history].reverse() : [];
-    document.getElementById('history').innerHTML = history.length
-      ? history.map((entry) => `<div class="history-row"><span>${escapeHealthBreakHtml(entry.dayKey)}</span><span>✓${Number(entry.completed) || 0}</span><span>+${Number(entry.bonus) || 0}</span><span>↷${Number(entry.skipped) || 0}</span><span>×${Number(entry.cancelled) || 0}</span></div>`).join('')
-      : `<div class="history-row"><span>${$UD.t('No records yet')}</span></div>`;
+    const goal = Number(stats.goal) || 0;
+    const todayDone = Number(stats.today?.completed) || 0;
+    document.getElementById('todayCompleted').textContent = goal ? `${todayDone}/${goal}` : String(todayDone);
+    document.getElementById('todayBonus').textContent = `+${Number(stats.today?.bonus) || 0}`;
+    document.getElementById('weekGoalDays').textContent = String(Number(stats.weekGoalDays) || 0);
+    document.getElementById('weekCompleted').textContent = String(Number(stats.weekCompleted) || 0);
+    document.getElementById('streak').textContent = String(Number(stats.streak) || 0);
+    renderHeatmap(Array.isArray(stats.history) ? stats.history : [], goal);
   }
 
   function pushSettings() {
@@ -123,7 +158,7 @@ function initHealthBreakInspector() {
           if (selectedGroups.length === 1) return;
           selectedGroups.splice(index, 1);
         } else {
-          if (selectedGroups.length >= 4) return;
+          if (selectedGroups.length >= 3) return;
           if (key === 'pelvic' && typeof window.confirm === 'function' && !window.confirm($UD.t('A tighter pelvic floor is not always better. Confirm that you read the safety note and will stop if you feel discomfort.'))) return;
           selectedGroups.push(key);
         }
@@ -181,7 +216,7 @@ function initHealthBreakInspector() {
     const param = message.param || {};
     applySettings(HEALTHBREAK_FIELDS, param);
     const groups = parseUniqueList(param.groups ?? document.getElementById('groups').value, HEALTHBREAK_GROUPS);
-    if (groups.length) selectedGroups = groups.slice(0, 4);
+    if (groups.length) selectedGroups = groups.slice(0, 3);
     const days = parseUniqueList(param.activeDays ?? document.getElementById('activeDays').value, ['0', '1', '2', '3', '4', '5', '6']);
     if (days.length) selectedDays = days;
     syncGroupUi();
