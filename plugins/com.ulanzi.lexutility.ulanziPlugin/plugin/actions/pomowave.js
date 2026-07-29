@@ -359,6 +359,10 @@ function startPomodoroBackground(instance, options = {}) {
   if (instance.active === false || instance.phase !== 'focus' || !instance.running) {
     return null;
   }
+  if (instance.backgroundMuted) {
+    stopPomodoroBackground(instance);
+    return null;
+  }
   const sound = selectPomodoroBackground(instance, options);
   if (sound === 'none') {
     stopPomodoroBackground(instance);
@@ -476,6 +480,7 @@ function serializePomodoroState(instance) {
     totalSec: instance.totalSec,
     completedFocusRounds: instance.completedFocusRounds || 0,
     phaseEndAt: instance.phaseEndAt ?? null,
+    backgroundMuted: Boolean(instance.backgroundMuted),
     selectedBackgroundSound: POMODORO_BACKGROUND_CHOICES.includes(instance.selectedBackgroundSound)
       ? instance.selectedBackgroundSound
       : 'none',
@@ -507,6 +512,7 @@ function hydratePomodoroState(raw, now = Date.now()) {
     remainingSec,
     phaseEndAt: running ? raw.phaseEndAt : null,
     completedFocusRounds,
+    backgroundMuted: Boolean(raw.backgroundMuted),
     selectedBackgroundSound: POMODORO_BACKGROUND_CHOICES.includes(raw.selectedBackgroundSound)
       ? raw.selectedBackgroundSound
       : null,
@@ -532,6 +538,7 @@ function resetPomodoroInstance(instance, { preserveRounds = false } = {}) {
   instance.awaiting = false;
   instance.blinkOn = false;
   instance.phaseEndAt = null;
+  instance.backgroundMuted = false;
   instance.selectedBackgroundSound = 'none';
   instance.totalSec = pomodoroDurationSecFromSettings(instance.settings, 'focus');
   instance.remainingSec = instance.totalSec;
@@ -579,6 +586,7 @@ function enterAwaitingPhase(instance, phase, options = {}) {
   instance.phaseEndAt = null;
   instance.awaiting = true;
   instance.blinkOn = true;
+  instance.backgroundMuted = false;
   if (playSound) {
     playPomodoroPhaseEndCue(instance, { autoStart: false });
   }
@@ -617,6 +625,7 @@ function startPomodoroPhase(instance, phase, options = {}) {
   instance.running = autoStart;
   instance.phaseEndAt = autoStart ? now + instance.totalSec * 1000 : null;
   instance.awaiting = false;
+  instance.backgroundMuted = false;
 
   if (phase === 'focus') {
     selectPomodoroBackground(instance, { force: true });
@@ -849,8 +858,25 @@ function handlePomodoroDoublePress(instance) {
   }
 }
 
-// 长按把当前工作重置为完整专注但保持暂停，已完成轮次数不变。
+// 当前专注中长按只临时开关本轮背景音；其余阶段仍重置为完整暂停专注。
+function togglePomodoroBackgroundMuted(instance) {
+  instance.backgroundMuted = !instance.backgroundMuted;
+  if (instance.backgroundMuted) {
+    stopPomodoroBackground(instance);
+  } else if (instance.running) {
+    startPomodoroBackground(instance);
+  }
+  flushPomodoroState(instance);
+  renderInstance(instance);
+  return instance.backgroundMuted;
+}
+
 function handlePomodoroLongPress(instance, options = {}) {
+  initializePomodoroInstance(instance);
+  if (instance.phase === 'focus' && !instance.awaiting) {
+    togglePomodoroBackgroundMuted(instance);
+    return;
+  }
   resetPomodoroWork(instance, options.now ?? Date.now());
 }
 
@@ -974,6 +1000,7 @@ const config = {
       backgroundProcess: null,
       backgroundGeneration: 0,
       backgroundPaused: false,
+      backgroundMuted: false,
       selectedBackgroundSound: null,
       previewProcess: null,
       previewGeneration: 0,
@@ -1057,6 +1084,7 @@ const config = {
       startPomodoroBackground,
       stopPomodoroBackground,
       pausePomodoroBackground,
+      togglePomodoroBackgroundMuted,
       playPomodoroBackgroundPreview,
       playPomodoroCuePreview,
       stopPomodoroPreview,

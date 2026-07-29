@@ -23,7 +23,7 @@ PomoWave 是可跨睡眠和插件重启恢复的番茄钟。它在专注、短�
 
 - idle 短按：开始一段完整专注。
 - 运行中短按：暂停；暂停中短按：从冻结剩余时间恢复。
-- 按住至少 600ms 时显示反色确认，松开后执行长按：停止提示音和背景音，把当前工作重置为一段完整、**暂停**的专注，保留已经完成的专注轮次；下一次单击才开始。
+- 按住至少 600ms 时显示反色确认，松开后执行长按：当前阶段为专注（运行或暂停）时，临时开关当前轮次背景音，不改变计时进度和 Inspector 配置；其余阶段停止所有声音，把当前工作重置为一段完整、**暂停**的专注，保留已经完成的专注轮次。
 - 等待下一阶段时短按：确认并从完整时长开始该阶段。
 - 等待进入休息时长按：直接重启为新专注，相当于跳过休息。
 - Inspector“跳过阶段”：视同当前阶段自然完成；专注仍计入轮次，但不播放提示音。idle 时无动作，done 时回到初始状态。
@@ -79,12 +79,12 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 
 `remainingSec` 只作为暂停/空闲时冻结值和渲染缓存。tick 对齐下一个整秒边界，调度误差不会累计；系统睡眠或插件重启后，`onReady` 立即按墙上时钟追平，已经超时则推进阶段。
 
-运行态版本为 `v: 2`，保存：`phase`、`running`、`remainingSec`、`totalSec`、`completedFocusRounds`、`phaseEndAt`、`selectedBackgroundSound`。随机结果只在真正进入新 focus 轮次时生成，暂停/恢复及重启继续使用同一选择；旧版本、非法 phase 或残缺数据安全降级为初始状态。只在阶段转换、暂停/恢复、重置、设置重算和 dispose 时写盘，不逐秒写盘。
+运行态版本为 `v: 2`，保存：`phase`、`running`、`remainingSec`、`totalSec`、`completedFocusRounds`、`phaseEndAt`、`selectedBackgroundSound`、`backgroundMuted`。随机结果只在真正进入新 focus 轮次时生成，暂停/恢复及重启继续使用同一选择；长按临时静音在同一轮重启后保持，进入新 focus 时清除。旧版本、非法 phase 或残缺数据安全降级为初始状态。只在阶段转换、暂停/恢复、长按切换、重置、设置重算和 dispose 时写盘，不逐秒写盘。
 
 ## 6. 提示音
 
 - 提示音仍使用 macOS `afplay`、Windows PowerShell beep 与其他平台终端 bell。自动开始下一阶段时只播一次；awaiting 依 `cueDuration` 循环，到期只停声、不离开 awaiting；`continuous` 直到用户操作或销毁。
-- 背景音仅在 `focus + running` 时播放。macOS 使用 `afplay`，Windows 使用 Windows Media Player COM，其他平台尝试 `ffplay`；平台或播放器不可用时静默降级。暂停优先续播，不能续播则恢复时从同一音源起点重播；运行中改音源、随机或音量立即重启。
+- 背景音仅在 `focus + running + !backgroundMuted` 时播放。macOS 使用 `afplay`，Windows 使用 Windows Media Player COM，其他平台尝试 `ffplay`；平台或播放器不可用时静默降级。暂停优先续播，不能续播则恢复时从同一音源起点重播；运行中改音源、随机或音量立即重启，但不得越过当前轮次的长按临时静音。
 - 提示、背景、试听是独立的实例通道，分别持有子进程、generation、播放/暂停标记与实例定时器；背景试听至多 15 秒，`Stop preview` 可提前停止。generation 使旧回调失效。播放失败仅停止该音频通道，不改变计时、不显示 ERR。
 - 背景资源位于 `assets/audio/pomowave/`，六项 Freesound CC0 公开 HQ preview 的来源、作者、日期与文件身份见同目录 `CREDITS.md`；预览 MP3 原样保留，未转码、截断、归一化或淡化，兼容 macOS 和 Windows 系统播放器。
 - `onDispose` 停止三个音频通道后再 flush 状态。
@@ -97,7 +97,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 | `onReady` | 初始化缺失值；运行中立即按当前时钟对齐并续排 tick |
 | `onRun` | 保存按前阶段快照，处理短按与 awaiting 确认交互 |
 | `onDoublePress` | 使用快照静默跳过，不自行识别双击 |
-| `onLongPress` | 重置为完整暂停 focus，保留已完成轮次并停止音频 |
+| `onLongPress` | focus 中切换当前轮次背景音；其他阶段重置为完整暂停 focus，保留已完成轮次并停止音频 |
 | `onSettingsChanged` | 按比例重算当前阶段时长；运行中的 focus 变更背景设置立即重启播放器 |
 | `onParamFromPlugin` | 处理提示试听、背景试听/停止、`resetTimer`、`skipPhase` 控制命令 |
 | `onDispose` | 停止提示/背景/试听并同步落盘 |
@@ -117,9 +117,9 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 
 - 墙钟计时、睡眠间隔追平、暂停冻结与恢复 deadline。
 - 状态序列化/水合、跳过语义、idle/done 边界。
-- 短按/长按、awaiting 确认与跳过休息。
+- 短按、focus 运行/暂停时长按切换背景音、awaiting 长按重置与跳过休息。
 - 自动衔接单次提示、awaiting 提示的 continuous/60/180/300/600 上限与清理。
-- 长按暂停式重置、按前快照双击边界（idle/done/awaiting/阶段）。
+- 非专注长按暂停式重置、专注临时静音的持久化/新轮次清除、按前快照双击边界（idle/done/awaiting/阶段）。
 - 背景固定与随机选择、同轮/重启稳定性、音量、暂停恢复、设置变更、失败与销毁清理。
 - Inspector、新旧设置升级、多语言、音频资源和 credits 一致性。
 - 各主题阶段色、进度方向、awaiting 闪烁和末段告警。

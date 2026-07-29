@@ -1193,6 +1193,7 @@ test('lex utility: pomowave state round-trips through serialize/hydrate', () => 
     totalSec: 1500,
     completedFocusRounds: 2,
     phaseEndAt: now + 300_000,
+    backgroundMuted: true,
   });
 
   const hydrated = lexTesting.hydratePomodoroState(raw, now + 60_000);
@@ -1200,6 +1201,7 @@ test('lex utility: pomowave state round-trips through serialize/hydrate', () => 
   assert.equal(hydrated.running, true);
   assert.equal(hydrated.remainingSec, 240);
   assert.equal(hydrated.completedFocusRounds, 2);
+  assert.equal(hydrated.backgroundMuted, true);
 
   // 重启期间已越过截止点：水合成 0 剩余，交给 onReady 的追平 tick 去推进阶段。
   const overdue = lexTesting.hydratePomodoroState(raw, now + 400_000);
@@ -1275,7 +1277,7 @@ test('lex utility: pomowave key art drops the title and shows a tomato only off 
   assert.ok(!done.includes('translate(128 78)'), 'done must not draw the tomato');
 });
 
-test('lex utility: pomowave short press toggles and long press resets to paused full focus', () => {
+test('lex utility: pomowave paused focus long press toggles background without resetting progress', () => {
   const t0 = Date.now();
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___tap___t1';
   const instance = createPomodoroInstance(context, {
@@ -1295,13 +1297,15 @@ test('lex utility: pomowave short press toggles and long press resets to paused 
   lexTesting.handlePomodoroLongPress(instance, { now: t1 });
   assert.equal(instance.phase, 'focus');
   assert.equal(instance.running, false);
-  assert.equal(instance.remainingSec, 1500);
+  assert.equal(instance.remainingSec, 300);
   assert.equal(instance.totalSec, 1500);
   assert.equal(instance.completedFocusRounds, 2);
   assert.equal(instance.phaseEndAt, null);
+  assert.equal(instance.backgroundMuted, true);
 
   lexTesting.handlePomodoroShortPress(instance, { now: t1 + 10 });
   assert.equal(instance.running, true);
+  assert.equal(instance.backgroundMuted, true);
 
   lexTesting.clearInstanceTimeout(instance, 'pomodoro');
   lexTesting.dropPersistedState(context);

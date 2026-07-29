@@ -134,10 +134,92 @@ test('pomowave persists the selected background and only plays it for a running 
   assert.match(starts[0].args.at(-1), /assets\/audio\/pomowave\/rain\.mp3$/);
   assert.equal(testing.serializePomodoroState(instance).v, 2);
   assert.equal(testing.serializePomodoroState(instance).selectedBackgroundSound, 'rain');
+  assert.equal(testing.serializePomodoroState(instance).backgroundMuted, false);
 
   instance.running = false;
   testing.startPomodoroBackground(instance);
   assert.equal(starts.length, 1);
+});
+
+test('pomowave long press toggles the current focus background without changing timer progress', () => {
+  const starts = [];
+  const { config, testing } = createPomowaveAction(createRuntime({
+    player: (_command, args) => {
+      const handle = {
+        args,
+        killed: false,
+        exitCode: null,
+        kill() {
+          this.killed = true;
+          return true;
+        },
+      };
+      starts.push(handle);
+      return handle;
+    },
+  }));
+  const phaseEndAt = Date.now() + 900_000;
+  const instance = createInstance(config, {
+    active: true,
+    phase: 'focus',
+    running: true,
+    remainingSec: 900,
+    totalSec: 1500,
+    phaseEndAt,
+    selectedBackgroundSound: 'ocean',
+  });
+
+  testing.startPomodoroBackground(instance);
+  const firstProcess = instance.backgroundProcess;
+  testing.handlePomodoroLongPress(instance);
+  assert.equal(instance.backgroundMuted, true);
+  assert.equal(firstProcess.killed, true);
+  assert.equal(instance.backgroundProcess, null);
+  assert.equal(instance.phase, 'focus');
+  assert.equal(instance.running, true);
+  assert.equal(instance.remainingSec, 900);
+  assert.equal(instance.phaseEndAt, phaseEndAt);
+
+  const serialized = testing.serializePomodoroState(instance);
+  assert.equal(serialized.backgroundMuted, true);
+  assert.equal(testing.hydratePomodoroState(serialized).backgroundMuted, true);
+
+  testing.handlePomodoroLongPress(instance);
+  assert.equal(instance.backgroundMuted, false);
+  assert.equal(starts.length, 2);
+  assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+});
+
+test('pomowave paused focus long press controls the next resume and a new focus clears temporary mute', () => {
+  const starts = [];
+  const { config, testing } = createPomowaveAction(createRuntime({
+    player: (_command, args) => {
+      starts.push(args);
+      return { killed: false, exitCode: null, kill() { this.killed = true; return true; } };
+    },
+  }));
+  const instance = createInstance(config, {
+    active: true,
+    phase: 'focus',
+    running: false,
+    remainingSec: 700,
+    totalSec: 1500,
+    phaseEndAt: null,
+    selectedBackgroundSound: 'forest',
+  });
+
+  testing.handlePomodoroLongPress(instance);
+  assert.equal(instance.backgroundMuted, true);
+  assert.equal(starts.length, 0);
+
+  testing.handlePomodoroShortPress(instance);
+  assert.equal(instance.running, true);
+  assert.equal(starts.length, 0, 'muted focus must stay silent when resumed');
+
+  testing.resetPomodoroWork(instance);
+  assert.equal(instance.phase, 'focus');
+  assert.equal(instance.running, false);
+  assert.equal(instance.backgroundMuted, false, 'a new focus clears the temporary mute');
 });
 
 test('pomowave applies every cue duration limit, leaves awaiting intact at expiry, and never loops auto transitions', () => {
@@ -235,7 +317,7 @@ test('pomowave background preview is isolated from the timer and has bounded cle
   assert.equal(instance.timers.has('pomodoroPreview'), false);
 });
 
-test('pomowave gives cue and background previews one killable instance channel, and long press clears all audio', () => {
+test('pomowave non-focus long press clears all audio while focus long press only toggles background', () => {
   const stopped = [];
   const { config, testing } = createPomowaveAction(createRuntime({
     player: (command) => ({
@@ -269,8 +351,14 @@ test('pomowave gives cue and background previews one killable instance channel, 
   const background = instance.backgroundProcess;
 
   testing.handlePomodoroLongPress(instance);
-  assert.equal(cue.killed, true);
+  assert.equal(instance.backgroundMuted, true);
+  assert.equal(cue.killed, false, 'focus long press must not interfere with the cue channel');
   assert.equal(background.killed, true);
+  assert.equal(backgroundPreview.killed, false, 'focus long press must not interfere with preview');
+
+  instance.phase = 'shortBreak';
+  testing.handlePomodoroLongPress(instance);
+  assert.equal(cue.killed, true);
   assert.equal(backgroundPreview.killed, true);
   assert.equal(instance.previewProcess, null);
   assert.equal(instance.timers.has('pomodoroPreview'), false);
@@ -405,6 +493,13 @@ test('pomowave random overrides none, redraws only for a new focus, and restarts
     config.onSettingsChanged(instance, beforeRandom);
     assert.equal(instance.selectedBackgroundSound, 'ocean');
     assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+
+    testing.handlePomodoroLongPress(instance);
+    const startsWhileMuted = starts.length;
+    const mutedBefore = { ...instance.settings };
+    instance.settings = { ...instance.settings, backgroundVolume: '55' };
+    config.onSettingsChanged(instance, mutedBefore);
+    assert.equal(starts.length, startsWhileMuted, 'settings changes must not restart a temporarily muted focus');
   } finally {
     Math.random = originalRandom;
   }
