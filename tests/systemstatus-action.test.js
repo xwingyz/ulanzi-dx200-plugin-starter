@@ -6,6 +6,7 @@ import { createSystemStatusAction } from '../plugins/com.ulanzi.lexutility.ulanz
 
 const {
   ACTION_CONFIGS,
+  THEMES,
   readPersistedState,
   systemStatusAppendHistory,
   systemStatusChartTypeForMetric,
@@ -239,6 +240,36 @@ test('unavailable sensor is shown honestly as N/A instead of zero', () => {
   const svg = decode(systemStatusRenderIcon(instance({ metric1: 'temperature', metric2: 'none', metric3: 'none' }, { temperature: null })));
   assert.match(svg, />N\/A</);
   assert.doesNotMatch(svg, />0(?:\.0)?</);
+});
+
+test('system load memory and temperature values above 80 use the theme accent', () => {
+  for (const key of ['cpu', 'ram', 'gpu', 'temperature']) {
+    const highSvg = decode(systemStatusRenderIcon(instance(
+      { metric1: key, metric2: 'none', metric3: 'none' },
+      { [key]: 80.1 },
+    )));
+    const boundarySvg = decode(systemStatusRenderIcon(instance(
+      { metric1: key, metric2: 'none', metric3: 'none' },
+      { [key]: 80 },
+    )));
+
+    assert.match(
+      highSvg,
+      new RegExp(`data-role="value"[^>]*fill="${THEMES.signal.accent}"`),
+      `${key} above 80 should use accent`,
+    );
+    assert.match(
+      boundarySvg,
+      new RegExp(`data-role="value"[^>]*fill="${THEMES.signal.text}"`),
+      `${key} at 80 should keep the main text colour`,
+    );
+  }
+
+  const networkSvg = decode(systemStatusRenderIcon(instance(
+    { metric1: 'download', metric2: 'none', metric3: 'none' },
+    { download: 81_000_000 },
+  )));
+  assert.match(networkSvg, new RegExp(`data-role="value"[^>]*fill="${THEMES.signal.text}"`));
 });
 
 test('network rows use compact direction icons and distinct 15px units', () => {

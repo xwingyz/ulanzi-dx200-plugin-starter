@@ -465,6 +465,16 @@ function metricColor(key, raw, theme) {
   return theme.accent;
 }
 
+function metricValueColor(key, raw, theme) {
+  if (raw == null) {
+    return theme.muted;
+  }
+  if (['cpu', 'ram', 'gpu', 'temperature'].includes(key) && finite(raw) > 80) {
+    return theme.accent;
+  }
+  return theme.text;
+}
+
 function metricIcon(key, centerY, color) {
   const transform = `translate(54 ${(centerY - 10).toFixed(1)})`;
   const common = `fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
@@ -525,6 +535,7 @@ function renderSystemStatusIcon(instance, runtime) {
     const display = formatMetric(key, values[key]);
     const displayUnit = display.unit === 'WAIT' ? t('WAIT', instance.settings.uiLanguage) : display.unit;
     const color = metricColor(key, values[key], theme);
+    const valueColor = metricValueColor(key, values[key], theme);
     const valueSize = keys.length === 1 ? 42 : keys.length === 2 ? 34 : 29;
     const isNetworkMetric = key === 'upload' || key === 'download';
     const unitSize = isNetworkMetric ? 15 : 14;
@@ -543,7 +554,7 @@ function renderSystemStatusIcon(instance, runtime) {
         <rect x="44" y="${y.toFixed(1)}" width="170" height="${rowHeight.toFixed(1)}" rx="7" fill="${theme.panel}" opacity="0.64" stroke="${theme.low}" stroke-width="1"/>
         ${chart}
         ${icon}
-        <text x="${displayUnit ? 172 : 207}" y="${(y + rowHeight / 2 + valueSize * 0.34).toFixed(1)}" text-anchor="end" fill="${display.value === 'N/A' ? theme.muted : theme.text}" font-size="${valueSize}" font-weight="800" font-family="Arial,Helvetica,sans-serif">${escapeXml(display.value)}</text>
+        <text data-role="value" x="${displayUnit ? 172 : 207}" y="${(y + rowHeight / 2 + valueSize * 0.34).toFixed(1)}" text-anchor="end" fill="${valueColor}" font-size="${valueSize}" font-weight="800" font-family="Arial,Helvetica,sans-serif">${escapeXml(display.value)}</text>
         ${displayUnit ? `<text data-role="unit" data-unit-kind="${isNetworkMetric ? 'network' : 'standard'}" x="${unitX}" y="${(y + rowHeight / 2 + 5).toFixed(1)}" text-anchor="end" fill="${unitColor}" font-size="${unitSize}" font-weight="700" font-family="Arial,Helvetica,sans-serif">${escapeXml(displayUnit)}</text>` : ''}
       </g>`;
   }).join('');
