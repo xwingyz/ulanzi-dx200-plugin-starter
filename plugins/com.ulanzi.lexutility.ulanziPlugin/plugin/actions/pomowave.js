@@ -17,6 +17,7 @@ export function createPomowaveAction(runtime) {
     readPersistedState,
     renderInstance,
     renderThemeBackdrop,
+    sendParamFromPlugin,
     setInstanceTimeout,
     t,
     themeFor,
@@ -35,7 +36,9 @@ const POMODORO_PHASES = ['idle', 'focus', 'shortBreak', 'longBreak', 'done'];
 const POMODORO_BLINK_MS = 550;
 const POMODORO_CUE_REPEAT_DELAY_MS = 150;
 const POMODORO_PREVIEW_MAX_MS = 15_000;
+const POMODORO_HISTORY_DAYS = 35;
 const POMODORO_CUE_DURATIONS = ['continuous', '60', '180', '300', '600'];
+const POMODORO_STAT_PHASES = ['focus', 'shortBreak', 'longBreak'];
 const POMODORO_BACKGROUND_SOUNDS = [
   'rain',
   'clock',
@@ -609,6 +612,116 @@ function pomodoroRemainingSec(instance, now = Date.now()) {
   return Math.max(0, Math.round(instance.remainingSec ?? instance.totalSec ?? 0));
 }
 
+function pomodoroDayKey(now = Date.now()) {
+  const date = new Date(now);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function pomodoroDayStart(dayKey) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayKey || ''));
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function emptyPomodoroDay(dayKey) {
+  return {
+    dayKey,
+    focus: { completed: 0, cancelled: 0 },
+    shortBreak: { completed: 0, cancelled: 0 },
+    longBreak: { completed: 0, cancelled: 0 },
+  };
+}
+
+function sanitizePomodoroHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    const start = pomodoroDayStart(entry?.dayKey);
+    if (start == null) return [];
+    const clean = emptyPomodoroDay(pomodoroDayKey(start));
+    for (const phase of POMODORO_STAT_PHASES) {
+      clean[phase].completed = Number.isFinite(entry?.[phase]?.completed)
+        ? Math.max(0, Math.round(entry[phase].completed))
+        : 0;
+      clean[phase].cancelled = Number.isFinite(entry?.[phase]?.cancelled)
+        ? Math.max(0, Math.round(entry[phase].cancelled))
+        : 0;
+    }
+    return [clean];
+  }).sort((left, right) => left.dayKey.localeCompare(right.dayKey)).slice(-POMODORO_HISTORY_DAYS);
+}
+
+function recordPomodoroOutcome(instance, phase, outcome, now = Date.now()) {
+  if (!POMODORO_STAT_PHASES.includes(phase) || !['completed', 'cancelled'].includes(outcome)) {
+    return false;
+  }
+  const dayKey = pomodoroDayKey(now);
+  const history = sanitizePomodoroHistory(instance.history);
+  let today = history.find((entry) => entry.dayKey === dayKey);
+  if (!today) {
+    today = emptyPomodoroDay(dayKey);
+    history.push(today);
+  }
+  today[phase][outcome] += 1;
+  instance.history = history.slice(-POMODORO_HISTORY_DAYS);
+  return true;
+}
+
+function pomodoroWeekStart(now = Date.now()) {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return date.getTime();
+}
+
+function pomodoroStatsSummary(instance, now = Date.now()) {
+  const todayKey = pomodoroDayKey(now);
+  const weekStart = pomodoroWeekStart(now);
+  const history = sanitizePomodoroHistory(instance.history);
+  const summarize = (entries) => {
+    const result = emptyPomodoroDay('');
+    delete result.dayKey;
+    for (const entry of entries) {
+      for (const phase of POMODORO_STAT_PHASES) {
+        result[phase].completed += entry[phase].completed;
+        result[phase].cancelled += entry[phase].cancelled;
+      }
+    }
+    return result;
+  };
+  return {
+    today: summarize(history.filter((entry) => entry.dayKey === todayKey)),
+    week: summarize(history.filter((entry) => {
+      const start = pomodoroDayStart(entry.dayKey);
+      return start != null && start >= weekStart && start <= now;
+    })),
+  };
+}
+
+function currentPomodoroBackground(instance) {
+  const selected = normalizePomodoroBackgroundChoice(instance.selectedBackgroundSound, 'none');
+  if (instance.phase === 'focus' && selected !== 'none') {
+    return selected;
+  }
+  if (isEnabled(instance.settings?.backgroundRandom)) {
+    return 'random';
+  }
+  return normalizePomodoroBackgroundChoice(instance.settings?.backgroundSound, 'none');
+}
+
+function sendPomodoroStatus(instance, now = Date.now()) {
+  if (!instance?.context || typeof sendParamFromPlugin !== 'function') return;
+  sendParamFromPlugin({
+    pomodoroStatus: JSON.stringify({
+      ...pomodoroStatsSummary(instance, now),
+      backgroundSound: currentPomodoroBackground(instance),
+    }),
+  }, instance.context);
+}
+
 function serializePomodoroState(instance) {
   const selectedBackgroundSound = normalizePomodoroBackgroundChoice(instance.selectedBackgroundSound, 'none');
   return {
@@ -618,6 +731,7 @@ function serializePomodoroState(instance) {
     remainingSec: instance.remainingSec,
     totalSec: instance.totalSec,
     completedFocusRounds: instance.completedFocusRounds || 0,
+    history: sanitizePomodoroHistory(instance.history),
     phaseEndAt: instance.phaseEndAt ?? null,
     backgroundMuted: Boolean(instance.backgroundMuted),
     selectedBackgroundSound,
@@ -633,6 +747,7 @@ function hydratePomodoroState(raw, now = Date.now()) {
   const completedFocusRounds = Number.isFinite(raw.completedFocusRounds)
     ? Math.max(0, Math.round(raw.completedFocusRounds))
     : 0;
+  const history = sanitizePomodoroHistory(raw.history);
   const totalSec = Number.isFinite(raw.totalSec) && raw.totalSec > 0 ? Math.round(raw.totalSec) : null;
   const running = Boolean(raw.running) && Number.isFinite(raw.phaseEndAt);
   const remainingSec = running
@@ -640,7 +755,7 @@ function hydratePomodoroState(raw, now = Date.now()) {
     : Number.isFinite(raw.remainingSec) ? Math.max(0, Math.round(raw.remainingSec)) : null;
   if (raw.phase === 'idle' || totalSec == null || remainingSec == null) {
     // 数据残缺时只保底轮次进度，其余交给 initialize 走干净初始态。
-    return { completedFocusRounds };
+    return { completedFocusRounds, history };
   }
   const selectedBackgroundSound = normalizePomodoroBackgroundChoice(raw.selectedBackgroundSound, null);
   return {
@@ -650,6 +765,7 @@ function hydratePomodoroState(raw, now = Date.now()) {
     remainingSec,
     phaseEndAt: running ? raw.phaseEndAt : null,
     completedFocusRounds,
+    history,
     backgroundMuted: Boolean(raw.backgroundMuted),
     selectedBackgroundSound,
   };
@@ -661,7 +777,9 @@ function flushPomodoroState(instance, options = {}) {
     return false;
   }
   const write = options.write ?? writePersistedState;
-  return write(instance.context, serializePomodoroState(instance));
+  const changed = write(instance.context, serializePomodoroState(instance));
+  sendPomodoroStatus(instance, options.now);
+  return changed;
 }
 
 function resetPomodoroInstance(instance, { preserveRounds = false } = {}) {
@@ -790,8 +908,15 @@ function advancePomodoroPhase(instance, options = {}) {
     playSound = true,
     countFocus = true,
     forceAutoStart = false,
+    recordCompletion = true,
+    now = Date.now(),
   } = options;
   const roundsGoal = pomodoroRoundsGoal(instance.settings);
+  const completedPhase = instance.phase;
+
+  if (recordCompletion) {
+    recordPomodoroOutcome(instance, completedPhase, 'completed', now);
+  }
 
   if (instance.phase === 'focus') {
     if (countFocus) {
@@ -987,6 +1112,7 @@ function handlePomodoroDoublePress(instance) {
   }
   // 首次短按可能暂停或确认 awaiting，但不会改变正常阶段；按快照阶段静默推进即可。
   if (snapshot.phase === 'focus' || snapshot.phase === 'shortBreak' || snapshot.phase === 'longBreak') {
+    recordPomodoroOutcome(instance, snapshot.phase, 'cancelled');
     instance.phase = snapshot.phase;
     instance.awaiting = false;
     stopPomodoroCue(instance);
@@ -995,6 +1121,7 @@ function handlePomodoroDoublePress(instance) {
       playSound: false,
       countFocus: false,
       forceAutoStart: true,
+      recordCompletion: false,
     });
   }
 }
@@ -1130,6 +1257,7 @@ const config = {
       remainingSec: null,
       totalSec: null,
       completedFocusRounds: 0,
+      history: [],
       running: false,
       phaseEndAt: null,
       // awaiting：阶段自然结束但下一阶段非自动开始，圆环闪烁等用户按键确认。属瞬时转场态，不持久化。
@@ -1170,8 +1298,13 @@ const config = {
     onSettingsChanged: (instance, previousSettings) => {
       initializePomodoroInstance(instance);
       reconcilePomodoroSettings(instance, previousSettings);
+      sendPomodoroStatus(instance);
     },
     onParamFromPlugin: (instance, param) => {
+      if (param?.__requestPomodoroStatus === 'true') {
+        sendPomodoroStatus(instance);
+        return;
+      }
       if (param?.previewSound) {
         // PI 试听：播放点选样式，无视 soundEnabled，不改动计时状态。
         playPomodoroCuePreview(instance, param.previewSound);
@@ -1211,6 +1344,12 @@ const config = {
       serializePomodoroState,
       flushPomodoroState,
       pomodoroRemainingSec,
+      pomodoroDayKey,
+      sanitizePomodoroHistory,
+      recordPomodoroOutcome,
+      pomodoroStatsSummary,
+      currentPomodoroBackground,
+      sendPomodoroStatus,
       tickPomodoro,
       togglePomodoro,
       skipPomodoroPhase,

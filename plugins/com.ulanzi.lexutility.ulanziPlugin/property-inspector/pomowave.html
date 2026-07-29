@@ -46,6 +46,20 @@
       .frame-toggle input { width: auto; }
       .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
       .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .status-card { margin: 8px 0 14px; border: 1px solid var(--line); border-radius: 12px; background: #0b1220; overflow: hidden; }
+      .status-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+      .status-head strong { font-size: 13px; }
+      .background-status { color: var(--accent); font-size: 12px; font-weight: 700; text-align: right; }
+      .status-grid { display: grid; grid-template-columns: 54px repeat(3, minmax(0, 1fr)); }
+      .status-grid > div { min-width: 0; padding: 8px 4px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: center; }
+      .status-grid > div:nth-child(4n) { border-right: 0; }
+      .status-grid > div:nth-last-child(-n + 4) { border-bottom: 0; }
+      .status-label { color: var(--muted); font-size: 11px; }
+      .status-period { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px; font-weight: 700; }
+      .status-count { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 12px; }
+      .status-count .completed { color: var(--accent); }
+      .status-count .cancelled { color: var(--muted); }
+      .status-legend { padding: 7px 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; text-align: right; }
     </style>
   </head>
   <body>
@@ -53,6 +67,27 @@
       <div class="panel">
         <h1 data-localize="Pomowave">Pomowave</h1>
         <form id="property-inspector">
+          <section class="status-card" aria-live="polite">
+            <div class="status-head">
+              <strong data-localize="Activity status">Activity status</strong>
+              <span class="background-status"><span data-localize="Current background">Current background</span>: <span id="currentBackgroundSound">—</span></span>
+            </div>
+            <div class="status-grid">
+              <div></div>
+              <div class="status-label" data-localize="Focus">Focus</div>
+              <div class="status-label" data-localize="Short break">Short break</div>
+              <div class="status-label" data-localize="Long break">Long break</div>
+              <div class="status-period" data-localize="Today">Today</div>
+              <div class="status-count"><span class="completed">✓ <span id="todayFocusCompleted">0</span></span> · <span class="cancelled">× <span id="todayFocusCancelled">0</span></span></div>
+              <div class="status-count"><span class="completed">✓ <span id="todayShortBreakCompleted">0</span></span> · <span class="cancelled">× <span id="todayShortBreakCancelled">0</span></span></div>
+              <div class="status-count"><span class="completed">✓ <span id="todayLongBreakCompleted">0</span></span> · <span class="cancelled">× <span id="todayLongBreakCancelled">0</span></span></div>
+              <div class="status-period" data-localize="This week">This week</div>
+              <div class="status-count"><span class="completed">✓ <span id="weekFocusCompleted">0</span></span> · <span class="cancelled">× <span id="weekFocusCancelled">0</span></span></div>
+              <div class="status-count"><span class="completed">✓ <span id="weekShortBreakCompleted">0</span></span> · <span class="cancelled">× <span id="weekShortBreakCancelled">0</span></span></div>
+              <div class="status-count"><span class="completed">✓ <span id="weekLongBreakCompleted">0</span></span> · <span class="cancelled">× <span id="weekLongBreakCancelled">0</span></span></div>
+            </div>
+            <div class="status-legend"><span data-localize="Completed">Completed</span> ✓ · <span data-localize="Cancelled">Cancelled</span> ×</div>
+          </section>
           <div class="grid">
             <div class="field">
               <label for="focusMin" data-localize="Focus (min)">Focus (min)</label>

@@ -16,6 +16,66 @@ const POMOWAVE_FIELDS = withLanguageField([
   'autoStartFocus',
 ]);
 
+const POMOWAVE_BACKGROUND_LABELS = {
+  none: 'None',
+  random: 'Random background',
+  rain: 'Rain',
+  clock: 'Clock',
+  wave: 'Wave',
+  forest: 'Forest',
+  cafe: 'Cafe',
+  morning: 'Morning',
+  summer: 'Summer',
+  storm: 'Storm',
+  stove: 'Stove',
+  stream: 'Stream',
+  deepSea: 'Deep sea',
+  desert: 'Desert',
+  chirp: 'Chirp',
+  boiling: 'Boiling',
+  musicBox: 'Music box',
+  woodenFish: 'Wooden fish',
+  streetTraffic: 'Street traffic',
+};
+
+function renderPomowaveStatus(raw) {
+  let status;
+  try {
+    status = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    return;
+  }
+  if (!status || typeof status !== 'object') return;
+
+  const ids = {
+    today: {
+      focus: 'todayFocus',
+      shortBreak: 'todayShortBreak',
+      longBreak: 'todayLongBreak',
+    },
+    week: {
+      focus: 'weekFocus',
+      shortBreak: 'weekShortBreak',
+      longBreak: 'weekLongBreak',
+    },
+  };
+  for (const [period, phases] of Object.entries(ids)) {
+    for (const [phase, prefix] of Object.entries(phases)) {
+      document.getElementById(`${prefix}Completed`).textContent = String(
+        Math.max(0, Number(status[period]?.[phase]?.completed) || 0),
+      );
+      document.getElementById(`${prefix}Cancelled`).textContent = String(
+        Math.max(0, Number(status[period]?.[phase]?.cancelled) || 0),
+      );
+    }
+  }
+
+  const backgroundKey = String(status.backgroundSound || 'none');
+  document.getElementById('currentBackgroundSound').textContent = $UD.t(
+    POMOWAVE_BACKGROUND_LABELS[backgroundKey] || 'None',
+  );
+}
+
 function syncPomowaveButtons() {
   const soundInput = document.getElementById('soundStyle');
 
@@ -34,6 +94,7 @@ function syncPomowaveBackgroundVolume() {
 function initPomowaveInspector() {
   let currentContext = '';
   let uiBound = false;
+  let lastStatus = null;
 
   function pushSettings() {
     $UD.sendParamFromPlugin(collectSettings(POMOWAVE_FIELDS), currentContext);
@@ -64,7 +125,7 @@ function initPomowaveInspector() {
     });
 
     bindThemeButtons(commitSettings);
-    bindLanguageSelection(commitSettings);
+    bindLanguageSelection(commitSettings, () => renderPomowaveStatus(lastStatus));
 
     document.querySelectorAll('[data-sound-style]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -119,14 +180,17 @@ function initPomowaveInspector() {
     document.querySelector('.uspi-wrapper').classList.remove('hidden');
     bindUiOnce();
     $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
+    $UD.sendParamFromPlugin({ __requestPomodoroStatus: 'true' }, currentContext);
   });
 
   function apply(message) {
     currentContext = message.context || currentContext;
-    applySettings(POMOWAVE_FIELDS, message.param || {});
+    const param = message.param || {};
+    applySettings(POMOWAVE_FIELDS, param);
     syncPomowaveButtons();
     syncPomowaveBackgroundVolume();
-    void applyLanguageSelection();
+    if (param.pomodoroStatus) lastStatus = param.pomodoroStatus;
+    void afterLanguageSelection(() => renderPomowaveStatus(lastStatus));
   }
 
   $UD.onAdd(apply);

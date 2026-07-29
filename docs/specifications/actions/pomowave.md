@@ -78,7 +78,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 
 `remainingSec` 只作为暂停/空闲时冻结值和渲染缓存。tick 对齐下一个整秒边界，调度误差不会累计；系统睡眠或插件重启后，`onReady` 立即按墙上时钟追平，已经超时则推进阶段。
 
-运行态版本为 `v: 2`，保存：`phase`、`running`、`remainingSec`、`totalSec`、`completedFocusRounds`、`phaseEndAt`、`selectedBackgroundSound`、`backgroundMuted`。随机结果只在真正进入新 focus 轮次时生成，暂停/恢复及重启继续使用同一选择；长按临时静音在同一轮重启后保持，进入新 focus 时清除。旧版本、非法 phase 或残缺数据安全降级为初始状态。只在阶段转换、暂停/恢复、长按切换、重置、设置重算和 dispose 时写盘，不逐秒写盘。
+运行态版本为 `v: 2`，保存：`phase`、`running`、`remainingSec`、`totalSec`、`completedFocusRounds`、`phaseEndAt`、`selectedBackgroundSound`、`backgroundMuted`、最近 35 个自然日的 `history`。历史按本机日期记录 focus、shortBreak、longBreak 的 completed/cancelled；本周从本地周一零点起算。自然完成与沿用既有语义的 Inspector 跳过计为 completed，双击明确放弃计为 cancelled。随机结果只在真正进入新 focus 轮次时生成，暂停/恢复及重启继续使用同一选择；长按临时静音在同一轮重启后保持，进入新 focus 时清除。旧版本、非法 phase 或残缺数据安全降级为初始状态。只在阶段转换、暂停/恢复、长按切换、重置、设置重算和 dispose 时写盘，不逐秒写盘。
 
 ## 6. 提示音
 
@@ -100,7 +100,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 | `onDoublePress` | 使用快照放弃当前阶段、不计未完成 focus，并强制启动下一阶段；不自行识别双击 |
 | `onLongPress` | focus（运行、暂停或 awaiting）中切换当前轮次背景音；其他状态无动作 |
 | `onSettingsChanged` | 按比例重算当前阶段时长；运行中的 focus 变更背景设置立即重启播放器 |
-| `onParamFromPlugin` | 处理提示试听、背景试听/停止、`resetTimer`、`skipPhase` 控制命令 |
+| `onParamFromPlugin` | 处理提示试听、背景试听/停止、状态请求、`resetTimer`、`skipPhase` 控制命令 |
 | `onDispose` | 停止提示/背景/试听并同步落盘 |
 | `render` | 生成阶段 SVG data URL |
 
@@ -116,6 +116,8 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 - done 状态不显示番茄图形，避免把“完成”误看成仍在专注。
 - 阶段色全部从当前公共 theme token 派生：focus 用 accent，短休息为 accent/text 混色，长休息用 muted，done 用 text；不维护私有阶段主题。
 
+Property Inspector 顶部显示只读状态卡：今日、本周的专注/短休息/长休息完成数与取消数，以及当前专注实际选择的背景声名称；尚未开始随机专注时显示“随机背景音”。Inspector 连接时通过 `__requestPomodoroStatus` 主动请求，阶段完成、取消、设置或背景声变化后由 action 回推 `pomodoroStatus`，统计字段不得进入 settings。
+
 ## 9. 已覆盖的关键验证
 
 - 墙钟计时、睡眠间隔追平、暂停冻结与恢复 deadline。
@@ -125,6 +127,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 - 专注临时静音的持久化/新轮次清除、按前快照双击边界（idle/done/awaiting/运行/暂停）、放弃 focus 不计轮次并强制启动下一阶段。
 - 背景固定与随机选择、同轮/重启稳定性、音量、暂停恢复、设置变更、失败与销毁清理。
 - Inspector、新旧设置升级、多语言、17 项音频资源、SHA-256 和来源记录一致性。
+- 今日/本周统计边界、三阶段完成/取消计数、状态请求与当前背景声回显。
 - 各主题阶段色与状态文字色、上移的水平轮次灯、灯组下方居中且无外圈的 17 种放大背景音图标及静音斜杠、进度方向、awaiting 闪烁和末段告警。
 
 修改阶段图、长按语义、计时事实源、运行态字段或提示音生命周期时，应同步本文件并扩充 `tests/app-framework.test.js`；修改 Inspector 控制命令时还应更新 `tests/inspector-lifecycle.test.js`。

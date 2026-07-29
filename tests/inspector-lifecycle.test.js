@@ -341,10 +341,53 @@ test('pomowave reset defaults sends the framework control param once', () => {
 
   assert.deepEqual(
     harness.sends
-      .filter(({ settings }) => !settings.__requestSettings)
+      .filter(({ settings }) => !settings.__requestSettings && !settings.__requestPomodoroStatus)
       .map(({ settings }) => JSON.parse(JSON.stringify(settings))),
     [{ __resetDefaults: 'true' }],
   );
+});
+
+test('pomowave requests authoritative settings and live status when the inspector connects', () => {
+  const harness = createHarness('pomowave.js');
+  harness.callbacks.connected[0]();
+
+  assert.deepEqual(
+    harness.sends.map(({ settings }) => JSON.parse(JSON.stringify(settings))),
+    [
+      { __requestSettings: 'true' },
+      { __requestPomodoroStatus: 'true' },
+    ],
+  );
+});
+
+test('pomowave renders live phase counts and the current background name', async () => {
+  const harness = createHarness('pomowave.js');
+  harness.callbacks.connected[0]();
+  harness.callbacks.plugin.forEach((callback) => callback({
+    context: 'ctx-pomowave',
+    param: {
+      pomodoroStatus: JSON.stringify({
+        today: {
+          focus: { completed: 3, cancelled: 1 },
+          shortBreak: { completed: 2, cancelled: 0 },
+          longBreak: { completed: 1, cancelled: 0 },
+        },
+        week: {
+          focus: { completed: 8, cancelled: 2 },
+          shortBreak: { completed: 6, cancelled: 1 },
+          longBreak: { completed: 2, cancelled: 1 },
+        },
+        backgroundSound: 'forest',
+      }),
+    },
+  }));
+  await Promise.resolve();
+
+  assert.equal(harness.elements.get('todayFocusCompleted').textContent, '3');
+  assert.equal(harness.elements.get('todayFocusCancelled').textContent, '1');
+  assert.equal(harness.elements.get('weekLongBreakCompleted').textContent, '2');
+  assert.equal(harness.elements.get('weekLongBreakCancelled').textContent, '1');
+  assert.equal(harness.elements.get('currentBackgroundSound').textContent, 'Forest');
 });
 
 test('latency mode button sends once after reconnect', () => {
@@ -368,7 +411,7 @@ test('pomowave reset sends once after reconnect without an extra settings send',
 
   assert.deepEqual(
     harness.sends
-      .filter(({ settings }) => !settings.__requestSettings)
+      .filter(({ settings }) => !settings.__requestSettings && !settings.__requestPomodoroStatus)
       .map(({ settings }) => JSON.parse(JSON.stringify(settings))),
     [{ resetTimer: 'true' }],
   );
@@ -382,7 +425,7 @@ test('pomowave skip phase sends the control param once', () => {
 
   assert.deepEqual(
     harness.sends
-      .filter(({ settings }) => !settings.__requestSettings)
+      .filter(({ settings }) => !settings.__requestSettings && !settings.__requestPomodoroStatus)
       .map(({ settings }) => JSON.parse(JSON.stringify(settings))),
     [{ skipPhase: 'true' }],
   );

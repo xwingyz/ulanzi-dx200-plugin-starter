@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { createPomowaveAction } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/actions/pomowave.js';
 
-function createRuntime({ platform = 'darwin', player, persistedState = {} } = {}) {
+function createRuntime({ platform = 'darwin', player, persistedState = {}, sentParams = [] } = {}) {
   return {
     clearInstanceTimeout(instance, slot) {
       instance.timers?.delete(slot);
@@ -35,6 +35,7 @@ function createRuntime({ platform = 'darwin', player, persistedState = {} } = {}
     readPersistedState: () => persistedState,
     renderInstance: () => {},
     renderThemeBackdrop: () => ({ outer: '', low: '#222', text: '#fff', muted: '#888' }),
+    sendParamFromPlugin: (param, context) => sentParams.push({ param, context }),
     setInstanceTimeout(instance, slot, callback, ms) {
       instance.timers ||= new Map();
       instance.timers.set(slot, { callback, ms });
@@ -122,6 +123,53 @@ test('pomowave applies characteristic-aware playback gain without rewriting sour
     'quiet continuous ambience should receive more gain than sharp near-peak transients',
   );
   assert.equal(testing.amplifiedPomodoroBackgroundVolume('rain', 0), 0);
+});
+
+test('pomowave summarizes completed and cancelled phases for today and the current Monday-based week', () => {
+  const { config, testing } = createPomowaveAction(createRuntime());
+  const instance = createInstance(config);
+  const sunday = new Date(2026, 6, 26, 12).getTime();
+  const monday = new Date(2026, 6, 27, 9).getTime();
+  const wednesday = new Date(2026, 6, 29, 14).getTime();
+
+  testing.recordPomodoroOutcome(instance, 'longBreak', 'completed', sunday);
+  testing.recordPomodoroOutcome(instance, 'focus', 'completed', monday);
+  testing.recordPomodoroOutcome(instance, 'focus', 'completed', wednesday);
+  testing.recordPomodoroOutcome(instance, 'shortBreak', 'cancelled', wednesday);
+
+  const summary = testing.pomodoroStatsSummary(instance, wednesday);
+  assert.deepEqual(summary.today, {
+    focus: { completed: 1, cancelled: 0 },
+    shortBreak: { completed: 0, cancelled: 1 },
+    longBreak: { completed: 0, cancelled: 0 },
+  });
+  assert.deepEqual(summary.week, {
+    focus: { completed: 2, cancelled: 0 },
+    shortBreak: { completed: 0, cancelled: 1 },
+    longBreak: { completed: 0, cancelled: 0 },
+  });
+  assert.equal(testing.serializePomodoroState(instance).history.length, 3);
+});
+
+test('pomowave status reports the actual focus background and counts a double-press abandonment', () => {
+  const sentParams = [];
+  const { config, testing } = createPomowaveAction(createRuntime({ sentParams }));
+  const instance = createInstance(config, {
+    phase: 'focus',
+    running: false,
+    totalSec: 1500,
+    remainingSec: 900,
+    selectedBackgroundSound: 'forest',
+  });
+
+  testing.handlePomodoroShortPress(instance, { now: Date.now() });
+  testing.handlePomodoroDoublePress(instance);
+  config.onParamFromPlugin(instance, { __requestPomodoroStatus: 'true' });
+
+  const status = JSON.parse(sentParams.at(-1).param.pomodoroStatus);
+  assert.equal(status.today.focus.cancelled, 1);
+  assert.equal(status.today.focus.completed, 0);
+  assert.equal(status.backgroundSound, 'rain');
 });
 
 test('pomowave long press is a no-op outside focus', () => {
