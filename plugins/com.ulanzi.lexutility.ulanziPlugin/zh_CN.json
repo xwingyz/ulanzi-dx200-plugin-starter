@@ -199,7 +199,7 @@
     "Background volume": "背景音量",
     "Preview background": "试听背景音",
     "Stop preview": "停止试听",
-    "Single click: start, pause, resume, or confirm the next phase. Double click: skip the phase currently shown before the first click. Long press: reset to a full paused focus while keeping completed rounds.": "单击：开始、暂停、恢复或确认下一阶段。双击：跳过第一次单击前显示的阶段。长按：保留已完成轮次，重置为完整且暂停的专注。",
+    "Single click: start, pause, resume, or confirm the next phase. Double click: skip the phase currently shown before the first click. Long press: toggle background sound during the current focus; otherwise reset to a full paused focus while keeping completed rounds.": "单击：开始、暂停、恢复或确认下一阶段。双击：跳过第一次单击前显示的阶段。长按：在当前专注中开关背景音；其他状态下保留已完成轮次，并重置为完整且暂停的专注。",
     "READY": "就绪",
     "FOCUS": "专注",
     "PAUSED": "暂停",
