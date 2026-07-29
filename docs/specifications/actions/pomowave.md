@@ -98,7 +98,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 | `onReady` | 初始化缺失值；运行中立即按当前时钟对齐并续排 tick |
 | `onRun` | 保存按前阶段快照，处理短按与 awaiting 确认交互 |
 | `onDoublePress` | 使用快照放弃当前阶段、不计未完成 focus，并强制启动下一阶段；不自行识别双击 |
-| `onLongPress` | focus（运行、暂停或 awaiting）中切换当前轮次背景音；其他状态无动作 |
+| `onLongPress` | focus（运行、暂停或 awaiting）中切换当前轮次背景音；只更新业务状态，由共享 `endPress` 在清除反色后统一重绘一次；其他状态无动作 |
 | `onSettingsChanged` | 按比例重算当前阶段时长；运行中的 focus 变更背景设置立即重启播放器 |
 | `onParamFromPlugin` | 处理提示试听、背景试听/停止、状态请求、`resetTimer`、`skipPhase` 控制命令 |
 | `onDispose` | 停止提示/背景/试听并同步落盘 |
@@ -122,7 +122,7 @@ Property Inspector 顶部显示只读状态卡：今日、本周的专注/短休
 
 - 墙钟计时、睡眠间隔追平、暂停冻结与恢复 deadline。
 - 状态序列化/水合、跳过语义、idle/done 边界。
-- 短按、focus 运行/暂停/awaiting 时长按切换背景音、非 focus 长按无动作。
+- 短按、focus 运行/暂停/awaiting 时长按切换背景音、非 focus 长按无动作；长按释放只由共享 `endPress` 提交一次恢复帧。
 - 自动衔接单次提示、awaiting 提示的 continuous/60/180/300/600 上限与清理。
 - 专注临时静音的持久化/新轮次清除、按前快照双击边界（idle/done/awaiting/运行/暂停）、放弃 focus 不计轮次并强制启动下一阶段。
 - 背景固定与随机选择、同轮/重启稳定性、音量、暂停恢复、设置变更、失败与销毁清理。

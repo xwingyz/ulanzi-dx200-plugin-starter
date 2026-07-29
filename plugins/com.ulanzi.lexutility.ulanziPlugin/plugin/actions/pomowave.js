@@ -1135,7 +1135,6 @@ function togglePomodoroBackgroundMuted(instance) {
     startPomodoroBackground(instance);
   }
   flushPomodoroState(instance);
-  renderInstance(instance);
   return instance.backgroundMuted;
 }
 

@@ -4,9 +4,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { __testing as lexTesting } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
 import { createPomowaveAction } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/actions/pomowave.js';
 
-function createRuntime({ platform = 'darwin', player, persistedState = {}, sentParams = [] } = {}) {
+function createRuntime({
+  platform = 'darwin',
+  player,
+  persistedState = {},
+  renderInstance = () => {},
+  sentParams = [],
+} = {}) {
   return {
     clearInstanceTimeout(instance, slot) {
       instance.timers?.delete(slot);
@@ -33,7 +40,7 @@ function createRuntime({ platform = 'darwin', player, persistedState = {}, sentP
     },
     platform: () => platform,
     readPersistedState: () => persistedState,
-    renderInstance: () => {},
+    renderInstance,
     renderThemeBackdrop: () => ({ outer: '', low: '#222', text: '#fff', muted: '#888' }),
     sendParamFromPlugin: (param, context) => sentParams.push({ param, context }),
     setInstanceTimeout(instance, slot, callback, ms) {
@@ -188,6 +195,32 @@ test('pomowave long press is a no-op outside focus', () => {
   assert.equal(instance.running, true);
   assert.equal(instance.remainingSec, 30);
   assert.equal(instance.completedFocusRounds, 2);
+});
+
+test('pomowave long press release submits exactly one restored frame', () => {
+  const renders = [];
+  const { config } = createPomowaveAction(createRuntime({
+    renderInstance: () => renders.push('action'),
+  }));
+  const instance = createInstance(config, {
+    active: true,
+    phase: 'focus',
+    running: false,
+    remainingSec: 300,
+    totalSec: 1500,
+    pressed: true,
+    longPressQualified: true,
+    longPressFeedback: true,
+  });
+
+  lexTesting.endPress(instance, config, {
+    clearTimeout: () => {},
+    render: () => renders.push('framework'),
+  });
+
+  assert.deepEqual(renders, ['framework']);
+  assert.equal(instance.longPressFeedback, false);
+  assert.equal(instance.backgroundMuted, true);
 });
 
 test('pomowave double press abandons the visible phase, starts the next one, and does not complete focus', () => {
