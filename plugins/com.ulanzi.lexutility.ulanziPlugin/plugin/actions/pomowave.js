@@ -36,8 +36,51 @@ const POMODORO_BLINK_MS = 550;
 const POMODORO_CUE_REPEAT_DELAY_MS = 150;
 const POMODORO_PREVIEW_MAX_MS = 15_000;
 const POMODORO_CUE_DURATIONS = ['continuous', '60', '180', '300', '600'];
-const POMODORO_BACKGROUND_SOUNDS = ['rain', 'fireplace', 'forest', 'ocean', 'cafe', 'brownNoise'];
+const POMODORO_BACKGROUND_SOUNDS = [
+  'rain',
+  'clock',
+  'wave',
+  'forest',
+  'cafe',
+  'morning',
+  'summer',
+  'storm',
+  'stove',
+  'stream',
+  'deepSea',
+  'desert',
+  'chirp',
+  'boiling',
+  'musicBox',
+  'woodenFish',
+  'streetTraffic',
+];
 const POMODORO_BACKGROUND_CHOICES = ['none', ...POMODORO_BACKGROUND_SOUNDS];
+const POMODORO_LEGACY_BACKGROUND_MAP = Object.freeze({
+  fireplace: 'stove',
+  ocean: 'wave',
+  brownNoise: 'deepSea',
+});
+const POMODORO_BACKGROUND_GLYPHS = Object.freeze({
+  rain: '<path d="M5 12.5h12.5a3.5 3.5 0 0 0 .3-7A5.2 5.2 0 0 0 8 7.2 3.1 3.1 0 0 0 5 12.5Z"/><path d="m7 16-1 2m5-2-1 2m5-2-1 2"/>',
+  clock: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3.5 2"/>',
+  wave: '<path d="M3 10c2.2 0 2.2-2 4.4-2s2.2 2 4.4 2 2.2-2 4.4-2 2.2 2 4.4 2M3 15c2.2 0 2.2-2 4.4-2s2.2 2 4.4 2 2.2-2 4.4-2 2.2 2 4.4 2"/>',
+  forest: '<path d="m8 4-4 7h3l-4 7h10l-4-7h3L8 4Zm9 3-3 5h2l-3 6h8l-3-6h2l-3-5Z"/>',
+  cafe: '<path d="M5 9h11v5.5A4.5 4.5 0 0 1 11.5 19h-2A4.5 4.5 0 0 1 5 14.5V9Zm11 2h2a2.5 2.5 0 0 1 0 5h-2M8 6c-1-1 1-2 0-3m4 3c-1-1 1-2 0-3"/>',
+  morning: '<path d="M4 17h16M6 17a6 6 0 0 1 12 0M12 4v3M5.6 7.6l2.1 2.1m10.7-2.1-2.1 2.1"/>',
+  summer: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1m0-14.2L17 7M7 17l-2.1 2.1"/>',
+  storm: '<path d="M5 12.5h12.5a3.5 3.5 0 0 0 .3-7A5.2 5.2 0 0 0 8 7.2 3.1 3.1 0 0 0 5 12.5Z"/><path d="m12 13-2 4h3l-2 4"/>',
+  stove: '<path d="M12 3c1 4-3 5-1 8 1.2 1.8 3.5.8 3-1.5 3 2.3 4 5 2.3 8A5.2 5.2 0 0 1 7 16c-.8-2.7.8-5.4 3.2-7.5-.1 2.2.5 3.2 1.8 3.5"/>',
+  stream: '<path d="M4 4c7 2 9 5 3 8s-4 6 10 8M11 4c7 2 8 5 2 8s-4 5 7 7"/>',
+  deepSea: '<path d="M4 12c3-4 8-5 13-2l3-2v8l-3-2c-5 3-10 2-13-2Zm4 0h.1"/><circle cx="18.5" cy="4.5" r="1.5"/><circle cx="15" cy="6" r="1"/>',
+  desert: '<circle cx="18" cy="6" r="3"/><path d="M2 18c4-5 8-6 12-2 2-2 5-2 8 0M2 21c6-3 12-3 20 0"/>',
+  chirp: '<ellipse cx="12" cy="13" rx="2.5" ry="5"/><path d="m10 10-4-3m8 3 4-3m-8 5-5 1m9-1 5 1m-9 3-4 3m8-3 4 3M11 7l-1-3m3 3 1-3"/>',
+  boiling: '<path d="M5 10h14l-1 9H6l-1-9Zm-2 0h18M8 6c-1.5-1.5 1.5-2.5 0-4m4 4c-1.5-1.5 1.5-2.5 0-4m4 4c-1.5-1.5 1.5-2.5 0-4"/>',
+  musicBox: '<rect x="4" y="9" width="16" height="11" rx="2"/><path d="M7 9V6h10v3m-7 7a2 2 0 1 0 2-2V7l5-1v7"/>',
+  woodenFish: '<path d="M4 14c2-6 8-9 15-5l2 3-2 3c-7 4-13 2-15-1Zm4-1h8M17 5l3-2"/>',
+  streetTraffic: '<path d="m5 9 2-4h10l2 4 2 2v6h-2v2h-3v-2H8v2H5v-2H3v-6l2-2Zm0 0h14M7 13h.1M17 13h.1"/>',
+  none: '<path d="M4 10h4l5-4v12l-5-4H4v-4Zm12-2 5 8m0-8-5 8"/>',
+});
 const POMODORO_AUDIO_DIR = new URL('../../assets/audio/pomowave/', import.meta.url);
 const POMODORO_MAC_SOUND_MAP = {
   glass: 'Glass',
@@ -105,6 +148,60 @@ function pomodoroPhaseLabel(instance) {
     return active ? 'LONG' : 'PAUSED';
   }
   return 'DONE';
+}
+
+function pomodoroStatusColor(instance, theme) {
+  if (instance.phase === 'idle') {
+    return mixHex(theme.muted, theme.text, 0.28);
+  }
+  if (!instance.running && !instance.awaiting && instance.phase !== 'done') {
+    return theme.warn || theme.muted;
+  }
+  if (instance.phase === 'focus') {
+    return theme.accent;
+  }
+  if (instance.phase === 'shortBreak') {
+    return theme.ok || mixHex(theme.accent, theme.text, 0.55);
+  }
+  if (instance.phase === 'longBreak') {
+    return mixHex(theme.muted, theme.text, 0.48);
+  }
+  return theme.text;
+}
+
+function pomodoroBackgroundGlyph(sound) {
+  return POMODORO_BACKGROUND_GLYPHS[sound] || POMODORO_BACKGROUND_GLYPHS.none;
+}
+
+function pomodoroBackgroundSoundForDisplay(instance) {
+  if (instance.phase !== 'focus') {
+    return null;
+  }
+  if (POMODORO_BACKGROUND_CHOICES.includes(instance.selectedBackgroundSound)) {
+    return instance.selectedBackgroundSound;
+  }
+  if (isEnabled(instance.settings?.backgroundRandom)) {
+    return 'none';
+  }
+  return normalizePomodoroBackgroundChoice(instance.settings?.backgroundSound, 'none');
+}
+
+function renderPomodoroBackgroundBadge(instance, theme, background) {
+  const sound = pomodoroBackgroundSoundForDisplay(instance);
+  if (!sound) {
+    return '';
+  }
+  const muted = Boolean(instance.backgroundMuted) || sound === 'none';
+  const iconColor = muted ? background.muted : theme.text;
+  return `
+    <g data-background-sound="${sound}" data-background-muted="${muted}" transform="translate(118 174)">
+      <circle cx="10" cy="10" r="9.5" fill="${theme.panel}" stroke="${iconColor}" stroke-width="1.2" opacity="${muted ? '0.42' : '0.82'}"/>
+      <g transform="translate(2 2) scale(0.6667)" fill="none" stroke="${iconColor}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="${muted ? '0.34' : '0.96'}">
+        ${pomodoroBackgroundGlyph(sound)}
+      </g>
+      ${muted ? `<path data-background-muted-slash d="M3 17 17 3" fill="none" stroke="${theme.muted}" stroke-width="2" stroke-linecap="round" opacity="0.92"/>` : ''}
+    </g>
+  `;
 }
 
 function formatPomodoroTime(totalSeconds) {
@@ -267,7 +364,12 @@ function backgroundAudioPath(sound) {
   if (!POMODORO_BACKGROUND_SOUNDS.includes(sound)) {
     return null;
   }
-  return fileURLToPath(new URL(`${sound}.mp3`, POMODORO_AUDIO_DIR));
+  return fileURLToPath(new URL(`${sound}.m4a`, POMODORO_AUDIO_DIR));
+}
+
+function normalizePomodoroBackgroundChoice(value, fallback = 'rain') {
+  const migrated = POMODORO_LEGACY_BACKGROUND_MAP[value] ?? value;
+  return POMODORO_BACKGROUND_CHOICES.includes(migrated) ? migrated : fallback;
 }
 
 function normalizedBackgroundVolume(settings) {
@@ -287,7 +389,7 @@ function selectPomodoroBackground(instance, { force = false } = {}) {
   } else if (instance.settings.backgroundSound === 'none') {
     instance.selectedBackgroundSound = 'none';
   } else {
-    instance.selectedBackgroundSound = normalizeChoice(instance.settings.backgroundSound, 'rain', POMODORO_BACKGROUND_CHOICES);
+    instance.selectedBackgroundSound = normalizePomodoroBackgroundChoice(instance.settings.backgroundSound);
   }
   return instance.selectedBackgroundSound;
 }
@@ -450,7 +552,7 @@ function playPomodoroCuePreview(instance, requestedStyle) {
 }
 
 function playPomodoroBackgroundPreview(instance, requestedSound) {
-  const sound = normalizeChoice(requestedSound ?? instance.settings.backgroundSound, 'rain', POMODORO_BACKGROUND_CHOICES);
+  const sound = normalizePomodoroBackgroundChoice(requestedSound ?? instance.settings.backgroundSound);
   if (sound === 'none') {
     stopPomodoroPreview(instance);
     return null;
@@ -472,6 +574,7 @@ function pomodoroRemainingSec(instance, now = Date.now()) {
 }
 
 function serializePomodoroState(instance) {
+  const selectedBackgroundSound = normalizePomodoroBackgroundChoice(instance.selectedBackgroundSound, 'none');
   return {
     v: POMODORO_STATE_VERSION,
     phase: instance.phase,
@@ -481,9 +584,7 @@ function serializePomodoroState(instance) {
     completedFocusRounds: instance.completedFocusRounds || 0,
     phaseEndAt: instance.phaseEndAt ?? null,
     backgroundMuted: Boolean(instance.backgroundMuted),
-    selectedBackgroundSound: POMODORO_BACKGROUND_CHOICES.includes(instance.selectedBackgroundSound)
-      ? instance.selectedBackgroundSound
-      : 'none',
+    selectedBackgroundSound,
   };
 }
 
@@ -505,6 +606,7 @@ function hydratePomodoroState(raw, now = Date.now()) {
     // 数据残缺时只保底轮次进度，其余交给 initialize 走干净初始态。
     return { completedFocusRounds };
   }
+  const selectedBackgroundSound = normalizePomodoroBackgroundChoice(raw.selectedBackgroundSound, null);
   return {
     phase: raw.phase,
     running,
@@ -513,9 +615,7 @@ function hydratePomodoroState(raw, now = Date.now()) {
     phaseEndAt: running ? raw.phaseEndAt : null,
     completedFocusRounds,
     backgroundMuted: Boolean(raw.backgroundMuted),
-    selectedBackgroundSound: POMODORO_BACKGROUND_CHOICES.includes(raw.selectedBackgroundSound)
-      ? raw.selectedBackgroundSound
-      : null,
+    selectedBackgroundSound,
   };
 }
 
@@ -650,15 +750,22 @@ function startPomodoroPhase(instance, phase, options = {}) {
 }
 
 function advancePomodoroPhase(instance, options = {}) {
-  const { playSound = true } = options;
+  const {
+    playSound = true,
+    countFocus = true,
+    forceAutoStart = false,
+  } = options;
   const roundsGoal = pomodoroRoundsGoal(instance.settings);
 
   if (instance.phase === 'focus') {
-    instance.completedFocusRounds += 1;
-    const hitLongBreak = instance.completedFocusRounds % roundsGoal === 0;
+    if (countFocus) {
+      instance.completedFocusRounds += 1;
+    }
+    const hitLongBreak = instance.completedFocusRounds > 0
+      && instance.completedFocusRounds % roundsGoal === 0;
     const nextBreak = hitLongBreak ? 'longBreak' : 'shortBreak';
-    // 专注结束：自动则直接开始休息，否则进入待命（圆环闪烁，等短按确认 / 长按跳过休息）。
-    if (isEnabled(instance.settings.autoStartBreaks)) {
+    // 专注结束：自动则直接开始休息，否则进入待命（圆环闪烁，等待短按确认）。
+    if (forceAutoStart || isEnabled(instance.settings.autoStartBreaks)) {
       startPomodoroPhase(instance, nextBreak, { autoStart: true, playSound });
     } else {
       enterAwaitingPhase(instance, nextBreak, { playSound });
@@ -668,7 +775,7 @@ function advancePomodoroPhase(instance, options = {}) {
 
   if (instance.phase === 'shortBreak') {
     // 短休息结束：自动则直接开始专注，否则进入待命（圆环闪烁，等按键进专注）。
-    if (isEnabled(instance.settings.autoStartFocus)) {
+    if (forceAutoStart || isEnabled(instance.settings.autoStartFocus)) {
       startPomodoroPhase(instance, 'focus', { autoStart: true, playSound });
     } else {
       enterAwaitingPhase(instance, 'focus', { playSound });
@@ -817,14 +924,6 @@ function skipPomodoroPhase(instance) {
   advancePomodoroPhase(instance, { playSound: false });
 }
 
-// 工作被打断：把当前番茄重启为一段全新的满时长专注并继续运行。
-// 只作废当前这颗番茄，保留已完成轮次数（startPomodoroPhase 只在 done 阶段清零轮次）。
-function resetPomodoroWork(instance, now = Date.now()) {
-  initializePomodoroInstance(instance);
-  stopPomodoroPreview(instance);
-  startPomodoroPhase(instance, 'focus', { autoStart: false, playSound: false, now });
-}
-
 // 短按开始/暂停；待命态短按确认进入下一阶段。按压时序和长按判定由基座统一处理，
 // action 只表达业务语义，不再维护双击窗口或 lastTapAt。
 function handlePomodoroShortPress(instance, options = {}) {
@@ -854,11 +953,17 @@ function handlePomodoroDoublePress(instance) {
   if (snapshot.phase === 'focus' || snapshot.phase === 'shortBreak' || snapshot.phase === 'longBreak') {
     instance.phase = snapshot.phase;
     instance.awaiting = false;
-    skipPomodoroPhase(instance);
+    stopPomodoroCue(instance);
+    // 双击明确表示放弃当前阶段：专注不计完成轮次，并直接启动下一阶段，不受自动衔接设置限制。
+    advancePomodoroPhase(instance, {
+      playSound: false,
+      countFocus: false,
+      forceAutoStart: true,
+    });
   }
 }
 
-// 当前专注中长按只临时开关本轮背景音；其余阶段仍重置为完整暂停专注。
+// 长按只负责专注背景音；休息、完成和 idle 状态不承载其他业务。
 function togglePomodoroBackgroundMuted(instance) {
   instance.backgroundMuted = !instance.backgroundMuted;
   if (instance.backgroundMuted) {
@@ -871,13 +976,11 @@ function togglePomodoroBackgroundMuted(instance) {
   return instance.backgroundMuted;
 }
 
-function handlePomodoroLongPress(instance, options = {}) {
+function handlePomodoroLongPress(instance) {
   initializePomodoroInstance(instance);
-  if (instance.phase === 'focus' && !instance.awaiting) {
+  if (instance.phase === 'focus') {
     togglePomodoroBackgroundMuted(instance);
-    return;
   }
-  resetPomodoroWork(instance, options.now ?? Date.now());
 }
 
 function renderPomodoroIcon(instance) {
@@ -905,15 +1008,17 @@ function renderPomodoroIcon(instance) {
     : isBreak ? mixHex(phaseColor, background.text, 0.3) : background.text;
   const displayText = instance.phase === 'done' ? '✓' : formatPomodoroTime(remainingSec);
   const displaySize = instance.phase === 'done' ? 88 : 40;
-  const label = t(pomodoroPhaseLabel(instance), instance.settings.uiLanguage);
+  const statusKey = pomodoroPhaseLabel(instance);
+  const label = t(statusKey, instance.settings.uiLanguage);
+  const statusColor = pomodoroStatusColor(instance, theme);
   const roundsGoal = pomodoroRoundsGoal(instance.settings);
   const completedInCycle = instance.phase === 'longBreak' || instance.phase === 'done'
     ? roundsGoal
     : instance.completedFocusRounds % roundsGoal;
-  const dots = Array.from({ length: roundsGoal }, (_, index) => {
+  const roundLights = Array.from({ length: roundsGoal }, (_, index) => {
     const cx = 128 - ((roundsGoal - 1) * 18) / 2 + index * 18;
     const filled = index < completedInCycle;
-    return `<circle cx="${cx}" cy="174" r="5.5" fill="${filled ? accent : background.low}" opacity="${filled ? '1' : '0.45'}"/>`;
+    return `<rect x="${cx - 6}" y="163" width="12" height="4" rx="2" fill="${filled ? accent : background.low}" opacity="${filled ? '1' : '0.45'}"/>`;
   }).join('');
 
   return toDataUrl(`
@@ -939,8 +1044,9 @@ function renderPomodoroIcon(instance) {
         <circle cx="0" cy="2" r="12"/>
         <path d="M0,-14 L1.88,-9.09 L7.13,-8.82 L3.04,-5.51 L4.41,-0.43 L0,-3.3 L-4.41,-0.43 L-3.04,-5.51 L-7.13,-8.82 L-1.88,-9.09 Z"/>
       </g>`}
-      <text x="128" y="${instance.phase === 'done' ? 160 : 126}" text-anchor="middle" fill="${timeFill}" font-size="${displaySize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(displayText)}</text>
-      ${instance.phase === 'done' ? '' : `<text x="128" y="152" text-anchor="middle" fill="${accent}" font-size="19" font-weight="800" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">${escapeXml(label)}</text>${dots}`}
+      ${renderPomodoroBackgroundBadge(instance, theme, background)}
+      <text x="128" y="${instance.phase === 'done' ? 145 : 126}" text-anchor="middle" fill="${timeFill}" font-size="${displaySize}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${escapeXml(displayText)}</text>
+      <text data-pomodoro-status="${statusKey}" x="128" y="${instance.phase === 'done' ? 178 : 152}" text-anchor="middle" fill="${statusColor}" font-size="19" font-weight="800" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">${escapeXml(label)}</text>${instance.phase === 'done' ? '' : roundLights}
       `)}
     </svg>
   `);
@@ -977,7 +1083,7 @@ const config = {
       soundStyle: normalizeChoice(settings.soundStyle, defaults.soundStyle, POMODORO_SOUND_STYLES),
       soundEnabled: normalizeBooleanString(settings.soundEnabled, defaults.soundEnabled),
       cueDuration: normalizeChoice(settings.cueDuration, defaults.cueDuration, POMODORO_CUE_DURATIONS),
-      backgroundSound: normalizeChoice(settings.backgroundSound, defaults.backgroundSound, POMODORO_BACKGROUND_CHOICES),
+      backgroundSound: normalizePomodoroBackgroundChoice(settings.backgroundSound, defaults.backgroundSound),
       backgroundRandom: normalizeBooleanString(settings.backgroundRandom, defaults.backgroundRandom),
       backgroundVolume: normalizeNumberString(settings.backgroundVolume, defaults.backgroundVolume, 0, 100),
       autoStartBreaks: normalizeBooleanString(settings.autoStartBreaks, defaults.autoStartBreaks),
@@ -1075,7 +1181,7 @@ const config = {
       handlePomodoroLongPress,
       handlePomodoroShortPress,
       handlePomodoroDoublePress,
-      resetPomodoroWork,
+      startPomodoroPhase,
       pomodoroCuePlan,
       shouldRepeatPomodoroCue,
       cueDurationMs,
@@ -1092,6 +1198,11 @@ const config = {
       backgroundAudioPath,
       backgroundPlaybackCommand,
       windowsBackgroundPlaybackCommand,
+      normalizePomodoroBackgroundChoice,
+      pomodoroStatusColor,
+      pomodoroBackgroundGlyph,
+      pomodoroBackgroundSoundForDisplay,
+      renderPomodoroBackgroundBadge,
     },
   };
 }

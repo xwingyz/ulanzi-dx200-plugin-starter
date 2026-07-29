@@ -328,6 +328,15 @@ test('pomowave phase colors derive from each framework theme', () => {
       assert.match(palette[phase], /^#[0-9a-f]{6}$/i);
       phaseColors[phase].add(palette[phase]);
     }
+    const statusColors = [
+      pluginTesting.pomodoroStatusColor({ phase: 'idle', running: false, awaiting: false }, theme),
+      pluginTesting.pomodoroStatusColor({ phase: 'focus', running: true, awaiting: false }, theme),
+      pluginTesting.pomodoroStatusColor({ phase: 'shortBreak', running: true, awaiting: false }, theme),
+      pluginTesting.pomodoroStatusColor({ phase: 'longBreak', running: true, awaiting: false }, theme),
+      pluginTesting.pomodoroStatusColor({ phase: 'done', running: true, awaiting: false }, theme),
+      pluginTesting.pomodoroStatusColor({ phase: 'focus', running: false, awaiting: false }, theme),
+    ];
+    assert.equal(new Set(statusColors).size, statusColors.length, `${name} needs six distinct status colors`);
   }
   for (const [phase, colors] of Object.entries(phaseColors)) {
     assert.equal(colors.size, Object.keys(pluginTesting.THEMES).length, `${phase} must change with every theme`);

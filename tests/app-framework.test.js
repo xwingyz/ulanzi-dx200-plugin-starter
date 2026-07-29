@@ -1399,7 +1399,7 @@ test('lex utility: pomowave awaiting short press confirms and starts the phase',
   lexTesting.dropPersistedState(context);
 });
 
-test('lex utility: pomowave long press while awaiting a break resets to a paused full focus', () => {
+test('lex utility: pomowave long press while awaiting a break is a no-op', () => {
   const context = 'com.ulanzi.ulanzistudio.lexutility.pomowave___await___t4';
   const t0 = Date.now();
   const instance = manualStartInstance(context, {
@@ -1412,10 +1412,10 @@ test('lex utility: pomowave long press while awaiting a break resets to a paused
   });
 
   lexTesting.handlePomodoroLongPress(instance, { now: t0 + 600 });
-  assert.equal(instance.phase, 'focus');
+  assert.equal(instance.phase, 'shortBreak');
   assert.equal(instance.running, false);
-  assert.equal(instance.awaiting, false);
-  assert.equal(instance.completedFocusRounds, 2, 'rounds preserved through the skip');
+  assert.equal(instance.awaiting, true);
+  assert.equal(instance.completedFocusRounds, 2);
 
   lexTesting.clearInstanceTimeout(instance, 'pomodoro');
   lexTesting.dropPersistedState(context);

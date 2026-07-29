@@ -407,14 +407,14 @@ test('pomowave inspector submits bounded cue and background settings', () => {
   const harness = createHarness('pomowave.js');
   harness.callbacks.connected[0]();
   harness.elements.get('cueDuration').value = '600';
-  harness.elements.get('backgroundSound').value = 'ocean';
+  harness.elements.get('backgroundSound').value = 'wave';
   harness.elements.get('backgroundRandom').checked = true;
   harness.elements.get('backgroundVolume').value = '67';
 
   harness.form.dispatchEvent({ type: 'submit' });
 
   assert.equal(harness.sends.at(-1).settings.cueDuration, '600');
-  assert.equal(harness.sends.at(-1).settings.backgroundSound, 'ocean');
+  assert.equal(harness.sends.at(-1).settings.backgroundSound, 'wave');
   assert.equal(harness.sends.at(-1).settings.backgroundRandom, 'true');
   assert.equal(harness.sends.at(-1).settings.backgroundVolume, '67');
   assert.equal('repeatManualCue' in harness.sends.at(-1).settings, false);

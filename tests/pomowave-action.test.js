@@ -17,7 +17,14 @@ function createRuntime({ platform = 'darwin', player, persistedState = {} } = {}
     frameFor: () => ({}),
     frameHighlight: () => '',
     instances: new Map(),
-    mixHex: (a) => a,
+    mixHex: (from, to, ratio) => {
+      const a = Number.parseInt(from.slice(1), 16);
+      const b = Number.parseInt(to.slice(1), 16);
+      const channel = (shift) => Math.round(
+        ((a >> shift) & 0xff) * (1 - ratio) + ((b >> shift) & 0xff) * ratio,
+      );
+      return `#${[16, 8, 0].map((shift) => channel(shift).toString(16).padStart(2, '0')).join('')}`;
+    },
     normalizeBooleanString: (value, fallback) => String(value) === 'true' || String(value) === 'false' ? String(value) : fallback,
     normalizeChoice: (value, fallback, choices) => choices.includes(value) ? value : fallback,
     normalizeNumberString: (value, fallback, min, max) => {
@@ -27,13 +34,21 @@ function createRuntime({ platform = 'darwin', player, persistedState = {} } = {}
     platform: () => platform,
     readPersistedState: () => persistedState,
     renderInstance: () => {},
-    renderThemeBackdrop: () => ({ outer: '', low: '#222', text: '#fff' }),
+    renderThemeBackdrop: () => ({ outer: '', low: '#222', text: '#fff', muted: '#888' }),
     setInstanceTimeout(instance, slot, callback, ms) {
       instance.timers ||= new Map();
       instance.timers.set(slot, { callback, ms });
     },
     t: (key) => key,
-    themeFor: () => ({ accent: '#f00', text: '#fff', muted: '#888' }),
+    themeFor: () => ({
+      accent: '#f00',
+      panel: '#111',
+      text: '#fff',
+      muted: '#888',
+      low: '#222',
+      ok: '#0f0',
+      warn: '#fbbf24',
+    }),
     toDataUrl: (svg) => `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
     writePersistedState: () => true,
   };
@@ -49,11 +64,15 @@ function createInstance(config, overrides = {}) {
   };
 }
 
+function decodeSvg(dataUrl) {
+  return Buffer.from(dataUrl.split(',')[1], 'base64').toString('utf8');
+}
+
 test('pomowave normalizes bounded cues and background settings without retaining legacy repeatManualCue', () => {
   const { config } = createPomowaveAction(createRuntime());
   const settings = config.normalizeSettings({
     cueDuration: '600',
-    backgroundSound: 'ocean',
+    backgroundSound: 'wave',
     backgroundRandom: 'true',
     backgroundVolume: '84',
     repeatManualCue: 'true',
@@ -61,16 +80,19 @@ test('pomowave normalizes bounded cues and background settings without retaining
 
   assert.equal(config.defaults.cueDuration, '180');
   assert.equal(settings.cueDuration, '600');
-  assert.equal(settings.backgroundSound, 'ocean');
+  assert.equal(settings.backgroundSound, 'wave');
   assert.equal(settings.backgroundRandom, 'true');
   assert.equal(settings.backgroundVolume, '84');
   assert.equal('repeatManualCue' in config.defaults, false);
   assert.equal('repeatManualCue' in settings, false);
   assert.equal(config.normalizeSettings({ cueDuration: 'nope', backgroundSound: 'bogus', backgroundVolume: '101' }, config.defaults).cueDuration, '180');
   assert.equal(config.normalizeSettings({ cueDuration: 'nope', backgroundSound: 'bogus', backgroundVolume: '101' }, config.defaults).backgroundSound, 'rain');
+  assert.equal(config.normalizeSettings({ backgroundSound: 'fireplace' }, config.defaults).backgroundSound, 'stove');
+  assert.equal(config.normalizeSettings({ backgroundSound: 'ocean' }, config.defaults).backgroundSound, 'wave');
+  assert.equal(config.normalizeSettings({ backgroundSound: 'brownNoise' }, config.defaults).backgroundSound, 'deepSea');
 });
 
-test('pomowave long press resets to a paused full focus while preserving completed rounds', () => {
+test('pomowave long press is a no-op outside focus', () => {
   const { config, testing } = createPomowaveAction(createRuntime());
   const instance = createInstance(config, {
     phase: 'shortBreak',
@@ -82,16 +104,17 @@ test('pomowave long press resets to a paused full focus while preserving complet
   });
 
   testing.handlePomodoroLongPress(instance);
-  assert.equal(instance.phase, 'focus');
-  assert.equal(instance.running, false);
-  assert.equal(instance.remainingSec, 1500);
+  assert.equal(instance.phase, 'shortBreak');
+  assert.equal(instance.running, true);
+  assert.equal(instance.remainingSec, 30);
   assert.equal(instance.completedFocusRounds, 2);
 });
 
-test('pomowave double press skips the phase visible before the first short press', () => {
+test('pomowave double press abandons the visible phase, starts the next one, and does not complete focus', () => {
   const { config, testing } = createPomowaveAction(createRuntime());
   const instance = createInstance(config, {
     active: true,
+    settings: { ...config.defaults, autoStartBreaks: 'false' },
     phase: 'focus',
     running: true,
     remainingSec: 900,
@@ -103,7 +126,9 @@ test('pomowave double press skips the phase visible before the first short press
   assert.equal(instance.running, false, 'the first short press pauses immediately');
   testing.handlePomodoroDoublePress(instance);
   assert.equal(instance.phase, 'shortBreak');
-  assert.equal(instance.completedFocusRounds, 1);
+  assert.equal(instance.running, true);
+  assert.equal(instance.awaiting, false);
+  assert.equal(instance.completedFocusRounds, 0);
 
   const idle = createInstance(config);
   testing.handlePomodoroShortPress(idle);
@@ -131,7 +156,7 @@ test('pomowave persists the selected background and only plays it for a running 
   testing.startPomodoroBackground(instance);
   assert.equal(instance.selectedBackgroundSound, 'rain');
   assert.equal(starts.length, 1);
-  assert.match(starts[0].args.at(-1), /assets\/audio\/pomowave\/rain\.mp3$/);
+  assert.match(starts[0].args.at(-1), /assets\/audio\/pomowave\/rain\.m4a$/);
   assert.equal(testing.serializePomodoroState(instance).v, 2);
   assert.equal(testing.serializePomodoroState(instance).selectedBackgroundSound, 'rain');
   assert.equal(testing.serializePomodoroState(instance).backgroundMuted, false);
@@ -166,7 +191,7 @@ test('pomowave long press toggles the current focus background without changing 
     remainingSec: 900,
     totalSec: 1500,
     phaseEndAt,
-    selectedBackgroundSound: 'ocean',
+    selectedBackgroundSound: 'wave',
   });
 
   testing.startPomodoroBackground(instance);
@@ -187,7 +212,7 @@ test('pomowave long press toggles the current focus background without changing 
   testing.handlePomodoroLongPress(instance);
   assert.equal(instance.backgroundMuted, false);
   assert.equal(starts.length, 2);
-  assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+  assert.match(starts.at(-1).args.at(-1), /wave\.m4a$/);
 });
 
 test('pomowave paused focus long press controls the next resume and a new focus clears temporary mute', () => {
@@ -216,7 +241,7 @@ test('pomowave paused focus long press controls the next resume and a new focus 
   assert.equal(instance.running, true);
   assert.equal(starts.length, 0, 'muted focus must stay silent when resumed');
 
-  testing.resetPomodoroWork(instance);
+  testing.startPomodoroPhase(instance, 'focus', { autoStart: false, playSound: false });
   assert.equal(instance.phase, 'focus');
   assert.equal(instance.running, false);
   assert.equal(instance.backgroundMuted, false, 'a new focus clears the temporary mute');
@@ -278,14 +303,14 @@ test('pomowave background random selection is stable through pause and serializa
     });
     testing.startPomodoroBackground(instance);
     const selected = instance.selectedBackgroundSound;
-    assert.equal(selected, 'ocean');
+    assert.equal(selected, 'stove');
     assert.deepEqual(testing.hydratePomodoroState(testing.serializePomodoroState(instance)).selectedBackgroundSound, selected);
     testing.pausePomodoroBackground(instance);
     assert.deepEqual(signals, ['SIGSTOP']);
     testing.startPomodoroBackground(instance);
     assert.deepEqual(signals, ['SIGSTOP', 'SIGCONT']);
     assert.equal(instance.selectedBackgroundSound, selected);
-    assert.equal(started[0].args.at(-1).endsWith(`${selected}.mp3`), true);
+    assert.equal(started[0].args.at(-1).endsWith(`${selected}.m4a`), true);
     assert.equal(started[0].args[1], '0.35');
 
     const failed = createPomowaveAction(createRuntime({ player: () => { throw new Error('missing player'); } }));
@@ -317,7 +342,7 @@ test('pomowave background preview is isolated from the timer and has bounded cle
   assert.equal(instance.timers.has('pomodoroPreview'), false);
 });
 
-test('pomowave non-focus long press clears all audio while focus long press only toggles background', () => {
+test('pomowave long press only toggles focus background and leaves non-focus state and audio untouched', () => {
   const stopped = [];
   const { config, testing } = createPomowaveAction(createRuntime({
     player: (command) => ({
@@ -341,7 +366,7 @@ test('pomowave non-focus long press clears all audio while focus long press only
   assert.equal(instance.previewPlaying, true);
   assert.equal(instance.timers.get('pomodoroPreview').ms, 15_000);
 
-  config.onParamFromPlugin(instance, { previewBackgroundSound: 'ocean' });
+  config.onParamFromPlugin(instance, { previewBackgroundSound: 'wave' });
   assert.equal(cuePreview.killed, true, '新试听必须终止上一个试听句柄');
   const backgroundPreview = instance.previewProcess;
   assert.ok(backgroundPreview);
@@ -358,11 +383,13 @@ test('pomowave non-focus long press clears all audio while focus long press only
 
   instance.phase = 'shortBreak';
   testing.handlePomodoroLongPress(instance);
-  assert.equal(cue.killed, true);
-  assert.equal(backgroundPreview.killed, true);
-  assert.equal(instance.previewProcess, null);
-  assert.equal(instance.timers.has('pomodoroPreview'), false);
-  assert.ok(stopped.length >= 3);
+  assert.equal(instance.phase, 'shortBreak');
+  assert.equal(instance.running, true);
+  assert.equal(cue.killed, false);
+  assert.equal(backgroundPreview.killed, false);
+  assert.equal(instance.previewProcess, backgroundPreview);
+  assert.equal(instance.timers.has('pomodoroPreview'), true);
+  assert.equal(stopped.length, 2, 'only the replaced preview and muted focus background should stop');
 });
 
 test('pomowave clears awaiting cues when confirming, skipping, resetting, or disposing', () => {
@@ -410,12 +437,15 @@ test('pomowave clears awaiting cues when confirming, skipping, resetting, or dis
 test('pomowave double press handles paused, awaiting, done, and break snapshots without count drift', () => {
   const { config, testing } = createPomowaveAction(createRuntime());
   const paused = createInstance(config, {
+    settings: { ...config.defaults, autoStartBreaks: 'false' },
     phase: 'focus', running: false, totalSec: 1500, remainingSec: 800, completedFocusRounds: 2,
   });
   testing.handlePomodoroShortPress(paused);
   testing.handlePomodoroDoublePress(paused);
   assert.equal(paused.phase, 'shortBreak');
-  assert.equal(paused.completedFocusRounds, 3);
+  assert.equal(paused.running, true);
+  assert.equal(paused.awaiting, false);
+  assert.equal(paused.completedFocusRounds, 2);
 
   const awaiting = createInstance(config, {
     phase: 'shortBreak', awaiting: true, running: false, totalSec: 300, remainingSec: 300, completedFocusRounds: 3,
@@ -423,6 +453,8 @@ test('pomowave double press handles paused, awaiting, done, and break snapshots 
   testing.handlePomodoroShortPress(awaiting);
   testing.handlePomodoroDoublePress(awaiting);
   assert.equal(awaiting.phase, 'focus');
+  assert.equal(awaiting.running, true);
+  assert.equal(awaiting.awaiting, false);
   assert.equal(awaiting.completedFocusRounds, 3);
 
   const done = createInstance(config, {
@@ -441,6 +473,75 @@ test('pomowave double press handles paused, awaiting, done, and break snapshots 
   testing.handlePomodoroDoublePress(breakPhase);
   assert.equal(breakPhase.phase, 'done');
   assert.equal(breakPhase.completedFocusRounds, 0);
+});
+
+test('pomowave renders distinct status colors and a per-sound focus badge with mute slash', () => {
+  const { config, testing } = createPomowaveAction(createRuntime());
+  const instance = createInstance(config, {
+    phase: 'focus',
+    running: true,
+    totalSec: 1500,
+    remainingSec: 900,
+    phaseEndAt: Date.now() + 900_000,
+    selectedBackgroundSound: 'rain',
+  });
+
+  const runningSvg = decodeSvg(config.render(instance));
+  assert.match(runningSvg, /data-pomodoro-status="FOCUS"[^>]+fill="#f00"/);
+  assert.match(runningSvg, /data-background-sound="rain"/);
+  assert.match(runningSvg, /data-background-muted="false"/);
+  assert.doesNotMatch(runningSvg, /data-background-muted-slash/);
+  assert.match(
+    runningSvg,
+    /data-background-sound="rain"[^>]+transform="translate\(118 174\)"/,
+    'background badge should be compact and centered below the round lights',
+  );
+  const roundLights = runningSvg.match(/<rect x="(?:95|113|131|149)" y="163" width="12" height="4" rx="2"[^>]+>/g) || [];
+  assert.equal(roundLights.length, 4);
+  roundLights.forEach((light) => {
+    assert.match(light, /y="163" width="12" height="4" rx="2"/);
+  });
+  assert.doesNotMatch(runningSvg, /cy="174" r="5\.5"/, 'legacy circular round lights should be removed');
+
+  instance.running = false;
+  instance.phaseEndAt = null;
+  const pausedSvg = decodeSvg(config.render(instance));
+  assert.match(pausedSvg, /data-pomodoro-status="PAUSED"[^>]+fill="#fbbf24"/);
+  assert.match(pausedSvg, /data-background-muted="false"/, 'pause is not the same as a user mute');
+
+  instance.backgroundMuted = true;
+  const mutedSvg = decodeSvg(config.render(instance));
+  assert.match(mutedSvg, /data-background-muted="true"/);
+  assert.match(mutedSvg, /data-background-muted-slash/);
+
+  const states = [
+    { key: 'READY', phase: 'idle', running: false },
+    { key: 'FOCUS', phase: 'focus', running: true },
+    { key: 'SHORT', phase: 'shortBreak', running: true },
+    { key: 'LONG', phase: 'longBreak', running: true },
+    { key: 'DONE', phase: 'done', running: true },
+    { key: 'PAUSED', phase: 'focus', running: false },
+  ];
+  const statusColors = states.map(({ key, phase, running }) => {
+    const svg = decodeSvg(config.render(createInstance(config, {
+      phase,
+      running,
+      totalSec: phase === 'done' ? 4 : 300,
+      remainingSec: phase === 'done' ? 4 : 200,
+      phaseEndAt: running ? Date.now() + 200_000 : null,
+    })));
+    const match = svg.match(new RegExp(`data-pomodoro-status="${key}"[^>]+fill="([^"]+)"`));
+    assert.ok(match, `${key} needs a visible colored status label`);
+    return match[1];
+  });
+  assert.equal(new Set(statusColors).size, states.length, 'every displayed status needs a distinct color');
+
+  const sounds = [
+    'rain', 'clock', 'wave', 'forest', 'cafe', 'morning', 'summer', 'storm', 'stove',
+    'stream', 'deepSea', 'desert', 'chirp', 'boiling', 'musicBox', 'woodenFish', 'streetTraffic',
+  ];
+  const glyphs = sounds.map((sound) => testing.pomodoroBackgroundGlyph(sound));
+  assert.equal(new Set(glyphs).size, sounds.length, 'every background sound needs a distinct vector glyph');
 });
 
 test('pomowave random overrides none, redraws only for a new focus, and restarts immediately for live background changes', () => {
@@ -463,36 +564,36 @@ test('pomowave random overrides none, redraws only for a new focus, and restarts
     });
     testing.startPomodoroBackground(instance);
     assert.equal(instance.selectedBackgroundSound, 'rain');
-    assert.match(starts[0].args.at(-1), /rain\.mp3$/);
+    assert.match(starts[0].args.at(-1), /rain\.m4a$/);
 
     testing.pausePomodoroBackground(instance);
     testing.startPomodoroBackground(instance);
     assert.equal(instance.selectedBackgroundSound, 'rain', '暂停恢复不能重抽');
 
-    testing.resetPomodoroWork(instance);
-    assert.equal(instance.selectedBackgroundSound, 'brownNoise', '新 focus 轮次必须重抽，即使固定项是 none');
+    testing.startPomodoroPhase(instance, 'focus', { autoStart: false, playSound: false });
+    assert.equal(instance.selectedBackgroundSound, 'streetTraffic', '新 focus 轮次必须重抽，即使固定项是 none');
 
     instance.running = true;
     instance.phaseEndAt = Date.now() + 1_500_000;
     testing.startPomodoroBackground(instance);
     const previous = { ...instance.settings };
-    instance.settings = { ...instance.settings, backgroundRandom: 'false', backgroundSound: 'ocean', backgroundVolume: '77' };
+    instance.settings = { ...instance.settings, backgroundRandom: 'false', backgroundSound: 'wave', backgroundVolume: '77' };
     config.onSettingsChanged(instance, previous);
     assert.equal(stopped.length >= 1, true);
-    assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+    assert.match(starts.at(-1).args.at(-1), /wave\.m4a$/);
     assert.equal(starts.at(-1).args[1], '0.77');
 
     const beforeVolume = { ...instance.settings };
     instance.settings = { ...instance.settings, backgroundVolume: '66' };
     config.onSettingsChanged(instance, beforeVolume);
-    assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+    assert.match(starts.at(-1).args.at(-1), /wave\.m4a$/);
     assert.equal(starts.at(-1).args[1], '0.66');
 
     const beforeRandom = { ...instance.settings };
     instance.settings = { ...instance.settings, backgroundSound: 'none', backgroundRandom: 'true' };
     config.onSettingsChanged(instance, beforeRandom);
-    assert.equal(instance.selectedBackgroundSound, 'ocean');
-    assert.match(starts.at(-1).args.at(-1), /ocean\.mp3$/);
+    assert.equal(instance.selectedBackgroundSound, 'stove');
+    assert.match(starts.at(-1).args.at(-1), /stove\.m4a$/);
 
     testing.handlePomodoroLongPress(instance);
     const startsWhileMuted = starts.length;
@@ -540,7 +641,7 @@ test('pomowave safely drops v1 state and audio failures or phase changes cannot 
 
 test('pomowave encodes Windows background playback without exposing paths in argv', () => {
   const { testing } = createPomowaveAction(createRuntime({ platform: 'win32' }));
-  const audioPath = "C:\\Users\\A B\\O'Neill\\rain.mp3";
+  const audioPath = "C:\\Users\\A B\\O'Neill\\rain.m4a";
   const plan = testing.windowsBackgroundPlaybackCommand(audioPath, 42.6);
   assert.equal(plan.command, 'powershell');
   assert.deepEqual(plan.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-EncodedCommand']);
@@ -640,30 +741,30 @@ test('pomowave updates paused focus background settings without restart until re
     testing.startPomodoroBackground(instance);
     testing.togglePomodoro(instance);
     const fixedBefore = { ...instance.settings };
-    instance.settings = { ...instance.settings, backgroundSound: 'ocean' };
+    instance.settings = { ...instance.settings, backgroundSound: 'wave' };
     config.onSettingsChanged(instance, fixedBefore);
     assert.deepEqual(signals, ['SIGSTOP', 'SIGTERM']);
-    assert.equal(instance.selectedBackgroundSound, 'ocean');
+    assert.equal(instance.selectedBackgroundSound, 'wave');
     assert.equal(starts.length, 1, '暂停期改固定音源不得立即重启');
 
     testing.togglePomodoro(instance);
-    assert.match(starts.at(-1).at(-1), /ocean\.mp3$/);
+    assert.match(starts.at(-1).at(-1), /wave\.m4a$/);
     testing.togglePomodoro(instance);
     const randomBefore = { ...instance.settings };
     instance.settings = { ...instance.settings, backgroundSound: 'none', backgroundRandom: 'true' };
     config.onSettingsChanged(instance, randomBefore);
-    assert.equal(instance.selectedBackgroundSound, 'forest');
+    assert.equal(instance.selectedBackgroundSound, 'morning');
     assert.equal(starts.length, 2, '暂停期改随机开关不得立即重启');
 
     testing.togglePomodoro(instance);
-    assert.match(starts.at(-1).at(-1), /forest\.mp3$/);
+    assert.match(starts.at(-1).at(-1), /morning\.m4a$/);
     testing.togglePomodoro(instance);
     const volumeBefore = { ...instance.settings };
     instance.settings = { ...instance.settings, backgroundVolume: '66' };
     config.onSettingsChanged(instance, volumeBefore);
     assert.equal(starts.length, 3, '暂停期改音量不得立即重启');
     testing.togglePomodoro(instance);
-    assert.match(starts.at(-1).at(-1), /forest\.mp3$/);
+    assert.match(starts.at(-1).at(-1), /morning\.m4a$/);
     assert.equal(starts.at(-1)[1], '0.66');
   } finally {
     Math.random = originalRandom;
@@ -708,38 +809,41 @@ test('pomowave dispose stops isolated cue, background and preview channels', () 
   assert.deepEqual(stopped.sort(), ['background', 'cue', 'preview']);
 });
 
-test('pomowave distributes every declared CC0 preview background with honest credits under the size cap', () => {
+test('pomowave packages every locally extracted TickTick background with exact identity and provenance', () => {
   const audioDir = path.resolve(import.meta.dirname, '../plugins/com.ulanzi.lexutility.ulanziPlugin/assets/audio/pomowave');
-  const expected = ['rain', 'fireplace', 'forest', 'ocean', 'cafe', 'brownNoise'];
-  const credits = fs.readFileSync(path.join(audioDir, 'CREDITS.md'), 'utf8');
-  const publicPreviewIds = ['595717_2530992', '852107_18387771', '723913_2008500', '852826_17997500', '540299_10965608', '737409_16041797'];
-  const originalUploadNames = [
-    '595717__lynks__soft-rain-loop.ogg',
-    '852107__myloop__fireplace.wav',
-    '723913__magnesus__forest-birds-ambient-seamless-loop.wav',
-    '852826__kkenny101__gentle-ocean-waves-loop.wav',
-    '540299__aidansamuel__cofee-shop-ambience.wav',
-    '737409__tracyradio__brown-noise.mp3',
+  const expected = [
+    'rain', 'clock', 'wave', 'forest', 'cafe', 'morning', 'summer', 'storm', 'stove',
+    'stream', 'deepSea', 'desert', 'chirp', 'boiling', 'musicBox', 'woodenFish', 'streetTraffic',
   ];
+  const credits = fs.readFileSync(path.join(audioDir, 'CREDITS.md'), 'utf8');
   const previewSha256 = {
-    rain: 'c42458d0383b82d5b03e09650ae3db75368d14f51702acf28c8125a23eadfa73',
-    fireplace: 'ac83ce6f89fff58e547c0e49d29eb77fab8556f0fee3a558c8ce87d464969d96',
-    forest: '9aebcb869cf37040c4588fc05d72bed197951aaa1beacb6874b379c69e379dbb',
-    ocean: '68cd94cdf360945f187e59ce583e45f7cd24dbf70e1cefac30b02e23a36035ed',
-    cafe: '37720997fe0c7dec610c8ee4d66ea0434e5026bf7f955767e6e1c830afd892d8',
-    brownNoise: 'ede75031c9944f017bce310ff040772d411cf4b689c1f50e1f05efa1d9ddc098',
+    rain: 'd0ea8c934c0ea4ed8ef7de92a1c70c9cc657c1841b964d303228969150fdd684',
+    clock: '56fc3bbbd84e83ea25cc4b9fa7d722176c1b875d3bffbe677404c39eb5936ad2',
+    wave: 'bb84a08f319b2b9c951169079229f91b8038bbddd9e89e11efd7316da4beed80',
+    forest: '7651ed119e0be8e1a94cfbbd9f76cd57b25b894be9caccac55b377288b779899',
+    cafe: 'c3a226b634f798b7750180c9b58f79c245c1a3ece6ffe032fe0ea86407739bea',
+    morning: '71390416b3591a848a328c144fba77d9e2b7739084458e82aa53baa10d9df68d',
+    summer: '8d6aa8531d8a26e9d0574a29c4bd2de5fef7547419a55f3237f064c1a900c4db',
+    storm: '31e674a3b6fc215c9f55a9a149e40c9e2bfc07d72e4dfc2b523f39259791328c',
+    stove: '80bd39400f8bb0b8c05d326c78dc84f85f2b5cc6ebbdc0a4c11d1928c237d765',
+    stream: '9381fa1819534981d4166865a0450257ecf2fba84146972f2be66f8d5a7ba54c',
+    deepSea: 'f791469a130ad0cdfa708de5969c89b36fdbd3ec93a3f78411480cbcf2d3003b',
+    desert: '0bb717880d5933497cc175d54140badcdceba9783674d80d046ff13b9d3df492',
+    chirp: '25a838b7fe86acb3a21bb5db51cab7b4abe9db03f308c94c7acc002fea9d959d',
+    boiling: 'ffabbab2063701e027ec7087660356218ed1dd5bddf2728d064de31ee5725952',
+    musicBox: 'b7e2def0392e0f52300d8902826135c89a5f7f953a32444da0dd4c34c2a7db02',
+    woodenFish: '6fb17df6f2e89ce15c781b4a56d997027c500e801400a68ce555c650164d7e98',
+    streetTraffic: 'a578ac65a18eb4950a2f2675271dd07ed59a847aef85e4b3ec01707cd1520923',
   };
-  const files = expected.map((sound) => path.join(audioDir, `${sound}.mp3`));
+  const files = expected.map((sound) => path.join(audioDir, `${sound}.m4a`));
 
-  assert.ok(files.every((file) => fs.existsSync(file)), 'every selectable background has a packaged MP3');
-  assert.ok(files.reduce((total, file) => total + fs.statSync(file).size, 0) <= 15 * 1024 * 1024);
-  assert.match(credits, /public Freesound HQ \*\*preview\*\* MP3s/);
-  assert.match(credits, /by _lynks/);
-  for (const [index, sound] of expected.entries()) {
-    assert.ok(credits.includes(`\`${sound}.mp3\``));
-    assert.match(credits, new RegExp(publicPreviewIds[index]));
-    assert.match(credits, new RegExp(originalUploadNames[index].replaceAll('.', '\\.')));
-    assert.match(credits, /2026-07-28/);
-    assert.equal(createHash('sha256').update(fs.readFileSync(path.join(audioDir, `${sound}.mp3`))).digest('hex'), previewSha256[sound]);
+  assert.ok(files.every((file) => fs.existsSync(file)), 'every selectable background has a packaged M4A');
+  assert.ok(files.reduce((total, file) => total + fs.statSync(file).size, 0) <= 30 * 1024 * 1024);
+  assert.match(credits, /TickTick 8\.0\.80/);
+  assert.match(credits, /licensing status is not established/i);
+  assert.match(credits, /Do not redistribute/i);
+  for (const sound of expected) {
+    assert.ok(credits.includes(`\`${sound}.m4a\``));
+    assert.equal(createHash('sha256').update(fs.readFileSync(path.join(audioDir, `${sound}.m4a`))).digest('hex'), previewSha256[sound]);
   }
 });
