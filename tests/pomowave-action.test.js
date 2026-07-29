@@ -92,6 +92,38 @@ test('pomowave normalizes bounded cues and background settings without retaining
   assert.equal(config.normalizeSettings({ backgroundSound: 'brownNoise' }, config.defaults).backgroundSound, 'deepSea');
 });
 
+test('pomowave applies characteristic-aware playback gain without rewriting source audio', () => {
+  const { testing } = createPomowaveAction(createRuntime());
+  const expectedGains = {
+    rain: 9,
+    clock: 6,
+    wave: 7,
+    forest: 10,
+    cafe: 8,
+    morning: 6,
+    summer: 2,
+    storm: 4,
+    stove: 0.5,
+    stream: 8,
+    deepSea: 2,
+    desert: 8,
+    chirp: 4,
+    boiling: 8,
+    musicBox: 5,
+    woodenFish: 4,
+    streetTraffic: 9,
+  };
+  for (const [sound, gainDb] of Object.entries(expectedGains)) {
+    assert.equal(testing.pomodoroBackgroundGainDb(sound), gainDb);
+    assert.ok(testing.amplifiedPomodoroBackgroundVolume(sound, 35) > 35);
+  }
+  assert.ok(
+    testing.pomodoroBackgroundGainDb('forest') > testing.pomodoroBackgroundGainDb('stove'),
+    'quiet continuous ambience should receive more gain than sharp near-peak transients',
+  );
+  assert.equal(testing.amplifiedPomodoroBackgroundVolume('rain', 0), 0);
+});
+
 test('pomowave long press is a no-op outside focus', () => {
   const { config, testing } = createPomowaveAction(createRuntime());
   const instance = createInstance(config, {
@@ -311,7 +343,10 @@ test('pomowave background random selection is stable through pause and serializa
     assert.deepEqual(signals, ['SIGSTOP', 'SIGCONT']);
     assert.equal(instance.selectedBackgroundSound, selected);
     assert.equal(started[0].args.at(-1).endsWith(`${selected}.m4a`), true);
-    assert.equal(started[0].args[1], '0.35');
+    assert.equal(
+      started[0].args[1],
+      String(testing.amplifiedPomodoroBackgroundVolume(selected, 35) / 100),
+    );
 
     const failed = createPomowaveAction(createRuntime({ player: () => { throw new Error('missing player'); } }));
     const failedInstance = createInstance(failed.config, {
@@ -494,8 +529,10 @@ test('pomowave renders distinct status colors and a per-sound focus badge with m
   assert.match(
     runningSvg,
     /data-background-sound="rain"[^>]+transform="translate\(118 174\)"/,
-    'background badge should be compact and centered below the round lights',
+    'background icon should stay centered below the round lights',
   );
+  assert.match(runningSvg, /data-background-sound="rain"[^]*?transform="scale\(0\.8333\)"/);
+  assert.doesNotMatch(runningSvg, /cx="10" cy="10" r="9\.5"/, 'background icon should not have an outer circle');
   const roundLights = runningSvg.match(/<rect x="(?:95|113|131|149)" y="163" width="12" height="4" rx="2"[^>]+>/g) || [];
   assert.equal(roundLights.length, 4);
   roundLights.forEach((light) => {
@@ -512,7 +549,7 @@ test('pomowave renders distinct status colors and a per-sound focus badge with m
   instance.backgroundMuted = true;
   const mutedSvg = decodeSvg(config.render(instance));
   assert.match(mutedSvg, /data-background-muted="true"/);
-  assert.match(mutedSvg, /data-background-muted-slash/);
+  assert.match(mutedSvg, /data-background-muted-slash d="M2 18 18 2"/);
 
   const states = [
     { key: 'READY', phase: 'idle', running: false },
@@ -581,13 +618,19 @@ test('pomowave random overrides none, redraws only for a new focus, and restarts
     config.onSettingsChanged(instance, previous);
     assert.equal(stopped.length >= 1, true);
     assert.match(starts.at(-1).args.at(-1), /wave\.m4a$/);
-    assert.equal(starts.at(-1).args[1], '0.77');
+    assert.equal(
+      starts.at(-1).args[1],
+      String(testing.amplifiedPomodoroBackgroundVolume('wave', 77) / 100),
+    );
 
     const beforeVolume = { ...instance.settings };
     instance.settings = { ...instance.settings, backgroundVolume: '66' };
     config.onSettingsChanged(instance, beforeVolume);
     assert.match(starts.at(-1).args.at(-1), /wave\.m4a$/);
-    assert.equal(starts.at(-1).args[1], '0.66');
+    assert.equal(
+      starts.at(-1).args[1],
+      String(testing.amplifiedPomodoroBackgroundVolume('wave', 66) / 100),
+    );
 
     const beforeRandom = { ...instance.settings };
     instance.settings = { ...instance.settings, backgroundSound: 'none', backgroundRandom: 'true' };
@@ -658,6 +701,12 @@ test('pomowave encodes Windows background playback without exposing paths in arg
   assert.equal(packagedPlan.command, 'powershell');
   assert.deepEqual(packagedPlan.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-EncodedCommand']);
   assert.equal(packagedPlan.args.length, 4);
+  const packagedScript = Buffer.from(packagedPlan.args[3], 'base64').toString('utf16le');
+  assert.match(packagedScript, /\$player\.settings\.volume = 99;/);
+
+  const linux = createPomowaveAction(createRuntime({ platform: 'linux' })).testing;
+  const ffplayPlan = linux.backgroundPlaybackCommand('forest', 35);
+  assert.deepEqual(ffplayPlan.args.slice(-3), ['-af', 'volume=10dB', ffplayPlan.args.at(-1)]);
 });
 
 test('pomowave terminates a SIGSTOP background process on stop and dispose', () => {
@@ -765,7 +814,10 @@ test('pomowave updates paused focus background settings without restart until re
     assert.equal(starts.length, 3, '暂停期改音量不得立即重启');
     testing.togglePomodoro(instance);
     assert.match(starts.at(-1).at(-1), /morning\.m4a$/);
-    assert.equal(starts.at(-1)[1], '0.66');
+    assert.equal(
+      starts.at(-1)[1],
+      String(testing.amplifiedPomodoroBackgroundVolume('morning', 66) / 100),
+    );
   } finally {
     Math.random = originalRandom;
   }

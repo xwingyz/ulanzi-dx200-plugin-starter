@@ -56,6 +56,27 @@ const POMODORO_BACKGROUND_SOUNDS = [
   'streetTraffic',
 ];
 const POMODORO_BACKGROUND_CHOICES = ['none', ...POMODORO_BACKGROUND_SOUNDS];
+// TickTick 原始素材的平均电平相差约 26 dB。按声音特征做播放时增益，不改写音频：
+// 持续、偏轻的环境声提升较多；尖锐、重复或本身较响的声音保守提升，避免疲劳与削波。
+const POMODORO_BACKGROUND_GAIN_DB = Object.freeze({
+  rain: 9,
+  clock: 6,
+  wave: 7,
+  forest: 10,
+  cafe: 8,
+  morning: 6,
+  summer: 2,
+  storm: 4,
+  stove: 0.5,
+  stream: 8,
+  deepSea: 2,
+  desert: 8,
+  chirp: 4,
+  boiling: 8,
+  musicBox: 5,
+  woodenFish: 4,
+  streetTraffic: 9,
+});
 const POMODORO_LEGACY_BACKGROUND_MAP = Object.freeze({
   fireplace: 'stove',
   ocean: 'wave',
@@ -195,11 +216,10 @@ function renderPomodoroBackgroundBadge(instance, theme, background) {
   const iconColor = muted ? background.muted : theme.text;
   return `
     <g data-background-sound="${sound}" data-background-muted="${muted}" transform="translate(118 174)">
-      <circle cx="10" cy="10" r="9.5" fill="${theme.panel}" stroke="${iconColor}" stroke-width="1.2" opacity="${muted ? '0.42' : '0.82'}"/>
-      <g transform="translate(2 2) scale(0.6667)" fill="none" stroke="${iconColor}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="${muted ? '0.34' : '0.96'}">
+      <g transform="scale(0.8333)" fill="none" stroke="${iconColor}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="${muted ? '0.34' : '0.96'}">
         ${pomodoroBackgroundGlyph(sound)}
       </g>
-      ${muted ? `<path data-background-muted-slash d="M3 17 17 3" fill="none" stroke="${theme.muted}" stroke-width="2" stroke-linecap="round" opacity="0.92"/>` : ''}
+      ${muted ? `<path data-background-muted-slash d="M2 18 18 2" fill="none" stroke="${theme.muted}" stroke-width="2" stroke-linecap="round" opacity="0.92"/>` : ''}
     </g>
   `;
 }
@@ -376,6 +396,16 @@ function normalizedBackgroundVolume(settings) {
   return Number.parseInt(normalizeNumberString(settings.backgroundVolume, '35', 0, 100), 10);
 }
 
+function pomodoroBackgroundGainDb(sound) {
+  return POMODORO_BACKGROUND_GAIN_DB[sound] ?? 0;
+}
+
+function amplifiedPomodoroBackgroundVolume(sound, volume) {
+  const safeVolume = Math.max(0, Math.min(100, Number(volume) || 0));
+  const gain = 10 ** (pomodoroBackgroundGainDb(sound) / 20);
+  return Number((safeVolume * gain).toFixed(4));
+}
+
 function selectPomodoroBackground(instance, { force = false } = {}) {
   if (!instance.settings) {
     instance.selectedBackgroundSound = 'none';
@@ -448,13 +478,19 @@ function backgroundPlaybackCommand(sound, volume) {
   if (!audioPath) {
     return null;
   }
+  const gainDb = pomodoroBackgroundGainDb(sound);
+  const amplifiedVolume = amplifiedPomodoroBackgroundVolume(sound, volume);
   if (platform() === 'darwin') {
-    return { command: 'afplay', args: ['-v', String(volume / 100), audioPath] };
+    return { command: 'afplay', args: ['-v', String(amplifiedVolume / 100), audioPath] };
   }
   if (platform() === 'win32') {
-    return windowsBackgroundPlaybackCommand(audioPath, volume);
+    // WMP 的音量上限为 100；正常设置区间仍可获得增益，达到上限后安全截顶。
+    return windowsBackgroundPlaybackCommand(audioPath, Math.min(100, amplifiedVolume));
   }
-  return { command: 'ffplay', args: ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-volume', String(volume), audioPath] };
+  return {
+    command: 'ffplay',
+    args: ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-volume', String(volume), '-af', `volume=${gainDb}dB`, audioPath],
+  };
 }
 
 function startPomodoroBackground(instance, options = {}) {
@@ -1198,6 +1234,8 @@ const config = {
       backgroundAudioPath,
       backgroundPlaybackCommand,
       windowsBackgroundPlaybackCommand,
+      pomodoroBackgroundGainDb,
+      amplifiedPomodoroBackgroundVolume,
       normalizePomodoroBackgroundChoice,
       pomodoroStatusColor,
       pomodoroBackgroundGlyph,

@@ -84,6 +84,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 
 - 提示音仍使用 macOS `afplay`、Windows PowerShell beep 与其他平台终端 bell。自动开始下一阶段时只播一次；awaiting 依 `cueDuration` 循环，到期只停声、不离开 awaiting；`continuous` 直到用户操作或销毁。
 - 背景音仅在 `focus + running + !backgroundMuted` 时播放。macOS 使用 `afplay`，Windows 使用 Windows Media Player COM，其他平台尝试 `ffplay`；平台或播放器不可用时静默降级。暂停优先续播，不能续播则恢复时从同一音源起点重播；运行中改音源、随机或音量立即重启，但不得越过当前轮次的长按临时静音。
+- 17 条素材使用播放时特征增益，不改写或重新编码源文件，`backgroundVolume` 的 0–100 仍作为最终比例控制。持续且偏轻的环境声提升较多，尖锐、重复、瞬态明显或本身较响的声音保守提升：`forest +10 dB`；`rain`、`streetTraffic +9 dB`；`cafe`、`stream`、`desert`、`boiling +8 dB`；`wave +7 dB`；`clock`、`morning +6 dB`；`musicBox +5 dB`；`storm`、`chirp`、`woodenFish +4 dB`；`summer`、`deepSea +2 dB`；`stove +0.5 dB`。macOS 与 `ffplay` 可完整应用增益；Windows Media Player 在放大后达到 100 时安全截顶。
 - 提示、背景、试听是独立的实例通道，分别持有子进程、generation、播放/暂停标记与实例定时器；背景试听至多 15 秒，`Stop preview` 可提前停止。generation 使旧回调失效。播放失败仅停止该音频通道，不改变计时、不显示 ERR。
 - 背景资源位于 `assets/audio/pomowave/`，17 项 M4A 从本机 TickTick 8.0.80 的群组数据容器逐字节抽取，未转码、截断、归一化或淡化。文件身份、原文件名、SHA-256 及“授权状态未确认、不得据此对外分发”的边界见同目录 `CREDITS.md`。
 - 旧设置值在归一化时兼容迁移：`fireplace -> stove`、`ocean -> wave`、`brownNoise -> deepSea`；运行态保存的旧选择按同一规则水合，不需要提升状态版本。
@@ -109,7 +110,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 
 - 显示阶段标签、剩余 `MM:SS`、进度圆环、番茄图形与轮次信息。
 - 轮次完成度在状态文字下方显示为一排水平短灯，灯组相对原圆点位置上移；默认显示 4 灯，数量随 `roundsBeforeLongBreak` 在 2–8 之间变化。
-- focus 键面在轮次灯下一行居中显示当前实际选中背景音的紧凑矢量图标，17 种声音各有独立图形；固定为 `none` 或随机声音尚未生成时显示无声图标。暂停只停止播放，不改变图标状态；长按静音后图标整体变暗，并叠加斜杠。
+- focus 键面在轮次灯下一行居中显示当前实际选中背景音的矢量图标，17 种声音各有独立图形；图标不绘制外圈，主体约为 20×20，固定为 `none` 或随机声音尚未生成时显示无声图标。暂停只停止播放，不改变图标状态；长按静音后图标整体变暗，并叠加覆盖主体范围的斜杠。
 - 圆环按已用时间顺时针填充；等待确认时按 550ms 周期闪烁。
 - 最后 5 秒进入告警脉冲并可使用内框高亮。
 - done 状态不显示番茄图形，避免把“完成”误看成仍在专注。
@@ -124,7 +125,7 @@ remaining = ceil((phaseEndAt - Date.now()) / 1000)
 - 专注临时静音的持久化/新轮次清除、按前快照双击边界（idle/done/awaiting/运行/暂停）、放弃 focus 不计轮次并强制启动下一阶段。
 - 背景固定与随机选择、同轮/重启稳定性、音量、暂停恢复、设置变更、失败与销毁清理。
 - Inspector、新旧设置升级、多语言、17 项音频资源、SHA-256 和来源记录一致性。
-- 各主题阶段色与状态文字色、上移的水平轮次灯、灯组下方居中的 17 种背景音图标及静音斜杠、进度方向、awaiting 闪烁和末段告警。
+- 各主题阶段色与状态文字色、上移的水平轮次灯、灯组下方居中且无外圈的 17 种放大背景音图标及静音斜杠、进度方向、awaiting 闪烁和末段告警。
 
 修改阶段图、长按语义、计时事实源、运行态字段或提示音生命周期时，应同步本文件并扩充 `tests/app-framework.test.js`；修改 Inspector 控制命令时还应更新 `tests/inspector-lifecycle.test.js`。
 
