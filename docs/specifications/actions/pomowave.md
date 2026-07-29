@@ -1,7 +1,7 @@
 # PomoWave 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-28
+最后代码核对：2026-07-29
 action key：`pomowave`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.pomowave`
 

@@ -1203,6 +1203,12 @@ test('lex utility: pomowave state round-trips through serialize/hydrate', () => 
   assert.equal(hydrated.completedFocusRounds, 2);
   assert.equal(hydrated.backgroundMuted, true);
 
+  // 兼容新增 backgroundMuted 字段前写入的合法 v2 状态。
+  const previousV2 = { ...raw };
+  delete previousV2.backgroundMuted;
+  const hydratedPreviousV2 = lexTesting.hydratePomodoroState(previousV2, now + 60_000);
+  assert.equal(hydratedPreviousV2.backgroundMuted, false);
+
   // 重启期间已越过截止点：水合成 0 剩余，交给 onReady 的追平 tick 去推进阶段。
   const overdue = lexTesting.hydratePomodoroState(raw, now + 400_000);
   assert.equal(overdue.remainingSec, 0);
