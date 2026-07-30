@@ -919,9 +919,13 @@ export function createHealthBreakAction(runtime) {
     const pause = instance.healthStatus === 'paused'
       ? `<g fill="${theme.text}" opacity="0.92"><rect x="112" y="80" width="11" height="34" rx="3"/><rect x="133" y="80" width="11" height="34" rx="3"/></g>`
       : '';
+    const labelText = t(instance.healthStatus === 'paused' ? 'Paused' : stage.label, language);
+    // 阶段标签按长度自适应字号，避免 "Shoulder blades" 等长英文标签越过安全框；
+    // CJK 标签本就短，会保持在 28px 上限。设计箱可用宽约 176，留边取 170。
+    const labelSize = Math.max(17, Math.min(28, Math.floor(170 / (labelText.length * 0.58))));
     return `${renderGuideArt(stage, theme, instance.animFrame)}
       ${pause}
-      <text x="128" y="155" text-anchor="middle" fill="${theme.text}" font-size="28" font-weight="800" font-family="Arial, sans-serif">${escapeXml(t(instance.healthStatus === 'paused' ? 'Paused' : stage.label, language))}</text>
+      <text x="128" y="155" text-anchor="middle" fill="${theme.text}" font-size="${labelSize}" font-weight="800" font-family="Arial, sans-serif">${escapeXml(labelText)}</text>
       <text x="128" y="198" text-anchor="middle" fill="${theme.accent}" font-size="36" font-weight="800" font-family="Arial, sans-serif">${escapeXml(value)}</text>`;
   }
 
