@@ -13,6 +13,8 @@ const STATUS_TIMEOUT_MS = 12_000;
 const ACTIVE_REFRESH_MS = 10_000;
 const PASSIVE_REDRAW_MS = 30_000;
 const COMPLETION_HOLD_MS = 3 * 60_000;
+const TOTAL_ESTIMATE_TOLERANCE_SEC = 120;
+const ANCHOR_GAP_MS = 10 * 60_000;
 const MANUAL_REFRESH_FEEDBACK_MS = 650;
 const RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
 const STATUS_TEXT_MAX_WIDTH = 164;
@@ -401,6 +403,62 @@ function estimatedTotalSeconds(elapsedSec, remainingSec) {
     : null;
 }
 
+// Identifies the print job so the anchor resets on a genuinely new task
+// rather than drifting across jobs.
+function taskIdentity(print = {}) {
+  const startedAt = parseStartTime(print.gcode_start_time);
+  const name = cleanString(print.subtask_name || print.gcode_file);
+  return `${startedAt ?? ''}|${name}`;
+}
+
+// The anchor is only trustworthy while it describes one continuous run of the same
+// task: a new task, progress running backwards, remaining time jumping up, or a gap
+// long enough to cover a reconnect all mean we can no longer extrapolate from it.
+function isStaleTimeAnchor(anchor, sample) {
+  if (!anchor || anchor.task !== sample.task) return true;
+  if (sample.now - anchor.seenAt > ANCHOR_GAP_MS || sample.now < anchor.seenAt) return true;
+  if (sample.progress != null && anchor.progress != null && sample.progress < anchor.progress) return true;
+  return sample.remainingSec != null && anchor.remainingSec != null
+    && sample.remainingSec > anchor.remainingSec + TOTAL_ESTIMATE_TOLERANCE_SEC;
+}
+
+// Some printers (P2S among them) never send `gcode_start_time`, so elapsed time falls
+// back to `remaining / (1 - percent/100)`. That formula is violently sensitive to the
+// integer percent near the end of a print — around 85% a single 1% step moves the total
+// by ~400s — which made the estimate flip between neighbouring display units forever.
+// Bootstrap elapsed from it once per task, then advance it on the wall clock, and only
+// move the shown total when it changes by more than the minute-quantization noise.
+function trackPrintTimes(anchor, sample) {
+  const fresh = isStaleTimeAnchor(anchor, sample);
+  const next = fresh
+    ? { task: sample.task, anchoredAt: sample.now, baseElapsedSec: null, totalSec: null }
+    : { ...anchor };
+  // The percent fallback yields nothing at 0% and 100%, so take the baseline from the
+  // first sample that actually carries one rather than pretending elapsed is zero.
+  if (next.baseElapsedSec == null && Number.isFinite(sample.rawElapsedSec)) {
+    next.baseElapsedSec = Math.max(0, sample.rawElapsedSec);
+    next.anchoredAt = sample.now;
+  }
+  next.progress = sample.progress;
+  next.remainingSec = sample.remainingSec;
+  next.seenAt = sample.now;
+
+  // An exact start time needs no extrapolation; it is already wall-clock based.
+  let elapsedSec = null;
+  if (sample.exactElapsed) {
+    elapsedSec = sample.rawElapsedSec;
+  } else if (next.baseElapsedSec != null) {
+    elapsedSec = Math.max(0, Math.round(next.baseElapsedSec + (sample.now - next.anchoredAt) / 1000));
+  }
+
+  const rawTotal = estimatedTotalSeconds(elapsedSec, sample.remainingSec);
+  if (rawTotal != null
+    && (next.totalSec == null || Math.abs(rawTotal - next.totalSec) > TOTAL_ESTIMATE_TOLERANCE_SEC)) {
+    next.totalSec = rawTotal;
+  }
+  return { anchor: next, elapsedSec, totalSec: next.totalSec };
+}
+
 function refreshDelay(status) {
   return ['RUNNING', 'PREPARING', 'PAUSED'].includes(status)
     ? ACTIVE_REFRESH_MS
@@ -552,7 +610,20 @@ export function createBambuStatusAction(runtime) {
     instance.taskName = cleanString(print.subtask_name || print.gcode_file || instance.taskName);
     instance.stage = stageLabel(print);
     instance.progress = clampPercent(print.mc_percent);
-    instance.elapsedSec = elapsedSec;
+    const active = ['RUNNING', 'PREPARING', 'PAUSED'].includes(nextStatus);
+    const tracked = trackPrintTimes(instance.timeAnchor, {
+      task: taskIdentity(print),
+      progress: clampPercent(print.mc_percent),
+      remainingSec,
+      rawElapsedSec: elapsedSec,
+      exactElapsed: parseStartTime(print.gcode_start_time) != null,
+      now,
+    });
+    // Keep the anchor alive through the final report so the completion card can still
+    // show how long the print actually took, then drop it once the job is over.
+    instance.elapsedSec = tracked.elapsedSec;
+    instance.totalSec = active ? tracked.totalSec : null;
+    instance.timeAnchor = active ? tracked.anchor : null;
     instance.remainingSec = remainingSec;
     instance.lastSeenAt = now;
     instance.connectionState = 'ONLINE';
@@ -772,6 +843,7 @@ export function createBambuStatusAction(runtime) {
         progress: instance.progress,
         elapsedSec: instance.elapsedSec,
         remainingSec: instance.remainingSec,
+        totalSec: instance.totalSec,
       };
   }
 
@@ -822,7 +894,7 @@ export function createBambuStatusAction(runtime) {
       return `<text data-bambu-time-value="${kind}" x="${x}" y="207" text-anchor="middle" font-weight="800"><tspan fill="${theme.text}" font-size="26">${value}</tspan>${unit ? `<tspan fill="${theme.muted}" font-size="14" xml:space="preserve"> ${unit}</tspan>` : ''}</text>`;
     };
     const renderTimes = (showRemaining = true) => showRemaining
-      ? `<g data-bambu-time-row="paired" font-family="Arial, Helvetica, sans-serif" font-variant-numeric="tabular-nums">${renderTimeIcon('estimated', 56)}${renderTimeValue('estimated', estimatedTotalSeconds(data.elapsedSec, data.remainingSec), 89)}<text data-bambu-time-separator="slash" x="128" y="205" text-anchor="middle" fill="${theme.low}" font-size="18" font-weight="700">/</text>${renderTimeIcon('remaining', 153)}${renderTimeValue('remaining', data.remainingSec, 186)}</g>`
+      ? `<g data-bambu-time-row="paired" font-family="Arial, Helvetica, sans-serif" font-variant-numeric="tabular-nums">${renderTimeIcon('estimated', 56)}${renderTimeValue('estimated', data.totalSec ?? estimatedTotalSeconds(data.elapsedSec, data.remainingSec), 89)}<text data-bambu-time-separator="slash" x="128" y="205" text-anchor="middle" fill="${theme.low}" font-size="18" font-weight="700">/</text>${renderTimeIcon('remaining', 153)}${renderTimeValue('remaining', data.remainingSec, 186)}</g>`
       : `<g data-bambu-time-row="single" font-family="Arial, Helvetica, sans-serif" font-variant-numeric="tabular-nums">${renderTimeIcon('estimated', 105)}${renderTimeValue('estimated', data.elapsedSec, 139)}</g>`;
     const renderPrintingIcon = () => {
       const frameIndex = Math.abs(Number(instance.printAnimationFrame) || 0) % 3;
@@ -903,7 +975,8 @@ export function createBambuStatusAction(runtime) {
     }),
     createState: (instance) => ({
       connectionState: 'CONFIG_REQUIRED', liveStatus: 'IDLE', model: '', taskName: '', stage: '',
-      progress: null, elapsedSec: null, remainingSec: null, lastSeenAt: null, print: {}, mqttClient: null,
+      progress: null, elapsedSec: null, remainingSec: null, totalSec: null, timeAnchor: null,
+      lastSeenAt: null, print: {}, mqttClient: null,
       discoverySocket: null, connectionGeneration: 0, reconnectAttempt: 0, statusReceived: false, diagnostic: '',
       completedSnapshot: null, completionLatched: false, suppressFinishedUntilNextTask: false,
       autoScanStarted: false, reportedOnline: false, manualRefreshing: false, printAnimationFrame: 0,
@@ -955,6 +1028,8 @@ export function createBambuStatusAction(runtime) {
       completionExpiryDelay,
       deriveTimes,
       estimatedTotalSeconds,
+      trackPrintTimes,
+      taskIdentity,
       formatAge,
       formatAgeShort,
       formatDuration,

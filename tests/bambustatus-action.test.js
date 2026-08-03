@@ -43,6 +43,82 @@ test('bambustatus derives elapsed and remaining time without a ticking counter',
   );
 });
 
+function bambuInstance() {
+  return {
+    print: {}, model: 'P2S', taskName: '', stage: '', progress: null, elapsedSec: null,
+    remainingSec: null, totalSec: null, timeAnchor: null, lastSeenAt: null,
+    connectionState: 'ONLINE', liveStatus: 'IDLE', statusReceived: false,
+    completionLatched: false, completedSnapshot: null, suppressFinishedUntilNextTask: false,
+  };
+}
+
+test('bambustatus holds the estimated total steady when the printer reports no start time', () => {
+  // Real P2S traffic: gcode_start_time is never sent, so elapsed time falls back to the
+  // integer percent. Replayed here at the progress/remaining pairs the printer actually
+  // produced, where the raw formula alternated between 1h and 2h on every single report.
+  const instance = bambuInstance();
+  const base = 1_700_000_000_000;
+  const report = (mc_percent, mc_remaining_time) => ({
+    gcode_state: 'RUNNING', subtask_name: 'TRAX2.3mf', mc_percent, mc_remaining_time,
+  });
+  const rawTotal = (p, m) => (m * 60) / (1 - p / 100);
+  // [msSinceFirstReport, percent, remainingMinutes], captured verbatim from the printer.
+  const samples = [
+    [0, 85, 18], [10_713, 85, 17], [49_145, 86, 17], [76_063, 86, 16], [128_314, 87, 16],
+    [139_938, 87, 15], [203_130, 87, 14], [206_645, 88, 14], [267_381, 88, 13],
+  ];
+
+  samples.forEach(([offset, percent, minutes]) => {
+    testing.applyPrintReport(instance, report(percent, minutes), base + offset);
+    assert.equal(instance.totalSec, 7200, `sample ${percent}% ${minutes}m moved the total`);
+  });
+
+  // The raw formula spanned 6462s..7385s across these same samples, straddling the
+  // 7200s boundary where the display flips between 1h and 2h.
+  const raws = samples.map(([, p, m]) => rawTotal(p, m));
+  assert.ok(Math.min(...raws) < 7200 && Math.max(...raws) > 7200);
+  assert.ok(Math.max(...raws) - Math.min(...raws) > 900);
+  assert.deepEqual(testing.formatDurationParts(instance.totalSec), { value: '2', unit: 'h' });
+
+  // Elapsed time keeps advancing on the wall clock even though the printer never sends it.
+  assert.equal(instance.elapsedSec, Math.round(6120 + 267.381));
+});
+
+test('bambustatus re-anchors the estimate on a new task, a restart gap and a real re-estimate', () => {
+  const base = 1_700_000_000_000;
+  const report = (extra) => ({ gcode_state: 'RUNNING', subtask_name: 'cube.3mf', ...extra });
+
+  const moved = bambuInstance();
+  testing.applyPrintReport(moved, report({ mc_percent: 50, mc_remaining_time: 30 }), base);
+  assert.equal(moved.totalSec, 3600);
+  // A genuine re-estimate past the tolerance still moves the number.
+  testing.applyPrintReport(moved, report({ mc_percent: 50, mc_remaining_time: 32 }), base + 60_000);
+  assert.equal(moved.totalSec, 1860 + 32 * 60);
+
+  const renamed = bambuInstance();
+  testing.applyPrintReport(renamed, report({ mc_percent: 50, mc_remaining_time: 30 }), base);
+  testing.applyPrintReport(renamed, {
+    gcode_state: 'RUNNING', subtask_name: 'bracket.3mf', mc_percent: 10, mc_remaining_time: 9,
+  }, base + 60_000);
+  assert.equal(renamed.totalSec, 600);
+
+  // A gap longer than the reconnect window cannot be extrapolated across.
+  const resumed = bambuInstance();
+  testing.applyPrintReport(resumed, report({ mc_percent: 50, mc_remaining_time: 30 }), base);
+  testing.applyPrintReport(resumed, report({ mc_percent: 60, mc_remaining_time: 24 }), base + 20 * 60_000);
+  assert.equal(resumed.totalSec, 3600);
+  assert.equal(resumed.elapsedSec, 2160);
+
+  // Leaving the active states clears the latch, but the final elapsed time survives
+  // so the completion card can report how long the print took.
+  const done = bambuInstance();
+  testing.applyPrintReport(done, report({ mc_percent: 50, mc_remaining_time: 30 }), base);
+  testing.applyPrintReport(done, { gcode_state: 'FAILED', mc_percent: 50 }, base + 120_000);
+  assert.equal(done.totalSec, null);
+  assert.equal(done.timeAnchor, null);
+  assert.equal(done.elapsedSec, 1800 + 120);
+});
+
 test('bambustatus uses compact one-unit times and refreshes active printing states every ten seconds', () => {
   assert.deepEqual(testing.formatDurationParts(5040), { value: '1', unit: 'h' });
   assert.deepEqual(testing.formatDurationParts(2160), { value: '36', unit: 'm' });
