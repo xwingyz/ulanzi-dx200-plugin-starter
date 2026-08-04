@@ -37,6 +37,10 @@
     {
       "Name": "休息一下",
       "Tooltip": "在长时间用电脑时引导短暂的护眼、姿势与活动休息。"
+    },
+    {
+      "Name": "DeepSeek 消费",
+      "Tooltip": "显示 DeepSeek API 余额，以及滚动 24 小时与 7 天消费。"
     }
   ],
   "Localization": {
@@ -485,6 +489,29 @@
     "Exhale": "呼气",
     "Pelvic floor": "盆底肌",
     "Contract": "收缩",
-    "Relax": "放松"
+    "Relax": "放松",
+    "Set API key": "填 Key",
+    "Bad key": "Key 无效",
+    "DeepSeek Spend": "DeepSeek 消费",
+    "API key": "API Key",
+    "Only the balance endpoint is called. The key is stored in plain text inside the plugin folder, so use a key created just for this button.": "只调用余额查询接口。Key 以明文保存在插件目录内，建议单独申请一把只给这个按键用。",
+    "24h budget": "24 小时预算",
+    "7d budget": "7 天预算",
+    "Leave a budget empty to drop its bar and show the amount alone.": "预算留空则不画进度条，只显示金额。",
+    "Balance warning": "余额预警",
+    "Balance critical": "余额告急",
+    "The balance row also turns critical whenever DeepSeek reports the balance is too low to serve requests.": "DeepSeek 报告余额已不足以发起调用时，余额行同样转为告急色。",
+    "Recorded intervals": "已记录区间",
+    "Window coverage": "窗口覆盖率",
+    "Clear spend history": "清空消费历史",
+    "Click again to erase": "再点一次确认清空",
+    "Spend is derived from balance drops between polls, so it is a lower bound. Clear the history after switching keys or accounts, or after topping up while Ulanzi Studio was closed.": "消费额由两次轮询间的余额下降推算，因此是下界。更换 Key、更换账号，或在 Ulanzi Studio 关闭期间充过值之后，请清空历史。",
+    "Show the DeepSeek API balance plus rolling 24-hour and 7-day spend. DeepSeek publishes no usage endpoint, so spend is inferred from balance changes and token counts are not available.": "显示 DeepSeek API 余额，以及滚动 24 小时与 7 天消费。DeepSeek 未提供用量接口，消费额由余额变化推算，无法获取 token 数。",
+    "No API key": "未填写 API Key",
+    "API key rejected": "API Key 被拒绝",
+    "Paste a DeepSeek API key above.": "请在上方填写 DeepSeek API Key。",
+    "DeepSeek rejected the key. Check it was not revoked.": "DeepSeek 拒绝了该 Key，请确认它没有被吊销。",
+    "Found": "已找到",
+    "Single click: refresh the balance. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the DeepSeek usage page.": "单击：刷新余额。双击：等同单击，第二次刷新受冷却限制。长按：打开 DeepSeek 用量页。"
   }
 }

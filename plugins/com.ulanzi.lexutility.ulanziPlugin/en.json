@@ -37,6 +37,10 @@
     {
       "Name": "MicroBreak",
       "Tooltip": "Guide short eye, posture and movement breaks for long computer sessions."
+    },
+    {
+      "Name": "DeepSeek Spend",
+      "Tooltip": "Show DeepSeek API balance plus rolling 24-hour and 7-day spend."
     }
   ],
   "Localization": {
@@ -485,6 +489,29 @@
     "Exhale": "Exhale",
     "Pelvic floor": "Pelvic floor",
     "Contract": "Contract",
-    "Relax": "Relax"
+    "Relax": "Relax",
+    "Set API key": "Set API key",
+    "Bad key": "Bad key",
+    "DeepSeek Spend": "DeepSeek Spend",
+    "API key": "API key",
+    "Only the balance endpoint is called. The key is stored in plain text inside the plugin folder, so use a key created just for this button.": "Only the balance endpoint is called. The key is stored in plain text inside the plugin folder, so use a key created just for this button.",
+    "24h budget": "24h budget",
+    "7d budget": "7d budget",
+    "Leave a budget empty to drop its bar and show the amount alone.": "Leave a budget empty to drop its bar and show the amount alone.",
+    "Balance warning": "Balance warning",
+    "Balance critical": "Balance critical",
+    "The balance row also turns critical whenever DeepSeek reports the balance is too low to serve requests.": "The balance row also turns critical whenever DeepSeek reports the balance is too low to serve requests.",
+    "Recorded intervals": "Recorded intervals",
+    "Window coverage": "Window coverage",
+    "Clear spend history": "Clear spend history",
+    "Click again to erase": "Click again to erase",
+    "Spend is derived from balance drops between polls, so it is a lower bound. Clear the history after switching keys or accounts, or after topping up while Ulanzi Studio was closed.": "Spend is derived from balance drops between polls, so it is a lower bound. Clear the history after switching keys or accounts, or after topping up while Ulanzi Studio was closed.",
+    "Show the DeepSeek API balance plus rolling 24-hour and 7-day spend. DeepSeek publishes no usage endpoint, so spend is inferred from balance changes and token counts are not available.": "Show the DeepSeek API balance plus rolling 24-hour and 7-day spend. DeepSeek publishes no usage endpoint, so spend is inferred from balance changes and token counts are not available.",
+    "No API key": "No API key",
+    "API key rejected": "API key rejected",
+    "Paste a DeepSeek API key above.": "Paste a DeepSeek API key above.",
+    "DeepSeek rejected the key. Check it was not revoked.": "DeepSeek rejected the key. Check it was not revoked.",
+    "Found": "Found",
+    "Single click: refresh the balance. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the DeepSeek usage page.": "Single click: refresh the balance. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the DeepSeek usage page."
   }
 }

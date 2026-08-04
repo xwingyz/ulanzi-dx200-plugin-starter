@@ -20,16 +20,16 @@ test('business actions live outside the Lex Utility framework entry', () => {
   for (const symbol of ['renderLatencyIcon', 'renderPomodoroIcon', 'renderSpeedtestIcon']) {
     assert.doesNotMatch(app, new RegExp(`function ${symbol}\\b`));
   }
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'nasstatus', 'systemstatus', 'healthbreak']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'nasstatus', 'systemstatus', 'healthbreak', 'deepseekusage']) {
     assert.equal(fs.existsSync(path.join(pluginRoot, 'actions', `${key}.js`)), true);
   }
 });
 
 test('individual action modules do not import app.js or sibling actions', () => {
-  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'nasstatus', 'systemstatus', 'healthbreak']) {
+  for (const key of ['latency', 'pomowave', 'speedtest', 'bambustatus', 'nasstatus', 'systemstatus', 'healthbreak', 'deepseekusage']) {
     const source = read(path.join(pluginRoot, 'actions', `${key}.js`));
     assert.doesNotMatch(source, /from\s+['"][^'"]*app\.js['"]/);
-    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus|nasstatus|systemstatus|healthbreak)\.js['"]/);
+    assert.doesNotMatch(source, /from\s+['"]\.\/(?:latency|pomowave|speedtest|bambustatus|nasstatus|systemstatus|healthbreak|deepseekusage)\.js['"]/);
   }
 });
 
@@ -105,6 +105,52 @@ const RENDER_STATES = {
     { healthStatus: 'running', sessionPlan: [{ groupKey: 'eyes', label: '远眺', durationMs: 20_000 }], stageRemainingMs: 12_000 },
     { healthStatus: 'paused', sessionPlan: [{ groupKey: 'neck', label: '下巴微收', durationMs: 15_000 }], stageRemainingMs: 8_000 },
     { healthStatus: 'done', today: { dayKey: '2026-07-22', completed: 6, bonus: 1, skipped: 0, cancelled: 0 } },
+  ],
+  deepseekusage: [
+    // 冷启动：还没余额，走错误字形分支。
+    { displayState: 'PENDING', balance: null },
+    { displayState: 'NO_KEY', balance: null },
+    // 只有一个采样点：消费行必须是 `--`，走 hasSpendData 的否定分支。
+    {
+      displayState: 'OK',
+      balance: 42.3,
+      currency: 'CNY',
+      isAvailable: true,
+      events: [],
+      firstSampleAt: Date.now(),
+      lastSampleAt: Date.now(),
+    },
+    // 满数据 + 覆盖率不足：三行都有值，7d 行带 tail。
+    {
+      displayState: 'OK',
+      balance: 42.3,
+      currency: 'CNY',
+      isAvailable: true,
+      events: [{ a: Date.now() - 7_200_000, b: Date.now() - 3_600_000, d: 1.25 }],
+      firstSampleAt: Date.now() - 86_400_000,
+      lastSampleAt: Date.now(),
+    },
+    // 陈旧 + 余额告急：走 staleBadge 与 crit 配色分支。
+    {
+      displayState: 'STALE',
+      lastErrorKind: 'NETWORK',
+      balance: 1.2,
+      currency: 'CNY',
+      isAvailable: false,
+      events: [{ a: Date.now() - 600_000, b: Date.now(), d: 0.03 }],
+      firstSampleAt: Date.now() - 604_800_000,
+      lastSampleAt: Date.now(),
+    },
+    // 非 CNY 账户：量纲回退到该币种符号，不做汇率换算。
+    {
+      displayState: 'OK',
+      balance: 128.4,
+      currency: 'USD',
+      isAvailable: true,
+      events: [{ a: Date.now() - 3_600_000, b: Date.now(), d: 12.5 }],
+      firstSampleAt: Date.now() - 604_800_000,
+      lastSampleAt: Date.now(),
+    },
   ],
 };
 

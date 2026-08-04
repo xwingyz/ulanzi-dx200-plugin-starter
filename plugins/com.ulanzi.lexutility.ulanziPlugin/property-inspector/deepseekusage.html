@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DeepSeek Spend</title>
+    <style>
+      :root { color-scheme: dark; --bg: #051820; --panel: #0b2a38; --text: #ecfeff; --muted: #a5f3fc; --line: #0e7490; --accent: #67e8f9; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: linear-gradient(180deg, #07202b 0%, #0b2a38 100%); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .uspi-wrapper.hidden { display: none; }
+      .panel { background: rgba(11, 42, 56, 0.92); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+      h1 { margin: 0 0 6px; font-size: 16px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      .field { display: grid; gap: 6px; margin-bottom: 12px; }
+      label { color: var(--muted); }
+      input, select { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #051820; color: var(--text); padding: 10px 12px; }
+      input[type="hidden"] { display: none; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .theme-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .theme-chip { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #051820; padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+      .theme-chip.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .theme-chip span { display: block; width: 100%; height: 100%; }
+      .action-row { display: flex; gap: 10px; margin-top: 4px; }
+      .action-row button { flex: 1; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 700; cursor: pointer; }
+      .save-btn { background: var(--accent); color: #083344; }
+      .ghost-btn { background: rgba(165, 243, 252, 0.14); color: var(--text); border: 1px solid var(--line); }
+      .uspi-feedback { margin-top: 10px; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .uspi-feedback[hidden] { display: none; }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .frame-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .frame-toggle { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; cursor: pointer; }
+      .frame-toggle input { width: auto; }
+      .diag { background: #051820; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--muted); }
+      .diag dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+      .diag dt { color: var(--muted); opacity: 0.75; }
+      .diag dd { margin: 0; color: var(--text); font-weight: 700; }
+      .diag .bad { color: #f87171; }
+      .diag .good { color: #34d399; }
+      .probe-btn { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: rgba(165, 243, 252, 0.14); color: var(--text); font-weight: 700; cursor: pointer; }
+      .danger-btn { width: 100%; margin-top: 8px; border: 1px solid #7f1d1d; border-radius: 10px; padding: 9px 10px; background: rgba(248, 113, 113, 0.14); color: #fecaca; font-weight: 700; cursor: pointer; }
+      .danger-btn.armed { background: rgba(248, 113, 113, 0.32); color: #fff; }
+      .pi-divider { border: none; border-top: 1px solid var(--line); margin: 8px 0 14px; }
+      .pi-note { margin: 2px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div class="uspi-wrapper hidden">
+      <div class="panel">
+        <h1 data-localize="DeepSeek Spend">DeepSeek Spend</h1>
+        <form id="property-inspector">
+          <div class="field">
+            <label for="apiKey" data-localize="API key">API key</label>
+            <input id="apiKey" name="apiKey" type="text" autocomplete="off" spellcheck="false" maxlength="128" placeholder="sk-...">
+            <div class="hint" data-localize="Only the balance endpoint is called. The key is stored in plain text inside the plugin folder, so use a key created just for this button.">Only the balance endpoint is called. The key is stored in plain text inside the plugin folder, so use a key created just for this button.</div>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="pollSec" data-localize="Poll (s)">Poll (s)</label>
+              <input id="pollSec" name="pollSec" type="number" min="60" max="3600" value="300">
+            </div>
+            <div class="field">
+              <label for="redrawSec" data-localize="Redraw (s)">Redraw (s)</label>
+              <input id="redrawSec" name="redrawSec" type="number" min="10" max="600" value="60">
+            </div>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="budget24h" data-localize="24h budget">24h budget</label>
+              <input id="budget24h" name="budget24h" type="number" min="0" step="0.01" value="5">
+            </div>
+            <div class="field">
+              <label for="budget7d" data-localize="7d budget">7d budget</label>
+              <input id="budget7d" name="budget7d" type="number" min="0" step="0.01" value="20">
+            </div>
+          </div>
+          <div class="hint" data-localize="Leave a budget empty to drop its bar and show the amount alone.">Leave a budget empty to drop its bar and show the amount alone.</div>
+          <div class="grid" style="margin-top: 12px;">
+            <div class="field">
+              <label for="balanceWarn" data-localize="Balance warning">Balance warning</label>
+              <input id="balanceWarn" name="balanceWarn" type="number" min="0" step="0.01" value="20">
+            </div>
+            <div class="field">
+              <label for="balanceCrit" data-localize="Balance critical">Balance critical</label>
+              <input id="balanceCrit" name="balanceCrit" type="number" min="0" step="0.01" value="5">
+            </div>
+          </div>
+          <div class="hint" data-localize="The balance row also turns critical whenever DeepSeek reports the balance is too low to serve requests.">The balance row also turns critical whenever DeepSeek reports the balance is too low to serve requests.</div>
+          <div class="field" style="margin-top: 12px;">
+            <label for="usageUrl" data-localize="Open on hold">Open on hold</label>
+            <input id="usageUrl" name="usageUrl" maxlength="160" value="https://platform.deepseek.com/usage">
+          </div>
+          <div class="field">
+            <label data-localize="Diagnostics">Diagnostics</label>
+            <div class="diag">
+              <dl>
+                <dt data-localize="API key">API key</dt><dd id="diag-key">—</dd>
+                <dt data-localize="Current status">Current status</dt><dd id="diag-state">—</dd>
+                <dt data-localize="Last fetch">Last fetch</dt><dd id="diag-fetched">—</dd>
+                <dt data-localize="Last error">Last error</dt><dd id="diag-error">—</dd>
+                <dt data-localize="Recorded intervals">Recorded intervals</dt><dd id="diag-events">—</dd>
+                <dt data-localize="Window coverage">Window coverage</dt><dd id="diag-coverage">—</dd>
+              </dl>
+              <button class="probe-btn" id="probe" type="button" data-localize="Test now">Test now</button>
+              <button class="danger-btn" id="clearHistory" type="button" data-localize="Clear spend history">Clear spend history</button>
+            </div>
+            <div class="hint" data-localize="Spend is derived from balance drops between polls, so it is a lower bound. Clear the history after switching keys or accounts, or after topping up while Ulanzi Studio was closed.">Spend is derived from balance drops between polls, so it is a lower bound. Clear the history after switching keys or accounts, or after topping up while Ulanzi Studio was closed.</div>
+          </div>
+          <p class="pi-note gesture-note" data-localize="Single click: refresh the balance. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the DeepSeek usage page.">Single click: refresh the balance. Double click: same as a single click; the second refresh is limited by the cooldown. Long press: open the DeepSeek usage page.</p>
+          <hr class="pi-divider">
+          <div class="field">
+            <label for="theme" data-localize="Theme">Theme</label>
+            <input id="theme" name="theme" type="hidden" value="ice">
+            <div class="theme-row" role="group" aria-label="Theme">
+            </div>
+          </div>
+          <div class="field">
+            <label for="frameSize" data-localize="Safe frame">Safe frame</label>
+            <div class="frame-row">
+              <label class="frame-toggle"><input id="frameSize" name="frameSize" type="checkbox" data-on="optimal" data-off="max" checked><span data-localize="Optimal area">Optimal area</span></label>
+              <label class="frame-toggle"><input id="showFrame" name="showFrame" type="checkbox" checked><span data-localize="Show frame">Show frame</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="uiLanguage" data-localize="Language">Language</label>
+            <select id="uiLanguage" name="uiLanguage">
+              <option value="auto" data-localize="Auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh_CN">简体中文</option>
+            </select>
+          </div>
+          <p class="pi-note" data-localize="Show the DeepSeek API balance plus rolling 24-hour and 7-day spend. DeepSeek publishes no usage endpoint, so spend is inferred from balance changes and token counts are not available.">Show the DeepSeek API balance plus rolling 24-hour and 7-day spend. DeepSeek publishes no usage endpoint, so spend is inferred from balance changes and token counts are not available.</p>
+          <div class="action-row">
+            <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
+            <button class="save-btn" type="submit" data-localize="Save">Save</button>
+          </div>
+          <div class="uspi-feedback" id="inspector-feedback" hidden>
+            <span id="feedback-saved" data-localize="Saved" hidden>Saved</span>
+            <span id="feedback-reset" data-localize="Defaults restored" hidden>Defaults restored</span>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="../libs/js/constants.js"></script>
+    <script src="../libs/js/eventEmitter.js"></script>
+    <script src="../libs/js/utils.js"></script>
+    <script src="../libs/js/ulanzideckApi.js"></script>
+    <script src="./inspector-shared.js"></script>
+    <script src="./deepseekusage.js"></script>
+  </body>
+</html>

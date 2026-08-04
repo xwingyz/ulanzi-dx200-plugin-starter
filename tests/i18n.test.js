@@ -25,6 +25,7 @@ const LEX_ACTION_KEYS = [
   'nasstatus',
   'systemstatus',
   'healthbreak',
+  'deepseekusage',
 ];
 const LEX_ACTION_NAMES = {
   en: [
@@ -37,6 +38,7 @@ const LEX_ACTION_NAMES = {
     'Synology NAS Status',
     'System Status',
     'MicroBreak',
+    'DeepSeek Spend',
   ],
   zh_CN: [
     '网络测速',
@@ -48,6 +50,7 @@ const LEX_ACTION_NAMES = {
     '群晖 NAS 状态',
     '系统状态',
     '休息一下',
+    'DeepSeek 消费',
   ],
 };
 const LEX_DYNAMIC_LOCALIZATION_KEYS = [
@@ -86,6 +89,11 @@ const LEX_DYNAMIC_LOCALIZATION_KEYS = [
   'Shoulder blades', 'Wrists', 'Open and close', 'Left wrist', 'Right wrist', 'Stand',
   'Stand up', 'Heel raises', 'Walk', 'Breathing', 'Inhale', 'Exhale', 'Pelvic floor',
   'Contract', 'Relax',
+  // DeepSeek 键面错误文案与诊断映射。
+  'Set API key', 'Bad key', 'No API key', 'API key rejected', 'Found',
+  'Paste a DeepSeek API key above.',
+  'DeepSeek rejected the key. Check it was not revoked.',
+  'Clear spend history', 'Click again to erase',
 ];
 
 test('adaptLocale keeps unknown locales as xx_YY so a language is a data-only add', () => {

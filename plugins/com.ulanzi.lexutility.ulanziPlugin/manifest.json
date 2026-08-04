@@ -155,6 +155,22 @@
       "Devices": [],
       "Controllers": ["Keypad"],
       "SupportedInMultiActions": false
+    },
+    {
+      "Name": "DeepSeek Spend",
+      "Tooltip": "Show DeepSeek API balance plus rolling 24-hour and 7-day spend.",
+      "Icon": "assets/icons/actionDeepseekusage.svg",
+      "PropertyInspectorPath": "property-inspector/deepseekusage.html",
+      "UUID": "com.ulanzi.ulanzistudio.lexutility.deepseekusage",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionDeepseekusage.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
     }
   ],
   "OS": [

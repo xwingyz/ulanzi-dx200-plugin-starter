@@ -1,6 +1,7 @@
 import { createChatGptUsageAction } from './chatgptusage.js';
 import { createBambuStatusAction } from './bambustatus.js';
 import { createClaudeUsageAction } from './claudeusage.js';
+import { createDeepSeekUsageAction } from './deepseekusage.js';
 import { createHealthBreakAction } from './healthbreak.js';
 import { createLatencyAction } from './latency.js';
 import { createNasStatusAction } from './nasstatus.js';
@@ -15,6 +16,7 @@ export function createActionModules(runtime) {
     createLatencyAction(runtime),
     createClaudeUsageAction(runtime),
     createChatGptUsageAction(runtime),
+    createDeepSeekUsageAction(runtime),
     createBambuStatusAction(runtime),
     createNasStatusAction(runtime),
     createSystemStatusAction(runtime),
