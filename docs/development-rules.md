@@ -286,6 +286,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 - 对比宿主插件目录里的 `plugin/app.js` 时间，确认文件确实同步过去。
 - 查插件进程是否真在跑新代码，必要时重启 `Ulanzi Studio`。
 - 重新拖放 action，排除旧 UUID / 旧实例仍绑在设备上的情况。
+- **键面在两份状态之间跳变、或外部连接数翻倍时，先查同一 actionid 是否有多个 key 的实例并存**。context 是 `uuid___key___actionid`，`key` 就是键位坐标，拖动按键会换 context 而宿主不发 `clear`。免重启的判定手段：`data/action-state.json` 在一个采样周期内若有同 actionid 不同 key 的多条记录被写入，或 `lsof -nP -p <插件 PID> -i` 对同一目标出现多条连接，就是旧实例没被回收（基座回收逻辑见 [specifications/base.md](specifications/base.md) §4「键位移动」）。
 
 ### C. Property Inspector 层
 

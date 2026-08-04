@@ -33,6 +33,9 @@ const frameworks = [
     handleRunEvent: lexTesting.handleRunEvent,
     longPressFeedbackIcon: lexTesting.longPressFeedbackIcon,
     initializeInstanceState: lexTesting.initializeInstanceState,
+    reclaimMovedInstances: lexTesting.reclaimMovedInstances,
+    relocatePersistedRecords: lexTesting.relocatePersistedRecords,
+    relocatedContexts: lexTesting.relocatedContexts,
     resolveSettings: lexTesting.resolveSettingsForEvent,
     storageFactory: lexTesting.createSettingsStorage,
     setTimeout: lexTesting.setInstanceTimeout,
@@ -69,6 +72,9 @@ const frameworks = [
     handleRunEvent: templateTesting.handleRunEvent,
     longPressFeedbackIcon: templateTesting.longPressFeedbackIcon,
     initializeInstanceState: templateTesting.initializeInstanceState,
+    reclaimMovedInstances: templateTesting.reclaimMovedInstances,
+    relocatePersistedRecords: templateTesting.relocatePersistedRecords,
+    relocatedContexts: templateTesting.relocatedContexts,
     resolveSettings: templateTesting.resolveSettingsForEvent,
     storageFactory: templateTesting.createSettingsStorage,
     setTimeout: templateTesting.setInstanceTimeout,
@@ -627,6 +633,89 @@ for (const framework of frameworks) {
     assert.equal(instance.settings.theme, 'signal');
     assert.equal(writes.length, 1);
     assert.equal(writes[0].settings.theme, 'signal');
+  });
+
+  // 宿主拖动按键只改 context 里的 key 并补发 add，从不发 clear。旧实例若留在注册表里，
+  // 它的定时器、外部连接和渲染都还活着，会和新实例同时推图，键面在两份状态之间跳变。
+  const movedContext = framework.context.replace('___key-1___', '___key-2___');
+  const siblingContext = framework.context.replace('___key-1___action-1', '___key-2___action-2');
+
+  const movableProcessor = (overrides = {}) => {
+    const seen = { disposed: [], relocated: [] };
+    const controller = framework.createSettingsEventProcessor({
+      ud: { sendParamFromPlugin: () => {} },
+      instances: new Map(),
+      readPersisted: () => ({ ...framework.actionConfigs[framework.configKey].defaults }),
+      writePersisted: () => {},
+      render: () => {},
+      ready: () => {},
+      dispose: (instance) => seen.disposed.push(instance),
+      relocate: (from, to) => seen.relocated.push({ from, to }),
+      ...overrides,
+    });
+    return { controller, seen };
+  };
+
+  test(`${framework.name}: a key dragged to a new position leaves exactly one live instance`, () => {
+    const instances = new Map();
+    const { controller, seen } = movableProcessor({ instances });
+
+    const before = controller.hostRestore(framework.context, {});
+    const after = controller.hostRestore(movedContext, {});
+
+    assert.equal(instances.size, 1);
+    assert.equal(instances.get(movedContext), after);
+    assert.equal(instances.has(framework.context), false);
+    assert.deepEqual(seen.disposed, [before]);
+    assert.deepEqual(seen.relocated, [{ from: framework.context, to: movedContext }]);
+  });
+
+  test(`${framework.name}: two keys of the same action keep their own instances`, () => {
+    const instances = new Map();
+    const { controller, seen } = movableProcessor({ instances });
+
+    controller.hostRestore(framework.context, {});
+    controller.hostRestore(siblingContext, {});
+
+    assert.equal(instances.size, 2);
+    assert.deepEqual(seen.disposed, []);
+    assert.deepEqual(seen.relocated, []);
+  });
+
+  test(`${framework.name}: only a host placement reclaims a moved key, never a stray runtime event`, () => {
+    const instances = new Map();
+    const { controller, seen } = movableProcessor({ instances });
+
+    const live = controller.hostRestore(movedContext, {});
+    controller.runtime(framework.context);
+
+    assert.equal(instances.get(movedContext), live);
+    assert.deepEqual(seen.disposed, []);
+  });
+
+  test(`${framework.name}: settings and runtime state follow the key to its new position`, () => {
+    const settingsStore = { 'action-1::key-1': { theme: 'mono' }, 'action-1::key-2': { theme: 'ember' } };
+    const stateStore = { 'action-1::key-1': { history: [1, 2] } };
+    const written = [];
+    const stores = [
+      { store: settingsStore, storage: { write: (value) => { written.push(value); return true; } } },
+      { store: stateStore, storage: { write: () => true } },
+    ];
+
+    const relocated = framework.relocatePersistedRecords(framework.context, movedContext, { stores });
+
+    assert.equal(relocated, true);
+    // 目标键位上那条"这个按键上次路过时"的旧记录必须被顶掉，否则配置会倒退回历史版本。
+    assert.deepEqual(settingsStore, { 'action-1::key-2': { theme: 'mono' } });
+    assert.deepEqual(stateStore, { 'action-1::key-2': { history: [1, 2] } });
+    assert.equal(written.length, 1);
+  });
+
+  test(`${framework.name}: a context without an actionid can never be treated as a move`, () => {
+    const instances = new Map([['orphan', { context: 'orphan' }]]);
+    const decode = () => ({ uuid: '', key: '', actionid: '' });
+
+    assert.deepEqual(framework.relocatedContexts('::', instances, decode), []);
   });
 
   test(`${framework.name}: createState error invokes the injected ERR renderer and returns control`, () => {

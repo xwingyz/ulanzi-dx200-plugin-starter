@@ -826,6 +826,77 @@ function dropPersistedState(context, options = {}) {
   return true;
 }
 
+// 宿主把按键拖到新位置时只补发 add/paramFromApp，从不发 clear：context 里的 key 变了，
+// 旧 context 的实例却留在 INSTANCES 里继续跑定时器、外部连接与渲染，于是同一个 action 会
+// 同时往新旧两个键位推图，被拖过的键面在两份状态之间跳变。真机实测过后果：一个 systemstatus
+// 按键被拖两次后有三个实例并行采样落盘，bambustatus 对同一台打印机挂着两条 MQTT 连接。
+// actionid 是宿主给每个已放置按键的唯一标识，跨移动不变，所以"同 uuid 同 actionid 但 key 不同"
+// 只能解释为位置变了，不可能是两个并存的按键。
+function relocatedContexts(context, instances, decode) {
+  const { uuid, key, actionid } = decode(context);
+  if (!uuid || !actionid) {
+    return [];
+  }
+  const moved = [];
+  for (const candidate of instances.keys()) {
+    if (candidate === context) {
+      continue;
+    }
+    const other = decode(candidate);
+    if (other.uuid === uuid && other.actionid === actionid && other.key !== key) {
+      moved.push(candidate);
+    }
+  }
+  return moved;
+}
+
+// 记录跟着按键搬家：不搬的话旧键位的设置与运行态会变成永久孤儿，而目标键位上若残留着
+// 这个按键上次路过时的旧记录，hostRestore 的合并顺序会让旧记录反超宿主来件，配置直接倒退。
+function relocatePersistedRecords(fromContext, toContext, options = {}) {
+  const keyFromContext = options.keyFromContext ?? persistenceKey;
+  const fromKey = keyFromContext(fromContext);
+  const toKey = keyFromContext(toContext);
+  if (!fromKey || fromKey === toKey) {
+    return false;
+  }
+  const stores = options.stores ?? [
+    { store: PERSISTED_SETTINGS, storage: SETTINGS_STORAGE },
+    { store: PERSISTED_STATE, storage: STATE_STORAGE },
+  ];
+  let relocated = false;
+  for (const { store, storage } of stores) {
+    if (!(fromKey in store)) {
+      continue;
+    }
+    const candidate = { ...store, [toKey]: store[fromKey] };
+    delete candidate[fromKey];
+    if (!storage.write(candidate)) {
+      continue;
+    }
+    store[toKey] = store[fromKey];
+    delete store[fromKey];
+    relocated = true;
+  }
+  return relocated;
+}
+
+// 先 dispose 再搬记录：onDispose 仍会把运行态刷到旧 key，顺序反了就会把刚搬走的记录又写回去。
+function reclaimMovedInstances(context, runtime = {}) {
+  const instances = runtime.instances ?? INSTANCES;
+  const dispose = runtime.dispose ?? disposeInstance;
+  const relocate = runtime.relocate ?? relocatePersistedRecords;
+  const decode = runtime.decodeContext ?? ((value) => $UD.decodeContext(value) || {});
+  const moved = relocatedContexts(context, instances, decode);
+  for (const staleContext of moved) {
+    const stale = instances.get(staleContext);
+    instances.delete(staleContext);
+    dispose(stale);
+    relocate(staleContext, context);
+    log(`instance moved ${decode(staleContext).key} -> ${decode(context).key} [${actionKeyFromUuid(decode(context).uuid)}]`);
+  }
+  return moved;
+}
+
 function persistedSettingsEqual(actionUuid, config, settings, persistedSettings) {
   const desired = pickPersistedSettings(config, settings);
   const previous = pickPersistedSettings(config, normalizeSettings(actionUuid, persistedSettings));
@@ -1384,6 +1455,12 @@ function ensureInstance(context, incomingSettings = {}, eventType = 'hostRestore
   let instance = instances.get(context);
   const actionUuid = actionFromContext(context);
   const config = configFromUuid(actionUuid);
+  // 只在宿主宣告位置（add / paramFromApp）且这个 context 还没建过实例时回收，且必须早于
+  // readPersisted——搬完记录才读得到本按键真正的设置。按键事件与 PI 往来不代表位置变化，
+  // 若也参与回收，一条发给旧 context 的杂散事件就会把当前活实例反杀掉。
+  if (eventType === 'hostRestore' && !instance) {
+    reclaimMovedInstances(context, { ...runtime, instances });
+  }
   const persistedSettings = readPersisted(context, config);
 
   if (!instance) {
@@ -1439,6 +1516,9 @@ function createSettingsEventProcessor(options = {}) {
     render: options.render ?? renderInstance,
     renderError: options.renderError,
     ready: options.ready ?? onInstanceReady,
+    dispose: options.dispose ?? disposeInstance,
+    relocate: options.relocate ?? relocatePersistedRecords,
+    decodeContext: options.decodeContext,
   };
   const ud = options.ud ?? $UD;
   return {
@@ -1634,6 +1714,9 @@ export const __testing = Object.freeze({
   handleRunEvent,
   dropPersistedState,
   initializeInstanceState,
+  reclaimMovedInstances,
+  relocatePersistedRecords,
+  relocatedContexts,
   longPressFeedbackIcon,
   readPersistedState,
   resolveSettingsForEvent,

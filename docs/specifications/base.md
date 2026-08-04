@@ -124,6 +124,7 @@ Ulanzi Studio :3906 / Simulator :39069
 | 长按反馈 | 达到阈值时只标记长按成立，并由基座提交一次同尺寸反色图保持到 `keyup`；实际长按业务在 `keyup` 执行，不得改变 `viewBox` 或几何 transform |
 | `onSetActive` | 更新 `active`；重新激活时补一次渲染，非 active 实例禁止推送图标 |
 | `onClear` | 先调用 `onDispose`，取消独占任务，清理登记定时器，再删除实例 |
+| 键位移动 | 宿主拖动按键只改 context 里的 `key` 并补发 `onAdd` / `onParamFromApp`，**不发 `onClear`**。基座在这两个事件建立新实例前，必须回收同 `uuid` 同 `actionid` 但 `key` 不同的旧实例（dispose 后从 `INSTANCES` 删除），并把它的设置与运行态记录搬到新 `actionid::key`。不回收就会出现同一按键多个实例并行推图、键面状态跳变与外部连接泄漏 |
 | 进程退出 / SIGINT / SIGTERM | 对所有实例执行一次同步 dispose，给运行态最后一次落盘机会 |
 
 单个 action 异常经 `guardAction` 隔离，错误只写入该实例并渲染 `ERR / <actionKey>`；宿主事件处理器另由 `safeHandler` 兜底。进程级 rejection/exception 监听仅是最后防线。
@@ -148,6 +149,7 @@ Ulanzi Studio :3906 / Simulator :39069
 - 默认持久化完整的归一化设置；action 可通过 `persist` 关闭或筛选。
 - 只有持久化语义变化才写盘，采用同目录临时文件 + rename 原子替换。
 - 新存储损坏时转为只读并保留现场；仅新文件明确不存在时才迁移 legacy latency 设置。
+- `key` 是键位坐标，会随拖动改变：按键移动时记录必须整条搬到新键位，旧键位记录不得留存，目标键位上的历史残留记录必须被顶掉，否则合并顺序会让旧记录反超宿主来件、设置倒退。
 - Inspector 的 `__resetDefaults: 'true'` 是框架控制参数，不进入设置、不转发给业务 action。
 - Inspector 的 `__requestSettings: 'true'` 是只读握手：按 persisted 语义回推完整权威设置，不写盘、不渲染、不调用 `onReady`、不转发给业务 action。
 - 权威设置回推必须带 `__settingsSync: 'true'`；宿主重放或广播这条 `PARAMFROMPLUGIN` 时，主进程只识别为 Inspector 同步回声，不得据此覆盖 persisted 设置。
@@ -156,7 +158,7 @@ Ulanzi Studio :3906 / Simulator :39069
 ### 5.3 运行态存储
 
 - 文件：`data/action-state.json`。
-- 键仍为 `actionid::key`，内容结构由各 action 版本化管理。
+- 键仍为 `actionid::key`，内容结构由各 action 版本化管理；按键移动时随设置记录一起搬家。
 - 框架只注入 `readPersistedState`、`writePersistedState`、`dropPersistedState`。
 - 运行态缺失、版本不符或损坏必须降级为空；不得阻止 action 启动。
 - action 应在语义边界批量落盘，并在 `onDispose` 同步 flush，禁止高频逐 tick/逐探测写盘。
