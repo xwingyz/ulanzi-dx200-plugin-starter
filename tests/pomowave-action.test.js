@@ -76,6 +76,25 @@ function decodeSvg(dataUrl) {
   return Buffer.from(dataUrl.split(',')[1], 'base64').toString('utf8');
 }
 
+// 键面是 data:image/svg+xml，宿主按 XML 解析：任何一个无值属性都会让整张图解析失败，
+// 表现为键面整个空白而不是少画一笔。逐个起始标签校验属性必须写成 name="value"。
+function assertSvgAttributesHaveValues(svg, message) {
+  const tagPattern = /<([a-zA-Z][\w:.-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+  // sticky 正则匹配失败会把 lastIndex 归零，所以游标自己记，别读 lastIndex。
+  const attrPattern = /\s*[\w:.-]+\s*=\s*("[^"]*"|'[^']*')/y;
+  for (const [, tagName, rawAttrs] of svg.matchAll(tagPattern)) {
+    const attrs = rawAttrs.replace(/\/$/, '').trimEnd();
+    let cursor = 0;
+    while (cursor < attrs.length) {
+      attrPattern.lastIndex = cursor;
+      if (!attrPattern.exec(attrs)) break;
+      cursor = attrPattern.lastIndex;
+    }
+    const leftover = attrs.slice(cursor).trim();
+    assert.equal(leftover, '', `<${tagName}> 存在无值属性「${leftover}」，${message}`);
+  }
+}
+
 test('pomowave normalizes bounded cues and background settings without retaining legacy repeatManualCue', () => {
   const { config } = createPomowaveAction(createRuntime());
   const settings = config.normalizeSettings({
@@ -627,10 +646,15 @@ test('pomowave renders distinct status colors and a per-sound focus badge with m
   assert.match(pausedSvg, /data-pomodoro-status="PAUSED"[^>]+fill="#fbbf24"/);
   assert.match(pausedSvg, /data-background-muted="false"/, 'pause is not the same as a user mute');
 
+  assertSvgAttributesHaveValues(runningSvg, '未静音的键面必须是合法 SVG');
+
   instance.backgroundMuted = true;
   const mutedSvg = decodeSvg(config.render(instance));
   assert.match(mutedSvg, /data-background-muted="true"/);
-  assert.match(mutedSvg, /data-background-muted-slash d="M2 18 18 2"/);
+  assert.match(mutedSvg, /data-background-muted-slash="true" d="M2 18 18 2"/);
+  // 长按静音后键面曾整体消失：斜杠上的 data-background-muted-slash 是无值属性，
+  // 让整张 SVG 变成非法 XML，宿主直接渲染不出任何东西。
+  assertSvgAttributesHaveValues(mutedSvg, '长按静音后的键面必须仍是合法 SVG');
 
   const states = [
     { key: 'READY', phase: 'idle', running: false },

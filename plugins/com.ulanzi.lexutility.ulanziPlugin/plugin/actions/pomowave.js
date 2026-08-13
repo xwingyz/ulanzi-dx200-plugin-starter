@@ -222,7 +222,7 @@ function renderPomodoroBackgroundBadge(instance, theme, background) {
       <g transform="scale(0.8333)" fill="none" stroke="${iconColor}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="${muted ? '0.34' : '0.96'}">
         ${pomodoroBackgroundGlyph(sound)}
       </g>
-      ${muted ? `<path data-background-muted-slash d="M2 18 18 2" fill="none" stroke="${theme.muted}" stroke-width="2" stroke-linecap="round" opacity="0.92"/>` : ''}
+      ${muted ? `<path data-background-muted-slash="true" d="M2 18 18 2" fill="none" stroke="${theme.muted}" stroke-width="2" stroke-linecap="round" opacity="0.92"/>` : ''}
     </g>
   `;
 }
