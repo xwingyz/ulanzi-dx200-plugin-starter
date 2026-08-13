@@ -269,6 +269,7 @@
     "Slow down": "请求过快",
     "macOS only": "仅限 macOS",
     "ChatGPT Usage": "ChatGPT 用量",
+    "Used": "已用",
     "Read Codex limits and reset countdowns through Codex CLI. Install Codex CLI and run codex login first. These are Codex limits, not total ChatGPT account usage.": "通过 Codex CLI 读取 Codex 限额与重置倒计时。请先安装 Codex CLI 并运行 codex login。这些是 Codex 限额，不是 ChatGPT 账号总用量。",
     "Codex command": "Codex 命令",
     "Codex path": "Codex 路径",

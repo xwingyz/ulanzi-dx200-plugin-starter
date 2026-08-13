@@ -1,7 +1,7 @@
 # ChatGPT Usage 功能与技术规范
 
 状态：持续维护
-最后代码核对：2026-07-28
+最后代码核对：2026-08-13
 action key：`chatgptusage`
 UUID：`com.ulanzi.ulanzistudio.lexutility.chatgptusage`
 
@@ -41,13 +41,15 @@ ChatGPT Usage 在单个 DX200 键面上显示 Codex 的限额用量与重置倒�
 - 双击仍按共享手势合同执行：第一次短按刷新，第二次短按受冷却限制。ChatGPT 桌面端没有公开可用的 Live 语音深链或命令接口，不用 UI 自动化模拟点击。
 - 长按打开 `usageUrl`。
 - 限额行按窗口时长排序，短窗口在前；只有一条限额时用剩余空间显示限额重置券张数。
-- 拉取失败时按失败原因显示不同标识；临时故障保留上次数值并叠加陈旧标记，确认需要重新登录时清空旧数据并直接显示登录提醒。
+- 拉取失败时按失败原因显示不同标识；临时故障保留历史数据供恢复和诊断，但键面以 `ERR` 代替旧百分比，确认需要重新登录时清空旧数据并直接显示登录提醒。
 
 ## 3. 取数契约
 
 ### 3.1 可执行文件发现
 
 默认 `codex`，按 PATH 解析。**插件进程由 Ulanzi Studio 拉起，其 PATH 未必包含 homebrew 等前缀**，因此在 PATH 之外补一份常见前缀兵库（`/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin` 等）。全部落空则进入 `NO_CLI`，由用户在 Inspector 的 `codexCommand` 里手填绝对路径。
+
+npm 安装的 `codex` 可能是裸 `.js`，也可能是指向 `codex.js` 的无扩展名符号链接。两者都必须显式交给插件当前的 Node 可执行文件启动，不能依赖入口中的 `#!/usr/bin/env node`；Ulanzi Studio 的 PATH 可能找不到 `node`，否则子进程会以 127 退出并被误报为普通 RPC 错误。
 
 **不做**官方插件那套 `npm root -g` / `npm ls -g` / `pnpm root -g` / `pnpm exec` 的完整发现——那是近百行与业务无关的探测代码，且每次发现都要 spawn 多个包管理器进程。可解释的 `NO_CLI` 加一个可填路径足以覆盖。
 
@@ -132,14 +134,14 @@ rateLimitsByLimitId  { <limitId>: {...} }
 | --- | --- | --- |
 | `OK` | 拉取成功 | 正常数据行 |
 | `REFRESHING` | 有历史数据时短按刷新 | 保留行结构，百分比临时显示 `...` |
-| `STALE` | 有历史数据，本次失败 | 保留上次数值 + 陈旧点 |
+| `STALE` | 有历史数据，本次失败 | 保留历史数据供恢复和诊断，但键面以 `ERR` 代替旧百分比，不显示旧重置券或倒计时 |
 | `NO_CLI` | 找不到可执行文件 | 终端字形 + `No codex` |
 | `NOT_LOGGED_IN` | auth.json 缺失或无 token | 钥匙字形 + `codex login` |
 | `TIMEOUT` | app-server 超时 | 沙漏字形 + `Timeout` |
 | `RPC_ERROR` | JSON-RPC 返回 error 或结构不可解析 | 感叹号 + `Error` |
 | `PENDING` | 首次拉取未返回 | 标记 + 占位横线 |
 
-只要曾成功拉取过，临时失败优先降级为 `STALE`。`NOT_LOGGED_IN` 是例外：立即清空用量、重置券、订阅类型和上次获取时间，显示登录提醒，并把清空结果写回运行态持久化。具体原因回显 Inspector 诊断面板。
+只要曾成功拉取过，临时失败优先降级为 `STALE`。历史值继续留在运行态，以便下次成功刷新时平滑恢复，但键面不得继续把旧百分比、旧重置券或旧倒计时画成当前数据；数据行统一显示 `ERR`，具体原因回显 Inspector 诊断面板。`NOT_LOGGED_IN` 是例外：立即清空用量、重置券、订阅类型和上次获取时间，显示登录提醒，并把清空结果写回运行态持久化。
 
 ## 7. 品牌资产
 
@@ -154,6 +156,7 @@ OpenAI 标记，`viewBox="0 0 24 24"` 单 path，取自 simple-icons（收录的
 ```text
 ┌──────────────┐
 │  ✳ ChatGPT   │  行1：标记 + 字样，下沿为分隔线
+│     已用      │  标题下明确百分比采用已用口径，不与剩余额度混淆
 ├──────────────┤
 │ 5H  12%   2h │  行2：短窗口在前（存在时）
 │ W   30%   5d │  行3：周限额
@@ -162,6 +165,7 @@ OpenAI 标记，`viewBox="0 0 24 24"` 单 path，取自 simple-icons（收录的
 ```
 
 - 行数 1..3，行高等比分配，字号随行数自适应。
+- 标题下固定显示本地化的“已用”语义标签；接口字段是 `usedPercent`，不得让键面百分比被误读为剩余额度。
 - 限额行按 `windowDurationMins` 升序排列，短窗口在前，与 claudeusage 的 `5H`/`W` 顺序一致；接口没有规定 `primary` 一定是长窗口，因此按时长排而不是按字段名，缺时长的排最后。
 - 内容箱为 `42..214`，即基座规范的设计箱范围，不额外内缩。
 - 数据行为行背景填充式进度条，填充用矩形宽度实现，**禁止 clipPath**。
@@ -201,7 +205,7 @@ fetchedAt, lastErrorKind
 
 ## 11. 已覆盖的关键验证
 
-`tests/chatgptusage-action.test.js` 25 条，另有渲染与端到端人工验证（2026-07-19：真实拉取成功，键面 13 个状态渲染正确，与 claudeusage 并排比对行位、字号、填充与倒计时格式完全对齐；2026-07-28：真实响应确认重置券含 `expiresAt`）。
+`tests/chatgptusage-action.test.js` 覆盖取数、进程启动、状态与渲染，另有渲染与端到端人工验证（2026-07-19：真实拉取成功，键面 13 个状态渲染正确，与 claudeusage 并排比对行位、字号、填充与倒计时格式完全对齐；2026-07-28：真实响应确认重置券含 `expiresAt`；2026-08-13：确认 Homebrew 的无扩展名 `codex` 符号链接在受限 PATH 下无法自行找到 Node，并补充宿主 Node 启动回归）。
 
 - `auth.json` 缺失 / 无 tokens / JSON 损坏三种未登录路径。
 - JSON-RPC 返回 error、非 JSON 行、超时、进程启动失败。

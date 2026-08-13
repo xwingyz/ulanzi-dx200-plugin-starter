@@ -82,7 +82,7 @@ export function createChatGptUsageAction(runtime) {
 
     // 带路径分隔符的当成绝对/相对路径，直接校验，不去 PATH 里找。
     if (requested.includes(path.sep)) {
-      return isExecutable(requested, fsImpl) ? buildSpec(requested) : null;
+      return isExecutable(requested, fsImpl) ? buildSpec(requested, fsImpl) : null;
     }
 
     const pathDirs = String(options.pathEnv ?? process.env.PATH ?? '')
@@ -91,15 +91,23 @@ export function createChatGptUsageAction(runtime) {
     for (const dir of [...pathDirs, ...EXTRA_BIN_DIRS]) {
       const candidate = path.join(dir, requested);
       if (isExecutable(candidate, fsImpl)) {
-        return buildSpec(candidate);
+        return buildSpec(candidate, fsImpl);
       }
     }
     return null;
   }
 
-  // npm 全局装出来的 bin 有时是裸 .js（没有可执行位或缺 shebang），必须用 node 拉起。
-  function buildSpec(resolved) {
-    if (resolved.endsWith('.js')) {
+  // npm 全局装出来的 bin 可能是裸 .js，也可能是指向 .js 的无扩展名符号链接。
+  // Ulanzi Studio 的 PATH 通常找不到 `node`，不能让 #!/usr/bin/env node 自行解析；
+  // 这两种入口都必须显式交给当前宿主 Node 拉起。
+  function buildSpec(resolved, fsImpl = fs) {
+    let realPath = resolved;
+    try {
+      realPath = fsImpl.realpathSync(resolved);
+    } catch {
+      // 某些测试桩或特殊文件系统没有 realpath 能力，仍可按原路径后缀判断。
+    }
+    if (resolved.endsWith('.js') || realPath.endsWith('.js')) {
       return { command: process.execPath, prefixArgs: [resolved], resolved };
     }
     return { command: resolved, prefixArgs: [], resolved };
@@ -442,7 +450,7 @@ export function createChatGptUsageAction(runtime) {
     const divider = `<line x1="${boxX}" y1="${headerBaseline}" x2="${boxX + boxWidth}" y2="${headerBaseline}" stroke="${theme.low}" stroke-width="1.6" opacity="0.7"/>`;
 
     const bands = [...rows];
-    if (showCredits && Number.isFinite(instance.resetCredits) && instance.resetCredits > 0) {
+    if (state !== 'STALE' && showCredits && Number.isFinite(instance.resetCredits) && instance.resetCredits > 0) {
       bands.push({
         credits: instance.resetCredits,
         expiresAt: instance.resetCreditsExpiresAt,
@@ -475,12 +483,13 @@ export function createChatGptUsageAction(runtime) {
             showBar,
           });
         }
-        const countdown = formatCountdown(band.resetsAt, nowMs);
+        const stale = state === 'STALE';
+        const countdown = stale ? '' : formatCountdown(band.resetsAt, nowMs);
         return renderMeterRow(geometry, theme, {
-          percent: band.percent,
-          color: severityColor(band.severity, theme, severityColors),
+          percent: stale ? null : band.percent,
+          color: stale ? theme.warn : severityColor(band.severity, theme, severityColors),
           label: band.label,
-          value: state === 'REFRESHING' ? '...' : `${band.percent}%`,
+          value: state === 'REFRESHING' ? '...' : stale ? 'ERR' : `${band.percent}%`,
           tail: countdown,
           tailColor: countdownColor(countdown, theme),
           showBar,
@@ -513,7 +522,8 @@ export function createChatGptUsageAction(runtime) {
       ${
         frameContent(frame, `
           ${mark}
-          <text x="${labelX.toFixed(1)}" y="${headerBaseline - 10}" fill="${background.text}" font-size="25" font-weight="800" font-family="Arial, Helvetica, sans-serif">ChatGPT</text>
+          <text x="${labelX.toFixed(1)}" y="${headerBaseline - 20}" fill="${background.text}" font-size="22" font-weight="800" font-family="Arial, Helvetica, sans-serif">ChatGPT</text>
+          <text x="${labelX.toFixed(1)}" y="${headerBaseline - 5}" fill="${theme.muted}" font-size="11" font-weight="700" font-family="Arial, Helvetica, sans-serif">${escapeXml(t('Used', language))}</text>
           ${divider}
           ${staleBadge}
           ${body}

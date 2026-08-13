@@ -194,6 +194,23 @@ test('an absolute path is trusted as given, and a bare .js is launched through n
   assert.equal(resolveCodexCommand('/nope/codex', { fsImpl: fakeFs({}) }), null);
 });
 
+test('a codex symlink whose real target is JavaScript is launched through the host node', () => {
+  const binPath = '/opt/homebrew/bin/codex';
+  const jsPath = '/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js';
+  const fsImpl = {
+    ...fakeFs({ [binPath]: '' }),
+    realpathSync(candidate) {
+      assert.equal(candidate, binPath);
+      return jsPath;
+    },
+  };
+
+  const spec = resolveCodexCommand('codex', { fsImpl, pathEnv: '/opt/homebrew/bin:/usr/bin:/bin' });
+  assert.equal(spec.command, process.execPath);
+  assert.deepEqual(spec.prefixArgs, [binPath]);
+  assert.equal(spec.resolved, binPath);
+});
+
 test('login is judged from auth.json without touching the token itself', () => {
   const authPath = '/home/u/.codex/auth.json';
   const ok = fakeFs({ [authPath]: JSON.stringify({ tokens: { access_token: 'sk-x' } }) });
@@ -386,6 +403,27 @@ test('a manual refresh replaces visible percentages with dots until the fetch co
   assert.doesNotMatch(svg, />30<\/tspan><tspan[^>]*>%<\/tspan>/);
 });
 
+test('stale data is retained for recovery but never presented as a current percentage', () => {
+  const stale = instance({
+    displayState: 'STALE',
+    lastErrorKind: 'RPC_ERROR',
+    primary: win('W', 75),
+  });
+  const svg = Buffer.from(config.render(stale, { now: 100_000 }).split(',')[1], 'base64').toString('utf8');
+
+  assert.ok(svg.includes('>ERR<'));
+  assert.doesNotMatch(svg, />75<\/tspan><tspan[^>]*>%<\/tspan>/);
+});
+
+test('the key face states that percentages are used quota, not remaining quota', () => {
+  const svg = Buffer.from(config.render(instance({
+    settings: { uiLanguage: 'zh_CN' },
+    primary: win('W', 3),
+  })).split(',')[1], 'base64').toString('utf8');
+
+  assert.ok(svg.includes('>已用<'));
+});
+
 test('hydrated data is stale until a live fetch confirms it', () => {
   const persisted = {
     v: 1,
@@ -468,15 +506,15 @@ test('render survives every display state and draws one band per visible row', (
     assert.match(config.render(instance({ displayState: state })), /^data:image\/svg\+xml;base64,/);
   }
 
-  // 每个 band 固定 3 个 text（标签 / 数值 / 附注），外加标题的 "ChatGPT"。
+  // 每个 band 固定 3 个 text（标签 / 数值 / 附注），外加标题和“已用”语义标签。
   const texts = (svg) => (svg.match(/<text/g) || []).length;
   const one = decode(instance({ primary: win('W', 30) }));
   const withCredits = decode(instance({ primary: win('W', 30), resetCredits: 3 }));
   const two = decode(instance({ primary: win('W', 30), secondary: win('5H', 12) }));
 
-  assert.equal(texts(one), 1 + 1 * 3);
-  assert.equal(texts(withCredits), 1 + 2 * 3);
-  assert.equal(texts(two), 1 + 2 * 3);
+  assert.equal(texts(one), 2 + 1 * 3);
+  assert.equal(texts(withCredits), 2 + 2 * 3);
+  assert.equal(texts(two), 2 + 2 * 3);
   assert.ok(withCredits.includes('>RESET<'));
   assert.ok(!one.includes('>RESET<'), 'zero credits should not take a row');
   assert.ok(!two.includes('clipPath'), 'must not rely on clipPath');
