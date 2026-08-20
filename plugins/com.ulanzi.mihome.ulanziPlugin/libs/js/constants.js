@@ -1,0 +1,16 @@
+const Events = Object.freeze({
+  CONNECTED: 'connected',
+  CLOSE: 'close',
+  ERROR: 'error',
+  ADD: 'add',
+  RUN: 'run',
+  KEYDOWN: 'keydown',
+  KEYUP: 'keyup',
+  PARAMFROMAPP: 'paramfromapp',
+  PARAMFROMPLUGIN: 'paramfromplugin',
+  SETACTIVE: 'setactive',
+  CLEAR: 'clear',
+  TOAST: 'toast',
+  STATE: 'state',
+  OPENURL: 'openurl',
+});

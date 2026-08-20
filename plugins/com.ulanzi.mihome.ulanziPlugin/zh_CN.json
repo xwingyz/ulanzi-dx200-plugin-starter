@@ -1,0 +1,34 @@
+{
+  "Name": "MiHome",
+  "Description": "通过 Home Assistant 控制米家设备的自动化插件。",
+  "Actions": [
+    {
+      "Name": "书房射灯",
+      "Tooltip": "通过 Home Assistant 切换书房射灯开关。"
+    }
+  ],
+  "Localization": {
+    "MiHome": "MiHome",
+    "Title": "标题",
+    "Subtitle": "副标题",
+    "Save": "保存",
+    "Restore defaults": "恢复默认",
+    "Saved": "已保存",
+    "Defaults restored": "已恢复默认",
+    "Safe frame": "安全边框",
+    "Optimal area": "最佳范围",
+    "Show frame": "显示边框",
+    "see plugin log": "详见插件日志",
+    "Language": "语言",
+    "Auto": "自动",
+    "ON": "开",
+    "OFF": "关",
+    "OFFLINE": "离线",
+    "SETUP": "待配置",
+    "SYNC": "同步中",
+    "config/local.json missing": "需配置 config/local.json",
+    "ha token invalid": "令牌无效",
+    "ha unreachable": "无法连接",
+    "ha error": "HA 错误"
+  }
+}

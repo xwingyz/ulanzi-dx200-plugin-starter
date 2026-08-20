@@ -6,3 +6,5 @@ tmp/
 # 运行态：各 action 的持久化设置存储
 plugins/*/data/
 template/*/data/
+# 插件级共享凭据（HA 地址/令牌等），只在本机手填，不进版本库；.example 保留作为模板。
+plugins/*/config/local.json

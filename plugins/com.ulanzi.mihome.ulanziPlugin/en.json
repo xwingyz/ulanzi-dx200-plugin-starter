@@ -1,0 +1,34 @@
+{
+  "Name": "MiHome",
+  "Description": "Home automation for MiHome via Home Assistant.",
+  "Actions": [
+    {
+      "Name": "Study Spotlight",
+      "Tooltip": "Toggle the study spotlight through Home Assistant."
+    }
+  ],
+  "Localization": {
+    "MiHome": "MiHome",
+    "Title": "Title",
+    "Subtitle": "Subtitle",
+    "Save": "Save",
+    "Restore defaults": "Restore defaults",
+    "Saved": "Saved",
+    "Defaults restored": "Defaults restored",
+    "Safe frame": "Safe frame",
+    "Optimal area": "Optimal area",
+    "Show frame": "Show frame",
+    "see plugin log": "see plugin log",
+    "Language": "Language",
+    "Auto": "Auto",
+    "ON": "ON",
+    "OFF": "OFF",
+    "OFFLINE": "OFFLINE",
+    "SETUP": "SETUP",
+    "SYNC": "SYNC",
+    "config/local.json missing": "set config/local.json",
+    "ha token invalid": "token invalid",
+    "ha unreachable": "unreachable",
+    "ha error": "HA error"
+  }
+}

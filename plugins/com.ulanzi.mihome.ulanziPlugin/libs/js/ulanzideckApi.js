@@ -1,0 +1,167 @@
+/// <reference path="eventEmitter.js"/>
+/// <reference path="utils.js"/>
+
+class UlanziDeck {
+  constructor() {
+    this.key = '';
+    this.uuid = '';
+    this.actionid = '';
+    this.websocket = null;
+    this.language = 'en';
+    this.localization = null;
+    this.listeners = {};
+    this.on = EventEmitter.on;
+    this.emit = EventEmitter.emit;
+  }
+
+  connect(uuid) {
+    this.port = Utils.getQueryParams('port') || 3906;
+    this.address = Utils.getQueryParams('address') || '127.0.0.1';
+    this.actionid = Utils.getQueryParams('actionid') || '';
+    this.key = Utils.getQueryParams('key') || '';
+    this.language = Utils.adaptLanguage(Utils.getQueryParams('language') || Utils.getLanguage());
+    this.uuid = Utils.getQueryParams('uuid') || uuid || '';
+    this.isMain = this.uuid.split('.').length === 4;
+
+    if (this.websocket) {
+      this.websocket.close();
+      this.websocket = null;
+    }
+
+    this.websocket = new WebSocket(`ws://${this.address}:${this.port}`);
+
+    this.websocket.onopen = () => {
+      this.websocket.send(JSON.stringify({
+        code: 0,
+        cmd: Events.CONNECTED,
+        actionid: this.actionid,
+        key: this.key,
+        uuid: this.uuid,
+      }));
+      this.emit(Events.CONNECTED, {});
+      if (!this.isMain) {
+        this.localizeUI();
+      }
+    };
+
+    this.websocket.onerror = (error) => this.emit(Events.ERROR, error);
+    this.websocket.onclose = () => this.emit(Events.CLOSE);
+
+    this.websocket.onmessage = (event) => {
+      const data = event?.data ? JSON.parse(event.data) : null;
+      if (!data || (typeof data.code !== 'undefined' && data.cmdType !== 'REQUEST')) {
+        return;
+      }
+
+      if (!this.key && data.uuid === this.uuid && data.key) {
+        this.key = data.key;
+      }
+      if (!this.actionid && data.uuid === this.uuid && data.actionid) {
+        this.actionid = data.actionid;
+      }
+
+      if (data.cmd === Events.CLEAR && Array.isArray(data.param)) {
+        data.param.forEach((item) => {
+          item.context = this.encodeContext(item);
+        });
+      } else {
+        data.context = this.encodeContext(data);
+      }
+
+      this.emit(data.cmd, data);
+    };
+  }
+
+  async localizeUI() {
+    if (document.documentElement) {
+      document.documentElement.lang = this.language.replace('_', '-');
+    }
+    const wrapper = document.querySelector('.uspi-wrapper') || document.querySelector('.udpi-wrapper');
+    if (!wrapper) {
+      return;
+    }
+    if (!this.localization) {
+      try {
+        const json = await Utils.readJson(`${Utils.getPluginPath()}/${this.language}.json`);
+        this.localization = json.Localization || null;
+      } catch {
+        this.localization = null;
+      }
+    }
+    if (!this.localization) {
+      return;
+    }
+    // 对齐官方 plugin-common-html：按元素类型选择本地化目标属性，
+    // data-localize 显式指定 key，缺省时回退到元素当前文案/占位符。
+    wrapper.querySelectorAll('[data-localize]').forEach((element) => {
+      const key = element.dataset.localize;
+      const tag = element.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') {
+        element.placeholder = this.localization[key || element.placeholder] || element.placeholder;
+      } else if (element.title) {
+        element.title = this.localization[key || element.title] || element.title;
+      } else {
+        const source = key || element.textContent;
+        element.textContent = this.localization[source] || element.textContent;
+      }
+    });
+  }
+
+  // 对齐官方：取译文，缺失时回退 key 本身，便于代码里直接 $UD.t('Save')。
+  t(key) {
+    return (this.localization && this.localization[key]) || key;
+  }
+
+  // 用户语言覆盖：pref 为 'auto'/空时回到宿主/系统语言，否则用显式 locale。
+  // 变更后清空缓存并重跑 localizeUI，让已本地化的 [data-localize] 元素刷新到新语言。
+  // 依赖每个可本地化元素都带显式 data-localize key（否则二次本地化会以已译文案作 key 查不到）。
+  setLanguage(pref) {
+    const next = (!pref || pref === 'auto')
+      ? Utils.adaptLanguage(Utils.getQueryParams('language') || Utils.getLanguage())
+      : Utils.adaptLanguage(pref);
+    if (next === this.language && this.localization) {
+      return Promise.resolve();
+    }
+    this.language = next;
+    this.localization = null;
+    return this.localizeUI();
+  }
+
+  encodeContext(data) {
+    return `${data.uuid}___${data.key}___${data.actionid}`;
+  }
+
+  send(cmd, params = {}) {
+    this.websocket?.send(JSON.stringify({
+      cmd,
+      uuid: this.uuid,
+      key: this.key,
+      actionid: this.actionid,
+      ...params,
+    }));
+  }
+
+  sendParamFromPlugin(settings, context) {
+    const scoped = context ? this.decodeContext(context) : {};
+    const isPlainSettings = settings && typeof settings === 'object' && !Array.isArray(settings)
+      && !Object.keys(settings).some((key) => key.startsWith('__'));
+    this.send(Events.PARAMFROMPLUGIN, {
+      uuid: scoped.uuid || this.uuid,
+      key: scoped.key || this.key,
+      actionid: scoped.actionid || this.actionid,
+      param: isPlainSettings ? { __settingsSubmit: 'true', ...settings } : settings,
+    });
+  }
+
+  decodeContext(context) {
+    const [uuid, key, actionid] = String(context || '').split('___');
+    return { uuid, key, actionid };
+  }
+
+  onConnected(handler) { this.on(Events.CONNECTED, handler); return this; }
+  onAdd(handler) { this.on(Events.ADD, handler); return this; }
+  onParamFromApp(handler) { this.on(Events.PARAMFROMAPP, handler); return this; }
+  onParamFromPlugin(handler) { this.on(Events.PARAMFROMPLUGIN, handler); return this; }
+}
+
+const $UD = new UlanziDeck();
