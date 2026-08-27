@@ -12,5 +12,10 @@ export const Events = Object.freeze({
   CLEAR: 'clear',
   TOAST: 'toast',
   STATE: 'state',
+  SETSTATE: 'setState',
+  SETIMAGE: 'setImage',
+  SETTITLE: 'setTitle',
+  SETFEEDBACKLAYOUT: 'setFeedbackLayout',
+  SETFEEDBACK: 'setFeedback',
   OPENURL: 'openurl',
 });

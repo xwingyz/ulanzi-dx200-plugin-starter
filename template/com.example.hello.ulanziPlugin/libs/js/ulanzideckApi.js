@@ -158,6 +158,39 @@ class UlanziDeck {
     return { uuid, key, actionid };
   }
 
+  // 协议 V3.1.0 新增，需 Ulanzi Studio 3.3.0+；截至集成时官方客户端最新仅 3.2.11，尚未生效。
+
+  setState(context, state) {
+    const { uuid, key, actionid } = this.decodeContext(context);
+    this.send(Events.SETSTATE, {
+      param: { uuid, key, actionid, state },
+    });
+  }
+
+  setImage(context, options) {
+    const { uuid, key, actionid } = this.decodeContext(context);
+    this.send(Events.SETIMAGE, {
+      param: { uuid, key, actionid, ...(options || {}) },
+    });
+  }
+
+  setTitle(context, text) {
+    const { uuid, key, actionid } = this.decodeContext(context);
+    this.send(Events.SETTITLE, {
+      param: { uuid, key, actionid, text },
+    });
+  }
+
+  setFeedbackLayout(context, layout) {
+    const { uuid, key, actionid } = this.decodeContext(context);
+    this.send(Events.SETFEEDBACKLAYOUT, { uuid, key, actionid, layout });
+  }
+
+  setFeedback(context, layout) {
+    const { uuid, key, actionid } = this.decodeContext(context);
+    this.send(Events.SETFEEDBACK, { uuid, key, actionid, layout });
+  }
+
   onConnected(handler) { this.on(Events.CONNECTED, handler); return this; }
   onAdd(handler) { this.on(Events.ADD, handler); return this; }
   onParamFromApp(handler) { this.on(Events.PARAMFROMAPP, handler); return this; }
