@@ -3,8 +3,12 @@
   "Description": "通过 Home Assistant 控制米家设备的自动化插件。",
   "Actions": [
     {
-      "Name": "书房射灯",
-      "Tooltip": "通过 Home Assistant 切换书房射灯开关。"
+      "Name": "书房灯",
+      "Tooltip": "通过 Home Assistant 同时切换书房射灯和屏幕灯。"
+    },
+    {
+      "Name": "餐厅射灯",
+      "Tooltip": "通过 Home Assistant 同时切换餐厅射灯 1 号和 2 号。"
     }
   ],
   "Localization": {

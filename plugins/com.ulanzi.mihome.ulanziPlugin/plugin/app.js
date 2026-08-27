@@ -187,6 +187,34 @@ function createHaClient(options = {}) {
 
 const HA_CLIENT = createHaClient();
 
+// ---- 灯组共用纯函数：studylight 和 diningspotlights 都要"轮询多个 light 实体、
+// 判断群组开关状态、失败退避"，第二个 action 出现同一能力时按 development-rules.md
+// 的规则提升到这里。轮询/乐观切换/定时器调度这些带副作用的编排仍留在各 action 自己
+// 的文件里（与 nasstatus/bambustatus 的既有写法一致），这里只放不依赖 instance 的纯计算。----
+
+function haStateToLightState(value) {
+  return value === 'on' || value === 'off' ? value : 'unknown';
+}
+
+// 群组语义：任意一个实体亮着就算整体"开"；全部确认关了才算整体"关"；其余（含还没
+// 轮询到）视为未知。
+function combineLightStates(states) {
+  if (states.some((value) => value === 'on')) {
+    return 'on';
+  }
+  if (states.length > 0 && states.every((value) => value === 'off')) {
+    return 'off';
+  }
+  return 'unknown';
+}
+
+const LIGHT_GROUP_BACKOFF_DELAYS_MS = [60_000, 120_000];
+
+function lightGroupBackoffDelay(attempt) {
+  const index = Math.min(Math.max(attempt, 1) - 1, LIGHT_GROUP_BACKOFF_DELAYS_MS.length - 1);
+  return LIGHT_GROUP_BACKOFF_DELAYS_MS[index];
+}
+
 // ok / warn / crit 是语义告警色，供需要分级预警的 action 使用。它们不进
 // THEME_SWATCHES —— 色卡只展示 canvas / panel / low / accent / text 五个角色。
 // 取值原则：与该主题色调调和，且在各自 canvas 上有足够对比度；sand 是浅色
@@ -330,10 +358,13 @@ const PERSISTED_STATE = STATE_STORAGE.load();
 const ACTION_MODULES = createActionModules({
   appendDiagnosticLog,
   clearInstanceTimeout,
+  combineLightStates,
   escapeXml,
   formatCountdown,
   frameFor,
   ha: HA_CLIENT,
+  haStateToLightState,
+  lightGroupBackoffDelay,
   normalizeColor,
   readPersistedState,
   renderInstance,
@@ -1659,7 +1690,10 @@ export const __testing = Object.freeze({
   frameHighlight,
   beginPress,
   clearInstanceTimeout,
+  combineLightStates,
   createHaClient,
+  haStateToLightState,
+  lightGroupBackoffDelay,
   createWakeCoordinator,
   createSettingsStorage,
   createSettingsEventProcessor,

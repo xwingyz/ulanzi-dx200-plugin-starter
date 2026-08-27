@@ -1,23 +1,27 @@
-// 书房灯：单击同时控制书房射灯组和显示器挂灯（屏幕灯）。群组语义——只要有一盏亮就
-// 全部关掉，两盏都关才会全部点亮——与常见的"一键全开/全关"面板一致，不会因为两盏灯
-// 原本状态不一致而变成一开一关。entity_id 这次仍然写死；要控制第三盏灯时再决定要不要
-// 把灯列表升级成可配置项（见仓库 AGENTS.md「先做实一个场景」的取舍）。
+// 餐厅射灯：单击同时控制"米家LED射灯1"和"米家LED射灯2"。注意 Xiaomi 集成没给灯组加
+// 房间区分，HA 里存在两组重名的"米家LED射灯1/2"实体；这里选的是 2026-08-20 核对时
+// 实际点亮的那一组（另一组同名实体当时是关的，属于别的房间，不要跟这里搞混）。
+// 群组语义与 studylight 一致——任意一盏亮着就全部关掉，两盏都关才会全部点亮。
 //
-// haStateToLightState / combineLightStates / lightGroupBackoffDelay 由 app.js 注入——
-// diningspotlights action 出现后两个 action 都要"轮询多个灯、判断群组开关、失败退避"，
-// 这几个不依赖 instance 的纯函数已按 development-rules.md 的规则提升为共享原语。
-const SPOTLIGHT_ENTITY_ID = 'light.mijia_cn_group_1749469573210054656_group3_s_2_light';
-const SCREEN_ENTITY_ID = 'light.yeelink_cn_554094998_lamp22_s_2';
-const ENTITY_IDS = [SPOTLIGHT_ENTITY_ID, SCREEN_ENTITY_ID];
+// haStateToLightState / combineLightStates / lightGroupBackoffDelay 由 app.js 注入，
+// 与 studylight 共用（development-rules.md：第二个 action 出现同一纯能力时提升为
+// 共享原语）。轮询/乐观切换/定时器调度这些带副作用的编排仍是每个 action 自己的实现，
+// 与 nasstatus/bambustatus 的既有写法一致，不强行抽成通用引擎。
+const ENTITY_IDS = [
+  'light.yeelink_cn_1084383117_spot2_s_2_light',
+  'light.yeelink_cn_1084388920_spot2_s_2_light',
+];
 
-const STATE_VERSION = 2;
+// 换过两次目标实体（spot1 → 错的一组 spot2 同名灯 → 正确的一组），版本号一并进位：
+// 旧持久化状态是别的灯的开关记录，不能当作这两盏灯的初始状态用，宁可丢弃回到 unknown
+// 等下次轮询校正。
+const STATE_VERSION = 3;
 const POLL_INTERVAL_MS = 5_000;
-// HA 执行 turn_on/turn_off 后状态还没落定就轮询会读到旧值；本地链路延迟通常 <1s
-// （见仓库 README「首期验收」），留够余量再校正。
+// HA 执行 turn_on/turn_off 后状态还没落定就轮询会读到旧值，留够余量再校正。
 const RECONCILE_DELAY_MS = 900;
-const POLL_TIMER_SLOT = 'studylightPoll';
+const POLL_TIMER_SLOT = 'diningspotlightsPoll';
 
-export function createStudyLightAction(runtime) {
+export function createDiningSpotlightsAction(runtime) {
   const {
     clearInstanceTimeout,
     combineLightStates,
@@ -39,20 +43,16 @@ export function createStudyLightAction(runtime) {
   // ---------------------------------------------------------------- 运行态持久化
 
   function serializeState(instance) {
-    return {
-      v: STATE_VERSION,
-      spotlightState: instance.spotlightState,
-      screenState: instance.screenState,
-      lastSeenAt: instance.lastSeenAt ?? null,
-    };
+    return { v: STATE_VERSION, lightStates: instance.lightStates, lastSeenAt: instance.lastSeenAt ?? null };
   }
 
   function hydrateState(raw) {
-    const valid = raw && typeof raw === 'object' && raw.v === STATE_VERSION;
-    const pick = (value) => (valid && (value === 'on' || value === 'off') ? value : 'unknown');
+    const valid = raw && typeof raw === 'object' && raw.v === STATE_VERSION
+      && Array.isArray(raw.lightStates) && raw.lightStates.length === ENTITY_IDS.length;
     return {
-      spotlightState: pick(raw?.spotlightState),
-      screenState: pick(raw?.screenState),
+      lightStates: valid
+        ? raw.lightStates.map((value) => (value === 'on' || value === 'off' ? value : 'unknown'))
+        : ENTITY_IDS.map(() => 'unknown'),
       lastSeenAt: valid && Number.isFinite(raw.lastSeenAt) ? raw.lastSeenAt : null,
     };
   }
@@ -74,26 +74,24 @@ export function createStudyLightAction(runtime) {
     setInstanceTimeout(instance, POLL_TIMER_SLOT, () => runPoll(instance), delay);
   }
 
-  // results 是 [spotlightResult, screenResult]，两个都成功才当作一次成功轮询——
-  // 半成功不足以判断群组的真实合并状态，宁可整体退避重试。
+  // 所有实体都成功才当作一次成功轮询——半成功不足以判断群组的真实合并状态，
+  // 宁可整体退避重试。
   function applyPollResult(instance, results, now = Date.now()) {
     if (!ha.configured) {
       instance.connectionState = 'CONFIG_REQUIRED';
       instance.errorKind = null;
       return;
     }
-    const [spotlightResult, screenResult] = results;
-    if (spotlightResult.ok && screenResult.ok) {
+    if (results.every((result) => result.ok)) {
       instance.connectionState = 'ONLINE';
       instance.errorKind = null;
       instance.failureCount = 0;
-      instance.spotlightState = haStateToLightState(spotlightResult.json?.state);
-      instance.screenState = haStateToLightState(screenResult.json?.state);
+      instance.lightStates = results.map((result) => haStateToLightState(result.json?.state));
       instance.lastSeenAt = now;
       return;
     }
     instance.failureCount += 1;
-    const failed = spotlightResult.ok ? screenResult : spotlightResult;
+    const failed = results.find((result) => !result.ok);
     instance.connectionState = failed.kind === 'CONFIG' ? 'CONFIG_REQUIRED' : 'OFFLINE';
     instance.errorKind = failed.kind;
   }
@@ -129,11 +127,10 @@ export function createStudyLightAction(runtime) {
     if (instance.toggling) return;
     instance.toggling = true;
     // 乐观翻转：不等接口响应先给用户即时反馈。当前合并状态是"开"（含未知，未知时优先
-    // 假定要点亮）才关灯，否则点亮两盏。
-    const currentlyOn = combineLightStates([instance.spotlightState, instance.screenState]) === 'on';
+    // 假定要点亮）才关灯，否则点亮全部。
+    const currentlyOn = combineLightStates(instance.lightStates) === 'on';
     const nextState = currentlyOn ? 'off' : 'on';
-    instance.spotlightState = nextState;
-    instance.screenState = nextState;
+    instance.lightStates = ENTITY_IDS.map(() => nextState);
     renderInstance(instance);
     clearInstanceTimeout(instance, POLL_TIMER_SLOT);
 
@@ -168,7 +165,7 @@ export function createStudyLightAction(runtime) {
           : 'ha error';
       return { mode: 'offline', word: t('OFFLINE'), hint: t(hintKey) };
     }
-    const combined = combineLightStates([instance.spotlightState, instance.screenState]);
+    const combined = combineLightStates(instance.lightStates);
     if (combined === 'on') {
       return { mode: 'on', word: t('ON'), hint: '' };
     }
@@ -201,7 +198,7 @@ export function createStudyLightAction(runtime) {
     `;
   }
 
-  function renderStudyLightIcon(instance) {
+  function renderDiningSpotlightsIcon(instance) {
     const theme = themeFor(instance.settings);
     const view = viewFor(instance);
     const color = colorFor(theme, view.mode);
@@ -223,9 +220,9 @@ export function createStudyLightAction(runtime) {
 
   const config = {
     defaults: {
-      title: 'Study Lights',
-      subtitle: 'Spotlight + Screen',
-      theme: 'ember',
+      title: 'Dining Spotlights',
+      subtitle: 'Spot 1 + 2',
+      theme: 'sunset',
       frameSize: 'optimal',
       showFrame: 'true',
     },
@@ -257,18 +254,18 @@ export function createStudyLightAction(runtime) {
       clearInstanceTimeout(instance, POLL_TIMER_SLOT);
       flushState(instance);
     },
-    render: renderStudyLightIcon,
+    render: renderDiningSpotlightsIcon,
   };
 
   return {
-    key: 'studylight',
+    key: 'diningspotlights',
     config,
     testing: {
-      studylightApplyPollResult: applyPollResult,
-      studylightHandleToggle: handleToggle,
-      studylightHydrateState: hydrateState,
-      studylightRunPoll: runPoll,
-      studylightViewFor: viewFor,
+      diningspotlightsApplyPollResult: applyPollResult,
+      diningspotlightsHandleToggle: handleToggle,
+      diningspotlightsHydrateState: hydrateState,
+      diningspotlightsRunPoll: runPoll,
+      diningspotlightsViewFor: viewFor,
     },
   };
 }

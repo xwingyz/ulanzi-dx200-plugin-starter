@@ -3,8 +3,12 @@
   "Description": "Home automation for MiHome via Home Assistant.",
   "Actions": [
     {
-      "Name": "Study Spotlight",
-      "Tooltip": "Toggle the study spotlight through Home Assistant."
+      "Name": "Study Lights",
+      "Tooltip": "Toggle the study spotlight and screen light together through Home Assistant."
+    },
+    {
+      "Name": "Dining Spotlights",
+      "Tooltip": "Toggle dining spotlights 1 and 2 together through Home Assistant."
     }
   ],
   "Localization": {

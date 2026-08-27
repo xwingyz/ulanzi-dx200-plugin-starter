@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Study Lights</title>
+    <title>Dining Spotlights</title>
     <style>
       :root {
         color-scheme: dark;
@@ -12,7 +12,7 @@
         --text: #fafafa;
         --muted: #a1a1aa;
         --line: #27272a;
-        --accent: #f97316;
+        --accent: #fb7185;
       }
       * { box-sizing: border-box; }
       body {
@@ -52,7 +52,7 @@
         border-radius: 10px;
         padding: 10px 12px;
         background: var(--accent);
-        color: #431407;
+        color: #4c0519;
         font-weight: 700;
         cursor: pointer;
       }
@@ -71,18 +71,18 @@
   <body>
     <div class="uspi-wrapper hidden">
       <div class="panel">
-        <h1>Study Lights</h1>
+        <h1>Dining Spotlights</h1>
         <form id="property-inspector">
-          <p class="pi-note" data-localize="Single click: toggle the study spotlight and screen light together (group logic — any light on turns both off, otherwise both turn on). Double click: handled as an independent single click, not a separate gesture. Long press: not set.">Single click: toggle the study spotlight and screen light together (group logic — any light on turns both off, otherwise both turn on). Double click: handled as an independent single click, not a separate gesture. Long press: not set.</p>
+          <p class="pi-note" data-localize="Single click: toggle dining spotlights 1 and 2 together (group logic — any light on turns both off, otherwise both turn on). Double click: handled as an independent single click, not a separate gesture. Long press: not set.">Single click: toggle dining spotlights 1 and 2 together (group logic — any light on turns both off, otherwise both turn on). Double click: handled as an independent single click, not a separate gesture. Long press: not set.</p>
           <p class="pi-note" data-localize="Home Assistant address and access token live in this plugin's config/local.json, shared by every MiHome action — not configured here.">Home Assistant address and access token live in this plugin's config/local.json, shared by every MiHome action — not configured here.</p>
           <div class="field">
             <label for="title">Title</label>
-            <input id="title" name="title" maxlength="14" value="Study Lights">
+            <input id="title" name="title" maxlength="14" value="Dining Spotlights">
           </div>
           <hr class="pi-divider">
           <div class="field">
             <label for="theme">Theme</label>
-            <input id="theme" name="theme" type="hidden" value="ember">
+            <input id="theme" name="theme" type="hidden" value="sunset">
             <div class="theme-row" role="group" aria-label="Theme">
             </div>
           </div>
@@ -117,6 +117,6 @@
     <script src="../libs/js/utils.js"></script>
     <script src="../libs/js/ulanzideckApi.js"></script>
     <script src="./inspector-shared.js"></script>
-    <script src="./studylight.js"></script>
+    <script src="./diningspotlights.js"></script>
   </body>
 </html>

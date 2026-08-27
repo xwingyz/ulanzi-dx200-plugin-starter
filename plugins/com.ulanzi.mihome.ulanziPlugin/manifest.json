@@ -13,8 +13,8 @@
   "SupportedInMultiActions": false,
   "Actions": [
     {
-      "Name": "Study Spotlight",
-      "Tooltip": "Toggle the study spotlight through Home Assistant.",
+      "Name": "Study Lights",
+      "Tooltip": "Toggle the study spotlight and screen light together through Home Assistant.",
       "Icon": "assets/icons/actionStudylight.svg",
       "PropertyInspectorPath": "property-inspector/studylight.html",
       "UUID": "com.ulanzi.ulanzistudio.mihome.studylight",
@@ -22,6 +22,22 @@
         {
           "Name": "Default",
           "Image": "assets/icons/actionStudylight.svg"
+        }
+      ],
+      "Devices": [],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Dining Spotlights",
+      "Tooltip": "Toggle dining spotlights 1 and 2 together through Home Assistant.",
+      "Icon": "assets/icons/actionDiningspotlights.svg",
+      "PropertyInspectorPath": "property-inspector/diningspotlights.html",
+      "UUID": "com.ulanzi.ulanzistudio.mihome.diningspotlights",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionDiningspotlights.svg"
         }
       ],
       "Devices": [],

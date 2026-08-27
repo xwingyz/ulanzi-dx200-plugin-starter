@@ -1,0 +1,10 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" rx="56" fill="#1f0910"/>
+  <rect x="28" y="28" width="200" height="200" rx="42" fill="#38121f" stroke="#9f1239" stroke-width="2"/>
+  <circle cx="128" cy="90" r="42" fill="#fb7185" opacity="0.16"/>
+  <circle cx="128" cy="90" r="30" fill="#fb7185" stroke="#fff1f2" stroke-opacity="0.16" stroke-width="2"/>
+  <path d="M 120 84 L 128 96 L 136 84" stroke="#4c0519" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+  <rect x="110" y="114" width="36" height="20" rx="5" fill="#2a0d17" stroke="#fb7185" stroke-width="2"/>
+  <text x="128" y="176" text-anchor="middle" fill="#fff1f2" font-size="24" font-weight="700" font-family="Arial, Helvetica, sans-serif">DINING</text>
+  <text x="128" y="202" text-anchor="middle" fill="#fda4af" font-size="18" font-family="Arial, Helvetica, sans-serif">SPOTLIGHTS</text>
+</svg>
