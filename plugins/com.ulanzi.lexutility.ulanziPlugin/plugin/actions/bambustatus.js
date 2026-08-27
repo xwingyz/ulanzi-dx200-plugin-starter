@@ -212,11 +212,26 @@ function stageLabel(print = {}) {
   return stage != null && stage > 0 ? `Preparation stage %s`.replace('%s', String(stage)) : 'Preparing to print';
 }
 
+function isUserCancelledFailure(print = {}) {
+  return [
+    print.mc_print_error_code,
+    print.print_error,
+    print.error_code,
+    print.fail_reason,
+    print.error_message,
+    print.error,
+  ].some((value) => {
+    const normalized = cleanString(value).toUpperCase();
+    return ['50348044', '16396', '0X0300400C', '0X400C'].includes(normalized);
+  });
+}
+
 function resolvePrintState(print = {}) {
   const raw = cleanString(print.gcode_state).toUpperCase();
   const stage = finiteNumber(print.mc_print_stage);
   if (['FINISH', 'FINISHED', 'SUCCESS', 'COMPLETED', 'COMPLETE'].includes(raw)) return 'FINISHED';
-  if (['FAILED', 'ERROR'].includes(raw)) return 'FAILED';
+  if (raw === 'FAILED') return isUserCancelledFailure(print) ? 'IDLE' : 'FAILED';
+  if (raw === 'ERROR') return 'FAILED';
   if (['PAUSE', 'PAUSED'].includes(raw)) return 'PAUSED';
   if (['PREPARE', 'PREPARING', 'SLICING'].includes(raw)) return 'PREPARING';
   if (['RUNNING', 'PRINTING'].includes(raw)) {

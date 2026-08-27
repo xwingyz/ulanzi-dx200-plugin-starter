@@ -31,6 +31,32 @@ test('bambustatus resolves the principal printer states', () => {
   assert.equal(testing.resolvePrintState({ gcode_state: 'FAILED' }), 'FAILED');
 });
 
+test('bambustatus treats a settled user-cancelled print as idle but keeps real failures', () => {
+  assert.equal(
+    testing.resolvePrintState({
+      gcode_state: 'FAILED',
+      mc_print_error_code: 16396,
+      fail_reason: '50348044',
+    }),
+    'IDLE',
+  );
+  assert.equal(
+    testing.resolvePrintState({
+      gcode_state: 'FAILED',
+      mc_print_error_code: 0,
+      fail_reason: '50348044',
+    }),
+    'IDLE',
+  );
+  assert.equal(
+    testing.resolvePrintState({
+      gcode_state: 'FAILED',
+      mc_print_error_code: 1,
+    }),
+    'FAILED',
+  );
+});
+
 test('bambustatus derives elapsed and remaining time without a ticking counter', () => {
   const now = 1_800_000;
   assert.deepEqual(

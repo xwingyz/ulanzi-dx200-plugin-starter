@@ -99,6 +99,8 @@ Inspector 不遮蔽 Access Code。所有设置由共享设置存储写入 `data/
 
 用户态统一为：`CONNECTING`、`IDLE`、`PREPARING`、`RUNNING`、`PAUSED`、`FINISHED`、`FAILED`、`OFFLINE`、`INCOMPATIBLE`。
 
+对于 Bambu 将用户停止打印上报为 `gcode_state=FAILED` 的情况，若 `mc_print_error_code`、`print_error`、`error_code` 或失败原因字段包含 `50348044`（或其低位形式 `16396`），按已停止任务处理为 `IDLE`。其他 `FAILED` 保持为 `FAILED`，避免隐藏真实故障。
+
 准备阶段优先按已知 `stg_cur` 数字映射为中文，例如自动调平、热床预热、机械模式检查、换料、喷嘴加热、流量校准、扫描热床、首层检查、识别热床、归位和清洁喷嘴。未知阶段显示设备返回的原始值；没有原始文本时显示 `阶段 <数值>`，不得吞成笼统“准备中”。
 
 ## 6. 键面显示
