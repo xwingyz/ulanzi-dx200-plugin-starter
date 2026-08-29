@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { __testing as lexTesting } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
 import { Events as lexSdkEvents } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/libs/node/constants.js';
 import LexUlanzideckApi from '../plugins/com.ulanzi.lexutility.ulanziPlugin/libs/node/ulanzideckApi.js';
+import { __testing as mihomeTesting } from '../plugins/com.ulanzi.mihome.ulanziPlugin/plugin/app.js';
 import { __testing as templateTesting } from '../template/com.example.hello.ulanziPlugin/plugin/app.js';
 
 const lexActionConfigs = lexTesting.ACTION_CONFIGS;
@@ -2168,5 +2169,143 @@ for (const framework of persistenceFrameworks) {
       delete config.onDispose;
     }
     assert.equal(called, false);
+  });
+}
+
+// --- 运行态图标帧去重 -------------------------------------------------------
+// 共享层能力，三份 app.js（两个业务插件 + template）必须行为一致。
+
+const dedupeFrameworks = [
+  { name: 'lex utility', t: lexTesting, key: 'latency', actionUuid: 'com.ulanzi.ulanzistudio.lexutility.latency' },
+  { name: 'mihome', t: mihomeTesting, key: 'studylight', actionUuid: 'com.ulanzi.ulanzistudio.mihome.studylight' },
+  { name: 'template', t: templateTesting, key: 'counter', actionUuid: '__PLUGIN_UUID__.counter' },
+];
+
+function dedupeInstance(framework) {
+  const config = framework.t.ACTION_CONFIGS[framework.key];
+  const instance = {
+    context: `${framework.actionUuid}___dedupe___a1`,
+    actionUuid: framework.actionUuid,
+    active: true,
+    settings: { ...config.defaults },
+  };
+  Object.assign(instance, config.createState(instance));
+  return instance;
+}
+
+// emit 收集器：renderInstanceNow 的注入点，测试不需要真实宿主连接。
+function collectEmits(framework, instance) {
+  const emitted = [];
+  const push = () => framework.t.renderInstanceNow(instance, {
+    emit: (context, icon) => emitted.push({ context, icon }),
+  });
+  return { emitted, push };
+}
+
+for (const framework of dedupeFrameworks) {
+  test(`${framework.name}: identical frames are pushed once`, () => {
+    const instance = dedupeInstance(framework);
+    const { emitted, push } = collectEmits(framework, instance);
+
+    assert.equal(push(), true);
+    assert.equal(push(), false);
+    assert.equal(push(), false);
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0].context, instance.context);
+  });
+
+  test(`${framework.name}: a changed frame is pushed again`, () => {
+    const instance = dedupeInstance(framework);
+    const { emitted, push } = collectEmits(framework, instance);
+
+    push();
+    // theme 是唯一保证影响每个 action 渲染的共享字段（规则 6：颜色只有 theme 一个轴，
+    // 所有 action 的取色都来自 theme token）。title 不行——不是每个 action 都画标题。
+    const theme = instance.settings.theme === 'mint' ? 'ember' : 'mint';
+    instance.settings = { ...instance.settings, theme };
+    assert.equal(push(), true);
+    assert.equal(emitted.length, 2);
+    assert.notEqual(emitted[0].icon, emitted[1].icon);
+  });
+
+  test(`${framework.name}: long-press feedback and its release both survive dedupe`, () => {
+    const instance = dedupeInstance(framework);
+    const { emitted, push } = collectEmits(framework, instance);
+
+    push();
+    instance.longPressFeedback = true;
+    assert.equal(push(), true);
+    instance.longPressFeedback = false;
+    assert.equal(push(), true);
+    assert.equal(emitted.length, 3);
+    // 松开后回到与第一帧完全相同的画面，反色那帧夹在中间。
+    assert.equal(emitted[2].icon, emitted[0].icon);
+    assert.notEqual(emitted[1].icon, emitted[0].icon);
+  });
+
+  test(`${framework.name}: invalidateIconCache forces the next frame through`, () => {
+    const instance = dedupeInstance(framework);
+    const { emitted, push } = collectEmits(framework, instance);
+
+    push();
+    assert.equal(push(), false);
+    framework.t.invalidateIconCache(instance);
+    assert.equal(push(), true);
+    assert.equal(emitted.length, 2);
+    assert.equal(emitted[1].icon, emitted[0].icon);
+  });
+
+  test(`${framework.name}: an inactive instance pushes nothing and keeps the cache untouched`, () => {
+    const instance = dedupeInstance(framework);
+    const { emitted, push } = collectEmits(framework, instance);
+
+    instance.active = false;
+    assert.equal(push(), false);
+    assert.equal(emitted.length, 0);
+    assert.equal(instance.lastIcon ?? null, null);
+
+    instance.active = true;
+    assert.equal(push(), true);
+    assert.equal(emitted.length, 1);
+  });
+
+  test(`${framework.name}: a failing render leaves the cache empty so the next good frame is pushed`, () => {
+    const instance = dedupeInstance(framework);
+    const config = framework.t.ACTION_CONFIGS[framework.key];
+    const realRender = config.render;
+    const { emitted, push } = collectEmits(framework, instance);
+
+    config.render = () => { throw new Error('render boom'); };
+    try {
+      assert.equal(push(), false);
+    } finally {
+      config.render = realRender;
+    }
+    assert.equal(emitted.length, 0);
+    assert.equal(instance.lastIcon ?? null, null);
+    assert.equal(instance.lastError?.phase, 'render');
+
+    assert.equal(push(), true);
+    assert.equal(emitted.length, 1);
+  });
+
+  test(`${framework.name}: a throwing emit keeps the cache stale so the frame is retried`, () => {
+    const instance = dedupeInstance(framework);
+    let attempts = 0;
+    const emitted = [];
+    const push = () => framework.t.renderInstanceNow(instance, {
+      emit: (context, icon) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error('websocket down');
+        }
+        emitted.push(icon);
+      },
+    });
+
+    assert.throws(push, /websocket down/);
+    assert.equal(instance.lastIcon ?? null, null);
+    assert.equal(push(), true);
+    assert.equal(emitted.length, 1);
   });
 }

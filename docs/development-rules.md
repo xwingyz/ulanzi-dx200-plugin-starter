@@ -151,6 +151,7 @@ settings 与运行态是两套东西，不得混用同一个存储：
 
 - action 代码不得直接调用 `setTimeout` / `setInterval`。统一使用框架的 `setInstanceTimeout(instance, slot, fn, ms)` / `clearInstanceTimeout(instance, slot)` / `hasInstanceTimeout(instance, slot)`，定时器句柄按实例登记，回调自动带异常兜底；实例被 `onClear` 移除时由框架 `disposeInstance` 统一回收，action 不需要（也不允许）自己维护裸句柄。
 - 实例定时器默认采用休眠恢复保护：事件循环超过 5 秒未运行即视为恢复事件，休眠前登记且尚未执行的回调不得在唤醒瞬间集中补跑，统一等待 2.5 秒稳定窗口并按 `context + slot` 在 1.5 秒内确定性错峰后执行一次。长按资格等瞬时回调使用 `latePolicy: 'drop'`，恢复后直接取消。恢复窗口内同一 context 的重复运行态图标推送必须合并为最后一帧，避免单个 action 的补绘触发整机画面刷新洪峰。
+- **运行态图标帧去重**：框架在 `renderInstanceNow` 里比对本次要提交的成品图标字符串（已含长按反色）与上一次提交的结果，逐字节相同就不提交。宿主每收一帧都要压一个 zip 再按 1024B 分帧走 HID 写出（单帧 11-24KB 约合 12-24 次 HID 事务），秒级 tick 的 action 绝大多数帧与上一帧完全相同，这层去重直接砍掉那部分宿主开销。因此 **action 不得依赖「每次调用 render 都会推一帧」这个副作用**：需要让画面动起来（闪烁、脉冲、轮播）必须真正改变渲染输出（如 pomowave 的 `blinkOn`），不能靠重复提交同一帧触发宿主重绘。缓存挂在实例上，只在宿主可能已经丢掉该帧时由框架经 `invalidateIconCache` 作废，作废点固定为三处：WebSocket 重连（宿主可能重启）、实例失活（`onSetActive(false)`，下次激活整帧重推）、休眠恢复窗口。按键搬位会重建实例，缓存随旧实例一起丢弃。`renderErrorState` 同样纳入去重，持续失败不会每个 tick 重推同一张 ERR 图。
 - 多实例争用同一排他资源（例如带宽测速）时，统一使用框架 `createExclusiveTaskQueue()` 创建的共享队列；资源名由业务定义，框架只负责同资源串行、同实例去重、排队/运行取消和 `AbortSignal`。不得在 action 内另造模块级 busy 标志或私有队列，`disposeInstance` 必须取消该实例仍在排队或运行的任务。
 - 框架对所有进入 action 代码的入口统一兜底：`onRun`、`onDoublePress`、`onLongPress`、`render`、`createState`、定时器回调、宿主事件处理均经 `guardAction` / `safeHandler` 包裹。单个 action 抛错只影响该实例：记日志、该键位显示 ERR 状态图（`renderErrorState`），进程与其他 action 不受影响。
 - 异步 `onRun` / `onDoublePress` / `onLongPress` 必须 return Promise（箭头函数省略大括号，或显式 `return`），否则 rejection 逃逸出框架兜底。

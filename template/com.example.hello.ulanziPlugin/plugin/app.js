@@ -859,7 +859,7 @@ function renderErrorState(instance) {
   try {
     const theme = themeFor(instance.settings || {});
     const actionKey = actionKeyFromUuid(instance.actionUuid);
-    $UD.setBaseDataIcon(instance.context, toDataUrl(`
+    const icon = toDataUrl(`
       <svg width="392" height="392" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
         ${renderScreenFrame(theme, theme.accent, `
           <text x="128" y="116" text-anchor="middle" fill="${theme.text}" font-size="34" font-weight="700" font-family="Arial, Helvetica, sans-serif">ERR</text>
@@ -867,7 +867,13 @@ function renderErrorState(instance) {
           <text x="128" y="182" text-anchor="middle" fill="${theme.low}" font-size="14" font-family="Arial, Helvetica, sans-serif">${escapeXml(t('see plugin log', instance.settings?.uiLanguage))}</text>
         `, frameFor(instance.settings || {}))}
       </svg>
-    `));
+    `);
+    // 持续失败时每个 tick 都会渲染同一张 ERR 图，同样走去重。
+    if (icon === instance.lastIcon) {
+      return;
+    }
+    $UD.setBaseDataIcon(instance.context, icon);
+    instance.lastIcon = icon;
   } catch {}
 }
 
@@ -1144,37 +1150,58 @@ function syncInspectorSettings(instance, _incomingSettings = {}, ud = $UD) {
   ud.sendParamFromPlugin(authoritative, instance.context);
 }
 
-function renderInstanceNow(instance) {
-  if (instance.active === false) {
-    return;
+// 帧去重。宿主每收一帧运行态图标都要落一个 zip 到 TempData，再按 1024B 分帧走 HID 写出
+// （单帧 11-24KB 约合 12-24 次 HID 事务），而秒级 tick 的 action 绝大多数帧与上一帧逐字节相同。
+// 这里只比对最终提交的字符串：相同就不提交，宿主那边那一帧还在，键面不变。
+// 代价是缓存必须在「宿主可能已经丢掉这帧」时作废，作废点见本函数的全部调用处。
+function invalidateIconCache(instance) {
+  if (instance) {
+    instance.lastIcon = null;
   }
+}
+
+function renderInstanceNow(instance, runtime = {}) {
+  if (instance.active === false) {
+    return false;
+  }
+  const emit = runtime.emit ?? ((context, icon) => $UD.setBaseDataIcon(context, icon));
   const config = configFromUuid(instance.actionUuid);
   let icon;
   try {
     icon = config.render(instance);
   } catch (error) {
     reportActionError(instance, 'render', error);
-    return;
+    return false;
   }
-  $UD.setBaseDataIcon(instance.context, longPressFeedbackIcon(icon, instance.longPressFeedback === true));
+  // 长按反色是最终画面的一部分，必须比对反色之后的成品，否则按下与松开这两帧会被去重吃掉。
+  const next = longPressFeedbackIcon(icon, instance.longPressFeedback === true);
+  if (next === instance.lastIcon) {
+    return false;
+  }
+  // 先提交再记账：emit 抛错时缓存保持旧值，下一帧仍会重推，不会把键面永久停在没送达的那帧。
+  emit(instance.context, next);
+  instance.lastIcon = next;
+  return true;
 }
 
-function renderInstance(instance) {
+function renderInstance(instance, runtime = {}) {
   if (instance.active === false) {
     return;
   }
   const recovery = WAKE_COORDINATOR.observe();
   if (recovery.recovering) {
+    // 休眠恢复后宿主与设备的画面可能已被重置，缓存不再代表宿主实际显示的内容，一律重推。
+    invalidateIconCache(instance);
     setInstanceTimeout(
       instance,
       WAKE_RENDER_TIMER_SLOT,
-      () => renderInstanceNow(instance),
+      () => renderInstanceNow(instance, runtime),
       WAKE_COORDINATOR.recoveryDelay(instance.context, WAKE_RENDER_TIMER_SLOT),
     );
     return;
   }
   clearInstanceTimeout(instance, WAKE_RENDER_TIMER_SLOT);
-  renderInstanceNow(instance);
+  renderInstanceNow(instance, runtime);
 }
 
 function dispatchShortPress(
@@ -1426,6 +1453,10 @@ function startPlugin() {
 
 $UD.onConnected(() => {
   log('connected');
+  // 重连意味着宿主可能重启过，它那边的图像不一定还在；缓存全部作废，让下一帧无条件重推。
+  for (const instance of INSTANCES.values()) {
+    invalidateIconCache(instance);
+  }
 });
 
 $UD.onError(safeHandler('wsError', (error) => {
@@ -1471,6 +1502,8 @@ $UD.onSetActive(safeHandler('setActive', (message) => {
   if (instance.active) {
     renderInstance(instance);
   } else {
+    // 失活期间宿主不保留这一帧，下次激活必须整帧重推，不能被去重挡掉。
+    invalidateIconCache(instance);
     clearInstanceTimeout(instance, LONG_PRESS_TIMER_SLOT);
     instance.pressed = false;
     instance.longPressQualified = false;
@@ -1543,6 +1576,8 @@ export const __testing = Object.freeze({
   handleRunEvent,
   dropPersistedState,
   initializeInstanceState,
+  invalidateIconCache,
+  renderInstanceNow,
   reclaimMovedInstances,
   relocatePersistedRecords,
   relocatedContexts,
