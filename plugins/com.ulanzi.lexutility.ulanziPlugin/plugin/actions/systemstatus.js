@@ -11,6 +11,7 @@ const HISTORY_LIMIT = 24;
 const HISTORY_FLUSH_SAMPLES = 24;
 const SYSTEM_STATUS_STATE_VERSION = 1;
 const MANUAL_REFRESH_FEEDBACK_MS = 300;
+const SHARED_TICK_SLOT = 'systemstatus-shared-tick';
 
 function finite(value) {
   if (value == null || value === '') {
@@ -600,6 +601,137 @@ export function createSystemStatusAction(runtime) {
     return written;
   }
 
+  // ---- 共享采样调度 ----
+  // 同一进程里可能同时挂着多个 systemstatus tile；如果各自独立轮询，currentLoad/mem/
+  // cpuTemperature/networkStats（以及 macOS 上按需触发的 ioreg 子进程）会按 tile 数量
+  // 重复执行。这里改成进程内只有一个共享定时器：按当前存活实例里最短的 pollSec 定节奏，
+  // 每次 tick 按全部存活实例 metric 槽位的并集决定要采集哪些字段，采一次后广播给全部实例。
+  // 定时器句柄必须挂在某个实例上才能被框架 disposeInstance 的统一回收接管，因此选一个
+  // "leader" 实例持有它；leader 被销毁时把句柄转交给还存活的下一个实例，全部销毁后停表。
+  const live = new Set();
+  let leader = null;
+  let sharedNetworkBaseline = null;
+
+  function sharedIntervalMs() {
+    let min = Infinity;
+    for (const candidate of live) {
+      const seconds = Number(candidate.settings.pollSec);
+      if (Number.isFinite(seconds) && seconds > 0 && seconds < min) {
+        min = seconds;
+      }
+    }
+    return (Number.isFinite(min) ? min : Number(defaults.pollSec)) * 1000;
+  }
+
+  function sharedWants() {
+    const metrics = new Set();
+    for (const candidate of live) {
+      for (const key of selectedMetrics(candidate.settings)) {
+        metrics.add(key);
+      }
+    }
+    return {
+      wantGpu: metrics.has('gpu'),
+      wantTemperature: metrics.has('temperature'),
+      wantNetwork: metrics.has('upload') || metrics.has('download'),
+    };
+  }
+
+  // lhmUrl 理论上是逐实例设置，但它描述的是同一台机器上唯一的 LibreHardwareMonitor
+  // 服务地址；共享采集只能选一个，优先用存活实例里任何一个非默认值。
+  function sharedLhmUrl() {
+    for (const candidate of live) {
+      if (candidate.settings.lhmUrl && candidate.settings.lhmUrl !== LHM_DEFAULT_URL) {
+        return candidate.settings.lhmUrl;
+      }
+    }
+    return LHM_DEFAULT_URL;
+  }
+
+  function stopSharedTick() {
+    if (leader) {
+      clearInstanceTimeout(leader, SHARED_TICK_SLOT);
+    }
+    leader = null;
+  }
+
+  // 成员变化（新实例就绪、leader 销毁、间隔变短）都会重排这张表；代价是每次变化都会把
+  // 倒计时重置为一整个新间隔，而不是精确延续剩余时间——对于 tile 数量不多、变化不频繁的
+  // 场景这点误差可以接受，换来的是不需要自己再造一份可查询剩余时间的定时器。
+  function scheduleSharedTick() {
+    if (!live.size) {
+      stopSharedTick();
+      return;
+    }
+    if (!leader || !live.has(leader)) {
+      leader = live.values().next().value;
+    }
+    setInstanceTimeout(leader, SHARED_TICK_SLOT, runSharedTick, sharedIntervalMs());
+  }
+
+  function applySample(instance, result) {
+    instance.advancedSource = result.advancedSource;
+    instance.lastSampleAt = result.at;
+    instance.sampleError = !result.ok;
+    instance.values = { ...instance.values, ...result.values };
+    if (appendSystemStatusHistory(instance.history, result.values)) {
+      instance.historyNeedsFlush = true;
+      instance.historyDirtySamples += 1;
+      if (instance.historyDirtySamples >= HISTORY_FLUSH_SAMPLES) {
+        flushHistory(instance);
+      }
+    }
+  }
+
+  async function runSharedTick() {
+    if (!live.size) {
+      return;
+    }
+    // 正在跑独立采样（手动刷新、刚 onReady、刚改设置）的实例这一轮先不掺和，让它自己的
+    // 结果落地；它不会因此错过数据，下一轮共享 tick 会把它带上。
+    const targets = [...live].filter((candidate) => !candidate.sampling);
+    if (targets.length) {
+      for (const target of targets) {
+        target.sampling = true;
+      }
+      try {
+        const result = await collectSample({
+          lhmUrl: sharedLhmUrl(),
+          previousNetwork: sharedNetworkBaseline,
+          ...sharedWants(),
+        });
+        sharedNetworkBaseline = result.networkBaseline;
+        for (const target of targets) {
+          if (live.has(target)) {
+            applySample(target, result);
+          }
+        }
+      } catch {
+        for (const target of targets) {
+          if (live.has(target)) {
+            target.sampleError = true;
+          }
+        }
+      } finally {
+        for (const target of targets) {
+          target.sampling = false;
+          if (!live.has(target)) {
+            continue;
+          }
+          if (target.manualRefreshQueued) {
+            target.manualRefreshQueued = false;
+            sample(target, { manualFeedback: true });
+          } else {
+            renderInstance(target);
+          }
+        }
+      }
+    }
+    scheduleSharedTick();
+  }
+
+  // 单实例即时采样：onReady 首次上屏、手动刷新、设置变更后都要立刻看到新值，不等下一次
+  // 共享 tick。自动周期轮询已经全部交给上面的共享调度，这里不再自行重新排班。
   async function sample(instance, options = {}) {
     const { manualFeedback = false, ...collectOptions } = options;
     if (instance.sampling) {
@@ -620,7 +752,7 @@ export function createSystemStatusAction(runtime) {
       const metrics = selectedMetrics(instance.settings);
       const result = await collectSample({
         lhmUrl: instance.settings.lhmUrl,
-        previousNetwork: instance.networkBaseline,
+        previousNetwork: sharedNetworkBaseline,
         wantGpu: metrics.includes('gpu'),
         wantTemperature: metrics.includes('temperature'),
         wantNetwork: metrics.includes('upload') || metrics.includes('download'),
@@ -629,18 +761,8 @@ export function createSystemStatusAction(runtime) {
       if (INSTANCES.get(instance.context) !== instance) {
         return;
       }
-      instance.networkBaseline = result.networkBaseline;
-      instance.advancedSource = result.advancedSource;
-      instance.lastSampleAt = result.at;
-      instance.sampleError = !result.ok;
-      instance.values = { ...instance.values, ...result.values };
-      if (appendSystemStatusHistory(instance.history, result.values)) {
-        instance.historyNeedsFlush = true;
-        instance.historyDirtySamples += 1;
-        if (instance.historyDirtySamples >= HISTORY_FLUSH_SAMPLES) {
-          flushHistory(instance);
-        }
-      }
+      sharedNetworkBaseline = result.networkBaseline;
+      applySample(instance, result);
     } catch {
       instance.sampleError = true;
     } finally {
@@ -660,13 +782,11 @@ export function createSystemStatusAction(runtime) {
           instance.manualRefreshing = false;
         }
         renderInstance(instance);
-        setInstanceTimeout(instance, 'systemstatus-poll', () => sample(instance), Number(instance.settings.pollSec) * 1000);
       }
     }
   }
 
   function runManualRefresh(instance) {
-    clearInstanceTimeout(instance, 'systemstatus-poll');
     return sample(instance, { manualFeedback: true });
   }
 
@@ -709,7 +829,6 @@ export function createSystemStatusAction(runtime) {
         ...hydrateSystemStatusState(readPersistedState(instance.context)),
         historyDirtySamples: 0,
         historyNeedsFlush: false,
-        networkBaseline: null,
         lastSampleAt: 0,
         sampleError: false,
         sampling: false,
@@ -723,6 +842,8 @@ export function createSystemStatusAction(runtime) {
       onReady(instance) {
         if (!instance.started) {
           instance.started = true;
+          live.add(instance);
+          scheduleSharedTick();
           return Promise.all([loadSystemIdentity(instance), sample(instance)]);
         }
         return undefined;
@@ -734,14 +855,19 @@ export function createSystemStatusAction(runtime) {
           instance.values.gpu = null;
           instance.values.temperature = null;
         }
-        if (sourceChanged || intervalChanged) {
-          clearInstanceTimeout(instance, 'systemstatus-poll');
-          instance.networkBaseline = null;
+        if (intervalChanged && live.has(instance)) {
+          // 间隔可能变短了，立刻按新的最短间隔重排共享定时器，不等旧的那一轮先跑完。
+          scheduleSharedTick();
         }
         return sample(instance);
       },
       onDispose(instance) {
         flushHistory(instance);
+        live.delete(instance);
+        if (leader === instance) {
+          stopSharedTick();
+          scheduleSharedTick();
+        }
       },
       render: (instance) => renderSystemStatusIcon(instance, runtime),
     },
@@ -762,6 +888,7 @@ export function createSystemStatusAction(runtime) {
       systemStatusRenderIcon: (instance) => renderSystemStatusIcon(instance, runtime),
       systemStatusRunManualRefresh: runManualRefresh,
       systemStatusSample: sample,
+      systemStatusSharedTickSlot: SHARED_TICK_SLOT,
       systemStatusSerializeState: serializeSystemStatusState,
       systemStatusSelectedMetrics: selectedMetrics,
       systemStatusSumNetworkCounters: sumNetworkCounters,

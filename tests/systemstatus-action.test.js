@@ -54,6 +54,18 @@ function instance(settings = {}, values = {}) {
   };
 }
 
+function schedulableInstance(context, settings = {}) {
+  return {
+    ...instance(settings),
+    context,
+    historyDirtySamples: 0,
+    historyNeedsFlush: false,
+    manualRefreshing: false,
+    manualRefreshQueued: false,
+    started: false,
+  };
+}
+
 test('system status defaults and slots enforce one to three unique metrics', () => {
   assert.deepEqual(
     systemStatusSelectedMetrics(ACTION_CONFIGS.systemstatus.defaults),
@@ -392,7 +404,7 @@ test('manual refresh brightens the platform mark and adds a restrained halo', ()
   assert.match(refreshingSvg, /data-platform-mark="macos" fill="#eff6ff"/);
 });
 
-test('manual refresh starts immediately, stays bright through sampling, then restores and reschedules', async () => {
+test('manual refresh starts immediately, stays bright through sampling, then restores', async () => {
   let resolveCollection;
   const renders = [];
   const clearedSlots = [];
@@ -430,7 +442,8 @@ test('manual refresh starts immediately, stays bright through sampling, then res
   instances.set(current.context, current);
 
   const refresh = action.config.onRun(current);
-  assert.deepEqual(clearedSlots, ['systemstatus-poll']);
+  // 自动轮询已经交给共享定时器，手动刷新不再需要清掉/重排任何逐实例的轮询槽位。
+  assert.deepEqual(clearedSlots, []);
   assert.equal(current.manualRefreshing, true);
   assert.equal(current.sampling, true);
   assert.deepEqual(renders.at(-1), { manualRefreshing: true, sampling: true });
@@ -450,7 +463,7 @@ test('manual refresh starts immediately, stays bright through sampling, then res
   assert.equal(delayedSlots[0][0], 'systemstatus-manual-feedback');
   assert.ok(delayedSlots[0][1] > 0 && delayedSlots[0][1] <= 300);
   assert.deepEqual(renders.at(-1), { manualRefreshing: false, sampling: false });
-  assert.deepEqual(scheduledSlots, ['systemstatus-poll']);
+  assert.deepEqual(scheduledSlots, []);
 });
 
 test('a press during automatic sampling queues one immediate manual refresh', async () => {
@@ -503,6 +516,163 @@ test('a press during automatic sampling queues one immediate manual refresh', as
   assert.equal(collectionCount, 2);
   assert.equal(current.manualRefreshing, false);
   assert.equal(current.manualRefreshQueued, false);
+});
+
+test('multiple live tiles share a single collection per shared tick', async () => {
+  let collectionCount = 0;
+  const scheduled = [];
+  const instances = new Map();
+  const action = createSystemStatusAction({
+    clearInstanceTimeout: () => {},
+    collectSystemIdentity: async () => ({ platform: 'darwin', versionLabel: 'Test OS' }),
+    collectSystemSample: () => {
+      collectionCount += 1;
+      return Promise.resolve({
+        ok: true,
+        at: collectionCount,
+        values: { cpu: 11, ram: 22, gpu: null, temperature: null, upload: null, download: null },
+        networkBaseline: null,
+        advancedSource: '',
+      });
+    },
+    delayInstance: async () => true,
+    instances,
+    normalizeNumberString: (value) => String(value),
+    readPersistedState: () => ({}),
+    renderInstance: () => {},
+    setInstanceTimeout: (target, slot, fn, ms) => scheduled.push({ target, slot, fn, ms }),
+    writePersistedState: () => true,
+  });
+
+  const tileA = schedulableInstance('systemstatus___a', { metric1: 'cpu', metric2: 'none', metric3: 'none' });
+  const tileB = schedulableInstance('systemstatus___b', { metric1: 'ram', metric2: 'none', metric3: 'none' });
+  instances.set(tileA.context, tileA);
+  instances.set(tileB.context, tileB);
+
+  await action.config.onReady(tileA);
+  await action.config.onReady(tileB);
+  // 两次 onReady 各自的即时采样已经各打一次，共享 tick 还没手动触发过。
+  assert.equal(collectionCount, 2);
+
+  const sharedSlot = action.testing.systemStatusSharedTickSlot;
+  const tick = scheduled.filter((entry) => entry.slot === sharedSlot).at(-1);
+  await tick.fn();
+
+  // 两个 tile 都存活，但共享 tick 只应该真正采集一次，而不是每个 tile 各采一次。
+  assert.equal(collectionCount, 3);
+  assert.equal(tileA.values.cpu, 11);
+  assert.equal(tileB.values.ram, 22);
+});
+
+test('shared tick interval tracks the shortest pollSec among live tiles and reacts to settings changes', async () => {
+  const scheduled = [];
+  const instances = new Map();
+  const action = createSystemStatusAction({
+    clearInstanceTimeout: () => {},
+    collectSystemIdentity: async () => ({ platform: 'darwin', versionLabel: 'Test OS' }),
+    collectSystemSample: async () => ({
+      ok: true, at: 1, values: {}, networkBaseline: null, advancedSource: '',
+    }),
+    delayInstance: async () => true,
+    instances,
+    normalizeNumberString: (value) => String(value),
+    readPersistedState: () => ({}),
+    renderInstance: () => {},
+    setInstanceTimeout: (target, slot, fn, ms) => scheduled.push({ target, slot, fn, ms }),
+    writePersistedState: () => true,
+  });
+  const sharedSlot = action.testing.systemStatusSharedTickSlot;
+  const lastSharedMs = () => scheduled.filter((entry) => entry.slot === sharedSlot).at(-1).ms;
+
+  const tileA = schedulableInstance('systemstatus___interval-a', { pollSec: '5' });
+  instances.set(tileA.context, tileA);
+  await action.config.onReady(tileA);
+  assert.equal(lastSharedMs(), 5_000);
+
+  const tileB = schedulableInstance('systemstatus___interval-b', { pollSec: '5' });
+  instances.set(tileB.context, tileB);
+  await action.config.onReady(tileB);
+  assert.equal(lastSharedMs(), 5_000);
+
+  const previousSettings = { ...tileB.settings };
+  tileB.settings = { ...tileB.settings, pollSec: '1' };
+  await action.config.onSettingsChanged(tileB, previousSettings);
+  assert.equal(lastSharedMs(), 1_000, 'lowering one tile\'s interval should shrink the shared cadence immediately');
+});
+
+test('leader hand-off keeps the shared tick alive after the leading tile is disposed', async () => {
+  const scheduled = [];
+  const cleared = [];
+  const instances = new Map();
+  const action = createSystemStatusAction({
+    clearInstanceTimeout: (target, slot) => cleared.push({ target, slot }),
+    collectSystemIdentity: async () => ({ platform: 'darwin', versionLabel: 'Test OS' }),
+    collectSystemSample: async () => ({
+      ok: true, at: 1, values: {}, networkBaseline: null, advancedSource: '',
+    }),
+    delayInstance: async () => true,
+    instances,
+    normalizeNumberString: (value) => String(value),
+    readPersistedState: () => ({}),
+    renderInstance: () => {},
+    setInstanceTimeout: (target, slot, fn, ms) => scheduled.push({ target, slot, fn, ms }),
+    writePersistedState: () => true,
+  });
+  const sharedSlot = action.testing.systemStatusSharedTickSlot;
+
+  const tileA = schedulableInstance('systemstatus___leader-a');
+  const tileB = schedulableInstance('systemstatus___leader-b');
+  instances.set(tileA.context, tileA);
+  instances.set(tileB.context, tileB);
+  await action.config.onReady(tileA);
+  await action.config.onReady(tileB);
+  // Set 的插入顺序决定了先就绪的 tileA 是 leader。
+  assert.ok(scheduled.some((entry) => entry.slot === sharedSlot && entry.target === tileA));
+
+  action.config.onDispose(tileA);
+  assert.ok(cleared.some((entry) => entry.slot === sharedSlot && entry.target === tileA));
+  const afterHandoff = scheduled.filter((entry) => entry.slot === sharedSlot).at(-1);
+  assert.equal(afterHandoff.target, tileB, 'tileB should take over the shared timer once the leader is gone');
+
+  const scheduledCountBefore = scheduled.length;
+  action.config.onDispose(tileB);
+  assert.equal(scheduled.length, scheduledCountBefore, 'no live tiles left, nothing should be rescheduled');
+});
+
+test('shared tick only requests the union of sensors the live tiles actually show', async () => {
+  const scheduled = [];
+  const captured = [];
+  const instances = new Map();
+  const action = createSystemStatusAction({
+    clearInstanceTimeout: () => {},
+    collectSystemIdentity: async () => ({ platform: 'darwin', versionLabel: 'Test OS' }),
+    collectSystemSample: (options) => {
+      captured.push({ wantGpu: options.wantGpu, wantTemperature: options.wantTemperature, wantNetwork: options.wantNetwork });
+      return Promise.resolve({
+        ok: true, at: captured.length, values: {}, networkBaseline: null, advancedSource: '',
+      });
+    },
+    delayInstance: async () => true,
+    instances,
+    normalizeNumberString: (value) => String(value),
+    readPersistedState: () => ({}),
+    renderInstance: () => {},
+    setInstanceTimeout: (target, slot, fn, ms) => scheduled.push({ target, slot, fn, ms }),
+    writePersistedState: () => true,
+  });
+
+  const cpuTile = schedulableInstance('systemstatus___union-cpu', { metric1: 'cpu', metric2: 'none', metric3: 'none' });
+  const tempTile = schedulableInstance('systemstatus___union-temp', { metric1: 'temperature', metric2: 'none', metric3: 'none' });
+  instances.set(cpuTile.context, cpuTile);
+  instances.set(tempTile.context, tempTile);
+  await action.config.onReady(cpuTile);
+  await action.config.onReady(tempTile);
+
+  const sharedSlot = action.testing.systemStatusSharedTickSlot;
+  const tick = scheduled.filter((entry) => entry.slot === sharedSlot).at(-1);
+  await tick.fn();
+
+  assert.deepEqual(captured.at(-1), { wantGpu: false, wantTemperature: true, wantNetwork: false });
 });
 
 test('all six metrics use vector icons instead of text labels', () => {
