@@ -214,6 +214,80 @@ test('fixed systeminformation fixture produces CPU, RAM, GPU and network reading
   assert.equal(result.values.upload, 2_000);
 });
 
+test('collectSystemSample skips temperature and network sensors nobody asked for', async () => {
+  const calls = [];
+  const trackedSi = {
+    currentLoad: async () => {
+      calls.push('currentLoad');
+      return { currentLoad: 10 };
+    },
+    mem: async () => {
+      calls.push('mem');
+      return { total: 1_000, available: 500 };
+    },
+    cpuTemperature: async () => {
+      calls.push('cpuTemperature');
+      throw new Error('should not be called when temperature is not selected');
+    },
+    networkInterfaces: async () => {
+      calls.push('networkInterfaces');
+      throw new Error('should not be called when no network metric is selected');
+    },
+    networkStats: async () => {
+      calls.push('networkStats');
+      throw new Error('should not be called when no network metric is selected');
+    },
+    graphics: async () => {
+      calls.push('graphics');
+      return { controllers: [] };
+    },
+  };
+
+  const result = await systemStatusCollectSample({
+    si: trackedSi,
+    platform: 'linux',
+    now: 1_000,
+    wantGpu: false,
+    wantTemperature: false,
+    wantNetwork: false,
+  });
+
+  assert.deepEqual(calls, ['currentLoad', 'mem']);
+  assert.equal(result.values.temperature, null);
+  assert.equal(result.values.upload, null);
+  assert.equal(result.values.download, null);
+  assert.equal(result.ok, true);
+});
+
+test('a systemstatus instance only requests the sensors its metric slots actually show', async () => {
+  const captured = [];
+  const instances = new Map();
+  const action = createSystemStatusAction({
+    clearInstanceTimeout: () => {},
+    collectSystemSample: (options) => {
+      captured.push({ wantGpu: options.wantGpu, wantTemperature: options.wantTemperature, wantNetwork: options.wantNetwork });
+      return Promise.resolve({ ok: true, at: 1, values: {}, networkBaseline: null, advancedSource: '' });
+    },
+    delayInstance: async () => true,
+    instances,
+    normalizeNumberString: (value) => String(value),
+    readPersistedState: () => ({}),
+    renderInstance: () => {},
+    setInstanceTimeout: () => {},
+    writePersistedState: () => true,
+  });
+
+  const cpuOnly = { ...instance({ metric1: 'cpu', metric2: 'none', metric3: 'none' }), networkBaseline: null };
+  instances.set(cpuOnly.context, cpuOnly);
+  await action.testing.systemStatusSample(cpuOnly);
+  assert.deepEqual(captured.at(-1), { wantGpu: false, wantTemperature: false, wantNetwork: false });
+
+  const fullHouse = { ...instance({ metric1: 'gpu', metric2: 'temperature', metric3: 'upload' }), networkBaseline: null };
+  instances.set(fullHouse.context, fullHouse);
+  await action.testing.systemStatusSample(fullHouse);
+  assert.deepEqual(captured.at(-1), { wantGpu: true, wantTemperature: true, wantNetwork: true });
+});
+
 test('LHM URL is constrained to loopback HTTP', () => {
   assert.equal(systemStatusNormalizeLhmUrl('http://localhost:8085/data.json'), 'http://localhost:8085/data.json');
   assert.equal(systemStatusNormalizeLhmUrl('https://127.0.0.1/data.json'), 'http://127.0.0.1:8085/data.json');

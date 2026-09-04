@@ -1,7 +1,7 @@
 # System Status Action 规格
 
 状态：已实现
-最后代码核对：2026-07-29
+最后代码核对：2026-09-04
 action key：`systemstatus`
 UUID：`com.ulanzi.ulanzistudio.lexutility.systemstatus`
 
@@ -18,6 +18,7 @@ System Status 在一个普通方键上持续显示本机系统指标。设置中
 - macOS 的 GPU 占用与 CPU 温度使用跨平台采样层可获得的系统探针；系统或权限不提供读数时显示 `N/A`，不得伪造 0。
 - 网络速度由连续两次累计字节数的差值计算，首次采样显示等待态；聚合所有有效物理接口，排除 internal/loopback。
 - 所有探测仅访问本机；LibreHardwareMonitor URL 只接受 loopback HTTP 地址。
+- **按需采集**：CPU 温度、网络吞吐（含 macOS 上 GPU 用到的 `ioreg` 子进程 / Windows 上的 LHM 请求）只在当前实例的 `metric1/2/3` 实际选中对应指标时才采集；未选中的指标既不发起系统调用，也不进程 spawn，直接以 `null` 呈现为 `N/A`，避免多 tile 场景下为没在键面上显示的指标付出重复的采样开销。
 
 ## 3. 设置契约
 
@@ -26,7 +27,7 @@ System Status 在一个普通方键上持续显示本机系统指标。设置中
 | `metric1` | `cpu` | 六种指标之一 | 第一行 |
 | `metric2` | `ram` | 六种指标之一、`none` 且不得重复 | 可选第二行 |
 | `metric3` | `download` | 六种指标之一、`none` 或不得重复 | 可选第三行 |
-| `pollSec` | `2` | 1..30 秒 | 采样间隔 |
+| `pollSec` | `5` | 1..30 秒 | 采样间隔 |
 | `lhmUrl` | `http://127.0.0.1:8085/data.json` | loopback HTTP URL | Windows 高级传感器来源 |
 | `theme` | `signal` | 公共主题 | 通用配色 |
 | `frameSize` | `optimal` | `optimal` / `max` | 安全框尺寸 |

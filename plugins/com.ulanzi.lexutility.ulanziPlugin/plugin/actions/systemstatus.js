@@ -253,14 +253,18 @@ async function collectSystemSample(options = {}) {
     now = Date.now(),
     previousNetwork = null,
     wantGpu = true,
+    wantTemperature = true,
+    wantNetwork = true,
   } = options;
 
+  // 温度 / 网络吞吐都不便宜（后者要遍历全部网卡），tile 没选中对应指标就别采，
+  // 和下面 wantGpu 跳过 ioreg/LHM 是同一个道理。
   const [load, memory, temperature, interfaces, stats, graphics] = await Promise.all([
     settled(() => si.currentLoad()),
     settled(() => si.mem()),
-    settled(() => si.cpuTemperature()),
-    settled(() => si.networkInterfaces()),
-    settled(() => si.networkStats('*')),
+    wantTemperature ? settled(() => si.cpuTemperature()) : Promise.resolve(null),
+    wantNetwork ? settled(() => si.networkInterfaces()) : Promise.resolve(null),
+    wantNetwork ? settled(() => si.networkStats('*')) : Promise.resolve(null),
     wantGpu && platform !== 'darwin' ? settled(() => si.graphics()) : Promise.resolve(null),
   ]);
 
@@ -613,10 +617,13 @@ export function createSystemStatusAction(runtime) {
     instance.sampling = true;
     renderInstance(instance);
     try {
+      const metrics = selectedMetrics(instance.settings);
       const result = await collectSample({
         lhmUrl: instance.settings.lhmUrl,
         previousNetwork: instance.networkBaseline,
-        wantGpu: selectedMetrics(instance.settings).includes('gpu'),
+        wantGpu: metrics.includes('gpu'),
+        wantTemperature: metrics.includes('temperature'),
+        wantNetwork: metrics.includes('upload') || metrics.includes('download'),
         ...collectOptions,
       });
       if (INSTANCES.get(instance.context) !== instance) {
@@ -677,7 +684,7 @@ export function createSystemStatusAction(runtime) {
     metric1: 'cpu',
     metric2: 'ram',
     metric3: 'download',
-    pollSec: '2',
+    pollSec: '5',
     lhmUrl: LHM_DEFAULT_URL,
     theme: 'signal',
     frameSize: 'optimal',
