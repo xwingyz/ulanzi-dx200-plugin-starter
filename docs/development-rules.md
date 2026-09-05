@@ -183,6 +183,14 @@ Studio 是 GUI 应用、没有终端接管，默认情况下这一路直接被�
 - **圆角规则**：嵌套方式参考 Apple 图标的同心圆角（内层圆角 = 外层圆角 − 层间距，下限 2），四角间隙均匀；但比例按 DX200 实体键角取 42/256 ≈ 16.41%（`FRAME_RADIUS_RATIO`，256 全幅时圆角 42）——Apple 的 22.37% 对本硬件偏大。半径一律由 `frameFor` 的 `radiusAt` 推导，不得在预设或 action 里硬编码圆角；连续曲率（squircle）按圆弧近似，不做模拟。
 - **内框线（高亮区域）**：框架在面板内缘（`panel + 4`）预留一条默认不绘制的内框线；action 需要强调运行态（如 latency 掉线、pomowave 尾段脉冲）时用 `frameHighlight(frame, color)` 把它画出来，画在 `frameContent` 之外的真实坐标层。圆角同样由 `radiusAt` 同心推导，且不受 `showFrame` 影响；action 不得自绘几何不一致的高亮框。
 - `showFrame` 只控制边框（外环/壳/面板描边）是否绘制，不改变内容布局几何——开关边框内容不跳动。`frameSize` / `showFrame` 是框架级共享设置，由 `normalizeSettings` 归一化，action 不得自行解析。
+- **不做帧动画**。键面不得靠定时帧循环驱动视觉效果（背景光晕、流动波纹、标题鎏金、进度条流光这类）。
+  claudeusage 曾用 8fps 帧循环实现这套，`8f7d2ba`（2026-07-22）整体撤除：每帧都要重新编码 SVG 并推图，
+  每个按键持续这么干，设备侧 CPU 占用明显偏高；宿主收到每一帧还要压 zip 并按 1024B 分帧走 HID 写出，
+  代价在宿主那边被再放大一次。**不要把 `renderAmbiance` / `shimmerFill` / `renderBarGloss` /
+  `scheduleAnim` 那套加回来，也不要在别的 action 里另起一份。**
+  允许的是低频、由真实状态变化驱动的重绘（倒计时每秒一帧、pomowave 待命闪烁），
+  它们每帧内容都真的不同——框架的帧去重只会挡住逐字节相同的重复帧，挡不住高频动画，
+  所以"有去重兜底"不能作为做动画的理由。
 - 新 action 的 `render` 内容必须整体经 `renderScreenFrame(..., frame)` 或 `frameContent(frame, inner)` 输出，不允许绕过安全边框直接铺画布。
 - 外框、屏幕、内面板优先复用 `renderScreenFrame` 这一层级，不为单 action 造完全不同的骨架。
 - 文本、颜色、图形布局必须围绕 theme token，而不是在各 action 里散落硬编码。
