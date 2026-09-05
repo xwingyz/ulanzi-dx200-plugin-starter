@@ -158,7 +158,18 @@ class UlanziDeck {
     return { uuid, key, actionid };
   }
 
-  // 协议 V3.1.0 新增，需 Ulanzi Studio 3.3.0+；截至集成时官方客户端最新仅 3.2.11，尚未生效。
+  // 协议 V3.1.0 新增。2026-09-05 在 Ulanzi Studio 3.3.8 上核对了宿主二进制的命令表，结论分两半，
+  // 别按「3.3.0+ 就全都能用」理解：
+  //   - setFeedbackLayout / setFeedback 已在 JS 插件命令表里，可用。
+  //   - setState / setImage / setTitle 只出现在 plugindef.cpp / pluginmanager.cpp 的 **native 插件**
+  //     接口表（配套 onStateUpdate / onTitleUpdate / onRuntimeIconUpdate），JS 插件的命令表里没有，
+  //     调了不会生效。运行态图标仍然只能走 setBaseDataIcon（Events.STATE）。
+  // 核对方法：strings 宿主二进制，定位 `PluginJsManager::keyEvent` 之后那段入站命令表——
+  // 3.3.8 的完整表是 paramfromplugin / openurl / openview / selectdialog / toast / logMessage /
+  // sendToPropertyInspector / sendToPlugin / showAlert / setSettings / getSettings /
+  // setGlobalSettings / getGlobalSettings / setFeedbackLayout / setFeedback / subscribeAiAgentState /
+  // unsubscribeAiAgentState / getAiAgentProjects / getAiAgentSessions / didReceiveAiAgentState。
+  // 换宿主版本后要重新核对这张表，不要直接信版本号。
 
   setState(context, state) {
     const { uuid, key, actionid } = this.decodeContext(context);
