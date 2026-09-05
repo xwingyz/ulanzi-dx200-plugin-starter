@@ -2309,3 +2309,23 @@ for (const framework of dedupeFrameworks) {
     assert.equal(emitted.length, 1);
   });
 }
+
+// logMessage 的线格式：宿主是否消费它尚未证实（见 SDK 注释），但我们发出去的内容必须确定，
+// 否则以后换参数名试错时无从判断改动是否生效。
+test('logMessage puts the command and message on the wire', () => {
+  const api = new LexUlanzideckApi();
+  const sent = [];
+  api.websocket = { send: (raw) => sent.push(JSON.parse(raw)) };
+
+  api.logMessage('[Lex Utility] connected');
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].cmd, 'logMessage');
+  assert.equal(sent[0].message, '[Lex Utility] connected');
+});
+
+test('logMessage is a no-op instead of throwing when the socket is down', () => {
+  const api = new LexUlanzideckApi();
+  api.websocket = null;
+  assert.doesNotThrow(() => api.logMessage('while disconnected'));
+});

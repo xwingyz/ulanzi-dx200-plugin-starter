@@ -11,6 +11,7 @@ export const Events = Object.freeze({
   SETACTIVE: 'setactive',
   CLEAR: 'clear',
   TOAST: 'toast',
+  LOGMESSAGE: 'logMessage',
   STATE: 'state',
   SETSTATE: 'setState',
   SETIMAGE: 'setImage',
