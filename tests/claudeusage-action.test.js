@@ -571,6 +571,7 @@ test('double press opens the Claude CLI, deduped so a logged-out double-open can
     writeFile: (p, c) => writes.push([p, c]),
     spawnFn: (cmd, args) => { opens.push([cmd, args]); return { on() {}, unref() {} }; },
     resolveCommand: () => ({ resolved: '/opt/homebrew/bin/claude' }),
+    platform: 'darwin',
   };
   const inst = instance({ lastOpenCliAt: 0 });
 

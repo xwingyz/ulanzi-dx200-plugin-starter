@@ -20,13 +20,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      # The test suite imports runtime modules (ws, mqtt, …) from both the
-      # business plugin and the template, so their dependencies must be
-      # installed before running tests. The plugin has a lockfile (npm ci);
-      # the template has none (npm install).
-      - name: Install plugin dependencies
+      # The test suite imports runtime modules (ws, mqtt, …) from every
+      # plugin and the template, so their dependencies must be installed
+      # before running tests. Plugins with a lockfile use npm ci; those
+      # without one (and the template) use npm install.
+      - name: Install lexutility plugin dependencies
         working-directory: plugins/com.ulanzi.lexutility.ulanziPlugin
         run: npm ci --registry https://registry.npmjs.org
+      - name: Install mihome plugin dependencies
+        working-directory: plugins/com.ulanzi.mihome.ulanziPlugin
+        run: npm install --registry https://registry.npmjs.org
       - name: Install template dependencies
         working-directory: template/com.example.hello.ulanziPlugin
         run: npm install --registry https://registry.npmjs.org

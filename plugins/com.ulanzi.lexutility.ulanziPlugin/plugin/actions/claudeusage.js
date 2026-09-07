@@ -719,7 +719,8 @@ export function createClaudeUsageAction(runtime) {
     const spawnFn = options.spawnFn ?? spawn;
     const writeFile = options.writeFile ?? ((p, c) => fs.writeFileSync(p, c, { mode: 0o755 }));
     const resolveCommand = options.resolveCommand ?? resolveClaudeCommand;
-    if (process.platform !== 'darwin') {
+    const platform = options.platform ?? process.platform;
+    if (platform !== 'darwin') {
       return undefined;
     }
     if (instance.lastOpenCliAt && now - instance.lastOpenCliAt < OPEN_CLI_COOLDOWN_MS) {
