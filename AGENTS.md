@@ -25,29 +25,9 @@ Ulanzi DX200 / Ulanzi Deck 插件开发仓库的 agent 指令入口。
 - `actionKey` 只用小写 ASCII 字母数字,无中划线。
 - 同一 action key 贯穿:UUID、`ACTION_CONFIGS[key]`、`property-inspector/<key>.html` + `<key>.js`、`assets/icons/action<Key>.svg`。
 
-## 每个 action 的四层 + ACTION_CONFIGS 约束
+## Action 开发
 
-四层齐全:`manifest.json` 声明 / `plugin/app.js` 的 `ACTION_CONFIGS[key]` / `property-inspector/<key>.{html,js}` / `assets/icons/`。
-
-`ACTION_CONFIGS` 条目至少含 `defaults`、`createState`、`onRun`、`render`,且:
-
-- `defaults` 只放可序列化设置,`createState` 只放运行态。
-- 所有设置先经 `normalizeSettings` 再进 `render`;`render` 是纯函数,依赖 `settings + state`。
-- 运行态统一放 `INSTANCES`,不跨 context 共享可变状态。
-- 颜色/布局走 `THEMES` token(`mint`/`ember`/`mono`/`signal`),不在 action 内硬编码或新增私有主题。
-- Property Inspector 复用 `property-inspector/inspector-shared.js`,共享字段固定 `title`/`subtitle`/`color`/`theme`。
-
-四件套之外的可选生命周期钩子:`onReady(instance)` / `onSettingsChanged(instance, previousSettings)` / `onParamFromPlugin(instance, param)` / `persist`(默认持久化归一化后的完整设置,设 `false` 关闭,传筛选函数只保存指定字段)。
-
-设置持久化由框架层统一负责(插件目录下 `data/action-settings.json`,记录键 `actionid::key`):**不要在框架事件里新增 action key 分支,也不要给 action 写私有持久化**。宿主恢复事件以本地 persisted 为权威并回推 Inspector,Inspector 提交事件以 incoming 为权威。完整条款见 [docs/development-rules.md](docs/development-rules.md) §4。
-
-## 进程内隔离(单进程硬约束)
-
-所有 action 共用一个 Node 进程(低系统占用),隔离由框架层保证,action 代码必须遵守:
-
-- 不得直接调用 `setTimeout`/`setInterval`,统一走 `setInstanceTimeout(instance, slot, fn, ms)` / `clearInstanceTimeout` / `hasInstanceTimeout`;实例清除时框架 `disposeInstance` 统一回收。
-- 进入 action 的入口(`onRun`/`render`/`createState`/定时器回调)已由 `guardAction`/`safeHandler` 兜底,单 action 抛错只让该键位显示 ERR 图,不影响进程。不要移除这些包裹。
-- 异步 `onRun` 必须 return Promise,否则 rejection 逃逸出框架兜底。
+新增或修改 action 时读取 [运行契约](docs/action-contract-reference.md) 和 `docs/development-rules.md` 对应条款；涉及实例状态、定时器、异步异常或设置持久化时必须遵守其隔离要求。
 
 ## 宿主连接事实
 
@@ -79,10 +59,6 @@ npm run run-plugin -- --plugin <pluginDir>           # 启动 Node.js 主服务
 - 改共享层必须说明影响哪些现有 action,且通用修复必须在同一次任务内回流 `template/`(详见 development-rules.md §9「共享层回流」)。
 - 要新增公共约束,先改 [docs/development-rules.md](docs/development-rules.md),再改模板或代码。
 
-## 完成定义
+## 验证
 
-四层齐全;`npm test` 全绿;`sync`/`restart` 后宿主显示正确按钮;Inspector 改值后按钮按预期刷新;删旧实例重拖后 UUID 绑定正常;业务逻辑没塞进桥接库或脚本目录。
-
-改共享层时 `npm test` 是合并前强制门槛;测试红了先查共享语义是否真被改动,不要改测试预期让它变绿。
-
-详见 development-rules.md §4、§8、§12。
+按改动选择验证：共享层必须通过 `npm test`，通用修复同轮回流 `template/`；action 行为改动需在宿主验证按钮、Inspector 刷新与实例绑定。纯文档修改不运行宿主全链路。同步文件不等于 Node 进程已加载新代码，宣称生效前核对运行态。不得为了通过测试改写未变化的共享语义。
