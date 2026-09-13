@@ -6,6 +6,7 @@ import { __testing } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/
 const {
   ACTION_CONFIGS,
   applyResult,
+  classifyCredential,
   extractAccessToken,
   fetchUsage,
   formatCountdown,
@@ -13,6 +14,7 @@ const {
   hasClaudeCredential,
   hasClaudeLogin,
   hydrateState,
+  keychainServices,
   needsLogin,
   openClaudeCli,
   parseUsage,
@@ -418,26 +420,26 @@ test('while refreshing, the key shows the refresh badge and suppresses the stale
 });
 
 test('http failures map to their own error kinds', async () => {
-  const readToken = async () => 'sk-test';
+  const readCredential = async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk-test' } });
   const respond = (status, body) => ({
     status,
     ok: status >= 200 && status < 300,
     json: async () => body,
   });
 
-  assert.equal((await fetchUsage({ readToken: async () => null })).kind, 'NO_TOKEN');
-  assert.equal((await fetchUsage({ readToken, fetchImpl: async () => respond(401) })).kind, 'AUTH');
-  assert.equal((await fetchUsage({ readToken, fetchImpl: async () => respond(403) })).kind, 'AUTH');
-  assert.equal((await fetchUsage({ readToken, fetchImpl: async () => respond(429) })).kind, 'RATE_LIMITED');
-  assert.equal((await fetchUsage({ readToken, fetchImpl: async () => respond(500) })).kind, 'NETWORK');
+  assert.equal((await fetchUsage({ readCredential: async () => null })).kind, 'NO_TOKEN');
+  assert.equal((await fetchUsage({ readCredential, fetchImpl: async () => respond(401) })).kind, 'AUTH');
+  assert.equal((await fetchUsage({ readCredential, fetchImpl: async () => respond(403) })).kind, 'AUTH');
+  assert.equal((await fetchUsage({ readCredential, fetchImpl: async () => respond(429) })).kind, 'RATE_LIMITED');
+  assert.equal((await fetchUsage({ readCredential, fetchImpl: async () => respond(500) })).kind, 'NETWORK');
   assert.equal(
-    (await fetchUsage({ readToken, fetchImpl: async () => { throw new Error('offline'); } })).kind,
+    (await fetchUsage({ readCredential, fetchImpl: async () => { throw new Error('offline'); } })).kind,
     'NETWORK',
   );
   // 200 但结构不认识：降级为失败，不能让 render 拿到半个对象。
-  assert.equal((await fetchUsage({ readToken, fetchImpl: async () => respond(200, { hi: 1 }) })).kind, 'NETWORK');
+  assert.equal((await fetchUsage({ readCredential, fetchImpl: async () => respond(200, { hi: 1 }) })).kind, 'NETWORK');
 
-  const good = await fetchUsage({ readToken, fetchImpl: async () => respond(200, usagePayload()) });
+  const good = await fetchUsage({ readCredential, fetchImpl: async () => respond(200, usagePayload()) });
   assert.equal(good.ok, true);
   assert.equal(good.data.weekly.percent, 66);
 });
@@ -445,7 +447,7 @@ test('http failures map to their own error kinds', async () => {
 test('the request carries oauth headers and never a request body', async () => {
   let seen = null;
   await fetchUsage({
-    readToken: async () => 'sk-header-test',
+    readCredential: async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk-header-test' } }),
     fetchImpl: async (url, options) => {
       seen = { url, options };
       return { status: 200, ok: true, json: async () => usagePayload() };
@@ -602,4 +604,172 @@ test('short press opens the CLI when login is needed, otherwise refreshes', () =
   // 正常态：单击走刷新，不开 CLI。
   handleShortPress(instance({ displayState: 'OK', lastManualAt: 0 }), { openCli, run, now: 1000 });
   assert.deepEqual([opened, refreshed], [1, 1]);
+});
+
+// ---------------------------------------------------------------- 凭据失效可见化
+// 2026-09-13 实机故障的回归：钥匙串里的 accessToken 在 09-04 过期，且 refreshToken 是
+// 空串——那是一份 CLI 自己也续不回来的残缺凭据，只有重新登录能补上。当时插件把它当
+// 「已登录」，每次短按白跑一次 45s 的 claude spawn，接口回 401 后又因为有历史数据降级
+// 成 STALE，于是键面挂着 9 天前的 26%/0% 和一个 15px 角标，没人看得出该去重新登录。
+
+test('an expired access token with no refresh token is a re-login, not a refreshable auth error', () => {
+  const wrap = (cred) => JSON.stringify({ claudeAiOauth: cred });
+  const now = 2_000_000;
+  const past = now - 1;
+  const future = now + 60_000;
+
+  // 登出：整串凭据皆空，只剩残留元数据。
+  assert.equal(classifyCredential(wrap({ accessToken: '', refreshToken: '' }), now), 'NONE');
+  assert.equal(classifyCredential(wrap({}), now), 'NONE');
+  for (const junk of ['', '  ', 'not json', '{}', null, undefined]) {
+    assert.equal(classifyCredential(junk, now), 'NONE', `should reject ${JSON.stringify(junk)}`);
+  }
+
+  // 本次故障的原形：token 串还在但已过期，refreshToken 空 → CLI 无法续期，必须重登。
+  assert.equal(classifyCredential(wrap({ accessToken: 'sk', refreshToken: '', expiresAt: past }), now), 'REAUTH');
+  // 过期但留着 refreshToken：CLI 能自己换新，仍算可用凭据，走既有的刷新/STALE 路径。
+  assert.equal(classifyCredential(wrap({ accessToken: 'sk', refreshToken: 'rt', expiresAt: past }), now), 'USABLE');
+  // 未过期照常可用。
+  assert.equal(classifyCredential(wrap({ accessToken: 'sk', expiresAt: future }), now), 'USABLE');
+  // 没有 expiresAt 字段时不能凭空断定过期——这是非公开接口写的凭据，字段随时可能变，
+  // 宁可发一次请求让服务端判，也不要凭一个缺失字段把用户推进重登提示。
+  assert.equal(classifyCredential(wrap({ accessToken: 'sk' }), now), 'USABLE');
+  assert.equal(classifyCredential(wrap({ accessToken: 'sk', expiresAt: 'junk' }), now), 'USABLE');
+});
+
+test('hasClaudeCredential refuses to burn a spawn on a credential the CLI cannot refresh', async () => {
+  const wrap = (cred) => JSON.stringify({ claudeAiOauth: cred });
+  const now = 2_000_000;
+  // 不可续期 → 不值得 spawn，交给「重新登录」提示。
+  assert.equal(hasClaudeCredential(wrap({ accessToken: 'sk', refreshToken: '', expiresAt: now - 1 }), now), false);
+  // 可续期 → 照旧值得跑一次 claude 让 CLI 自己刷新。
+  assert.equal(hasClaudeCredential(wrap({ accessToken: 'sk', refreshToken: 'rt', expiresAt: now - 1 }), now), true);
+
+  let spawned = false;
+  const result = await runClaudeRefresh({
+    hasLogin: async () => false,
+    resolveCommand: () => { spawned = true; return { command: 'claude', prefixArgs: [] }; },
+    spawnFn: () => { spawned = true; return {}; },
+  });
+  assert.deepEqual(result, { ok: false, reason: 'NOT_LOGGED_IN' });
+  assert.equal(spawned, false);
+});
+
+test('fetchUsage reports REAUTH without spending a request on a credential it knows is dead', async () => {
+  let requested = false;
+  const result = await fetchUsage({
+    readCredential: async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk', refreshToken: '', expiresAt: 1 } }),
+    fetchImpl: async () => { requested = true; return { status: 200, ok: true, json: async () => usagePayload() }; },
+    now: 2,
+  });
+  assert.deepEqual(result, { ok: false, kind: 'REAUTH' });
+  assert.equal(requested, false, '已知续不回来的凭据不该再发一次注定 401 的请求');
+
+  // 可用凭据照常发请求。
+  const good = await fetchUsage({
+    readCredential: async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk-live', expiresAt: 10 } }),
+    fetchImpl: async (url, options) => {
+      assert.equal(options.headers.authorization, 'Bearer sk-live');
+      return { status: 200, ok: true, json: async () => usagePayload() };
+    },
+    now: 2,
+  });
+  assert.equal(good.ok, true);
+});
+
+test('REAUTH replaces stale percentages with a re-login prompt', () => {
+  const decode = (i) => Buffer.from(config.render(i).split(',')[1], 'base64').toString('utf8');
+  const rows = { weekly: limit('W', 66), fiveHour: limit('5H', 57) };
+
+  // 与 NO_TOKEN 同级：凭据续不回来就拉不到新值，继续显示旧百分比只会误导。
+  for (const inst of [
+    instance({ ...rows, displayState: 'REAUTH' }),
+    instance({ ...rows, displayState: 'STALE', lastErrorKind: 'REAUTH' }),
+  ]) {
+    const svg = decode(inst);
+    assert.ok(svg.includes('>Re-login<'), 'must tell the user to log in again');
+    assert.ok(!svg.includes('>66<') && !svg.includes('>57<'), 'stale percentages must be hidden');
+    assert.ok(!svg.includes('scale(0.5)'), 'no stale badge under the re-login prompt');
+    assert.equal(needsLogin(inst), true);
+  }
+
+  // 短按直接开 CLI 让用户登录，而不是又跑一次注定失败的刷新。
+  let opened = 0;
+  let ran = 0;
+  handleShortPress(instance({ ...rows, displayState: 'REAUTH', lastManualAt: 0 }), {
+    openCli: () => { opened += 1; },
+    run: () => { ran += 1; },
+    now: 1000,
+  });
+  assert.equal(opened, 1);
+  assert.equal(ran, 0);
+});
+
+test('a stale key face shows how old the numbers are once several polls have failed', () => {
+  const decode = (i) => Buffer.from(config.render(i).split(',')[1], 'base64').toString('utf8');
+  const now = 1_800_000_000_000;
+  const rows = { weekly: limit('W', 26), fiveHour: limit('5H', 0) };
+  const stale = (ageMs) => decode({
+    ...instance({ ...rows, displayState: 'STALE', lastErrorKind: 'AUTH' }),
+    fetchedAt: now - ageMs,
+  });
+  const render = (inst) => Buffer.from(config.render(inst, { now }).split(',')[1], 'base64').toString('utf8');
+  const at = (ageMs) => render({
+    ...instance({ ...rows, displayState: 'STALE', lastErrorKind: 'AUTH' }),
+    fetchedAt: now - ageMs,
+  });
+
+  // 一次偶发失败不喊——才过 2 分钟，下一拍就可能恢复。
+  assert.ok(!/>\d+[mhd]</.test(at(2 * 60_000)), 'a single missed poll must stay quiet');
+  // 连续失败到数小时、数天，必须在键面上写明白已经多旧了。这正是这次故障藏 9 天的缺口。
+  assert.ok(at(9 * 24 * 3600_000).includes('>9d<'), 'nine days stale must read 9d');
+  assert.ok(at(5 * 3600_000).includes('>5h<'), 'five hours stale must read 5h');
+  // OK 态永远不画陈旧时长。
+  assert.ok(!/>\d+[mhd]</.test(render({ ...instance({ ...rows, displayState: 'OK' }), fetchedAt: now - 9 * 24 * 3600_000 })));
+  assert.ok(stale(9 * 24 * 3600_000).length > 0);
+});
+
+test('the keychain service name follows CLAUDE_CONFIG_DIR', async () => {
+  const { createHash } = await import('node:crypto');
+  const homeDir = '/Users/x';
+  // 默认 profile 仍用裸名——上游只给非默认 config dir 加哈希后缀。
+  assert.deepEqual(
+    keychainServices({ configDir: '/Users/x/.claude', homeDir }),
+    ['Claude Code-credentials'],
+  );
+  assert.deepEqual(keychainServices({ configDir: undefined, homeDir }), ['Claude Code-credentials']);
+  // 非默认 profile：`Claude Code-credentials-<sha256(configDir) 前 8 位>`，裸名兜底，
+  // 以防用户的 CLI 版本还在用旧命名。
+  const dir = '/Users/x/.claude-work';
+  const hash = createHash('sha256').update(dir).digest('hex').slice(0, 8);
+  assert.deepEqual(
+    keychainServices({ configDir: dir, homeDir }),
+    [`Claude Code-credentials-${hash}`, 'Claude Code-credentials'],
+  );
+});
+
+test('failed fetches and recoveries land in the diagnostic log', () => {
+  const entries = [];
+  const logImpl = (name, entry) => { entries.push([name, entry]); return true; };
+  const now = 1_800_000_000_000;
+  const inst = instance({ weekly: limit('W', 26), fiveHour: limit('5H', 0), displayState: 'STALE' });
+  inst.fetchedAt = now - 9 * 24 * 3600_000;
+
+  applyResult(inst, { ok: false, kind: 'REAUTH' }, { now, appendLog: logImpl });
+  assert.equal(entries.length, 1, '失败必须留痕——调试模式开着也一行日志都没有，是这次排障最贵的部分');
+  assert.equal(entries[0][0], 'claudeusage-fetch');
+  assert.equal(entries[0][1].kind, 'REAUTH');
+  assert.equal(entries[0][1].displayState, 'STALE');
+  assert.equal(entries[0][1].staleMs, 9 * 24 * 3600_000);
+
+  // 同一个原因连续失败不刷屏；原因变了才再记一条。
+  applyResult(inst, { ok: false, kind: 'REAUTH' }, { now, appendLog: logImpl });
+  assert.equal(entries.length, 1);
+  applyResult(inst, { ok: false, kind: 'NETWORK' }, { now, appendLog: logImpl });
+  assert.equal(entries.length, 2);
+
+  // 恢复也记一条，否则日志里只有坏消息，看不出什么时候好的。
+  applyResult(inst, { ok: true, data: { weekly: limit('W', 25), fiveHour: limit('5H', 43), scoped: null } }, { now, appendLog: logImpl });
+  assert.equal(entries.length, 3);
+  assert.equal(entries[2][1].kind, 'OK');
 });

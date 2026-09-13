@@ -20,6 +20,7 @@ const DIAG_STATE_TEXT = {
   OK: 'OK',
   STALE: 'Stale (showing last values)',
   NO_TOKEN: 'No Keychain credential',
+  REAUTH: 'Credential expired beyond refresh',
   AUTH: 'Credential expired',
   NETWORK: 'Network failure',
   RATE_LIMITED: 'Rate limited',
@@ -29,6 +30,7 @@ const DIAG_STATE_TEXT = {
 
 const DIAG_ERROR_TEXT = {
   NO_TOKEN: 'No Claude Code credential in Keychain. Sign in from Terminal.',
+  REAUTH: 'The credential expired and carries no refresh token. Run claude and log in again.',
   AUTH: 'The access token expired. Use Claude Code once to refresh it.',
   NETWORK: 'The request failed or the API response changed.',
   RATE_LIMITED: 'Requests are rate limited. Increase the polling interval.',
@@ -66,7 +68,13 @@ function renderDiagnostics(diag) {
   }
   const mac = diag.platform === 'darwin';
   setDiagField('diag-platform', mac ? 'macOS' : `${diag.platform} (${$UD.t('unsupported')})`, mac ? 'good' : 'bad');
-  setDiagField('diag-token', $UD.t(diag.hasToken ? 'Found' : 'Not found'), diag.hasToken ? 'good' : 'bad');
+  const credentialState = diag.credentialState || (diag.hasToken ? 'USABLE' : 'NONE');
+  const CREDENTIAL_TEXT = { USABLE: 'Found', REAUTH: 'Expired, needs re-login', NONE: 'Not found' };
+  setDiagField(
+    'diag-token',
+    $UD.t(CREDENTIAL_TEXT[credentialState] || 'Not found'),
+    credentialState === 'USABLE' ? 'good' : 'bad',
+  );
 
   const state = diag.displayState || 'PENDING';
   setDiagField(

@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 export function createClaudeUsageAction(runtime) {
   const {
+    appendDiagnosticLog,
     clearInstanceTimeout,
     escapeXml,
     formatCountdown,
@@ -27,6 +29,9 @@ export function createClaudeUsageAction(runtime) {
   } = runtime;
 
   const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+  const DIAGNOSTIC_LOG = 'claudeusage-fetch';
+  // 陈旧时长上键面的门槛：连续 3 拍都没拉回来才算「一直在失败」，单次偶发失败不喊。
+  const STALE_NOTICE_POLLS = 3;
   const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
   const OAUTH_BETA = 'oauth-2025-04-20';
   const REQUEST_TIMEOUT_MS = 12_000;
@@ -71,13 +76,28 @@ export function createClaudeUsageAction(runtime) {
 
   // ---------------------------------------------------------------- 凭据
 
-  function runSecurity(spawnFn = spawn) {
+  // Claude Code 按 config dir 分账存凭据：默认 `~/.claude` 用裸服务名，其它 profile 用
+  // `Claude Code-credentials-<sha256(configDir) 前 8 位>`。用户切了 CLAUDE_CONFIG_DIR 又只读
+  // 裸名的话，读到的是另一个 profile 的旧凭据——看着「有 token」，实际早就作废了。
+  // 两个候选都试：哈希名优先，裸名兜底（用户的 CLI 版本可能还在用旧命名）。
+  function keychainServices(options = {}) {
+    const homeDir = options.homeDir ?? os.homedir();
+    const raw = options.configDir ?? process.env.CLAUDE_CONFIG_DIR;
+    const configDir = String(raw || '').trim();
+    if (!configDir || configDir === path.join(homeDir, '.claude')) {
+      return [KEYCHAIN_SERVICE];
+    }
+    const suffix = createHash('sha256').update(configDir).digest('hex').slice(0, 8);
+    return [`${KEYCHAIN_SERVICE}-${suffix}`, KEYCHAIN_SERVICE];
+  }
+
+  function readKeychainItem(service, spawnFn = spawn) {
     return new Promise((resolve) => {
       let child;
       try {
         child = spawnFn('security', [
           'find-generic-password',
-          '-s', KEYCHAIN_SERVICE,
+          '-s', service,
           '-a', os.userInfo().username,
           '-w',
         ]);
@@ -93,6 +113,16 @@ export function createClaudeUsageAction(runtime) {
     });
   }
 
+  async function runSecurity(spawnFn = spawn, options = {}) {
+    for (const service of (options.services ?? keychainServices())) {
+      const raw = await readKeychainItem(service, spawnFn);
+      if (classifyCredential(raw) !== 'NONE') {
+        return raw;
+      }
+    }
+    return null;
+  }
+
   function extractAccessToken(raw) {
     if (typeof raw !== 'string' || !raw.trim()) {
       return null;
@@ -105,29 +135,56 @@ export function createClaudeUsageAction(runtime) {
     }
   }
 
-  // 是否还有可用于恢复的凭据。登出时钥匙串里 accessToken / refreshToken 会双双清空
-  // （只剩 scopes、subscriptionType 等残留元数据）。注意 accessToken 过期时其字符串仍
-  // 保留（可被 CLI 刷新），所以「任一存在」即值得尝试刷新，只有两者皆空才是真正登出。
-  function hasClaudeCredential(raw) {
+  function parseCredential(raw) {
     if (typeof raw !== 'string' || !raw.trim()) {
-      return false;
+      return null;
     }
     try {
       const cred = JSON.parse(raw.trim())?.claudeAiOauth;
-      if (!cred || typeof cred !== 'object') {
-        return false;
-      }
-      const hasAccess = typeof cred.accessToken === 'string' && cred.accessToken.length > 0;
-      const hasRefresh = typeof cred.refreshToken === 'string' && cred.refreshToken.length > 0;
-      return hasAccess || hasRefresh;
+      return cred && typeof cred === 'object' && !Array.isArray(cred) ? cred : null;
     } catch {
-      return false;
+      return null;
     }
+  }
+
+  // 凭据三态。登出时 accessToken / refreshToken 双双清空（只剩 scopes、subscriptionType
+  // 等残留元数据）→ NONE。
+  //
+  // REAUTH 是 2026-09-13 那次实机故障逼出来的第三态：accessToken 串还在、但 expiresAt
+  // 已过，且 refreshToken 是**空串**。这种凭据 CLI 自己也换不回新 token（没有 refreshToken
+  // 可用），只有重新登录能修。旧代码只看「串在不在」，把它判成已登录，于是每次短按都白跑
+  // 一次 45s 的 claude spawn，拉取又必然 401，最后因为有历史数据降级成 STALE——键面挂着
+  // 9 天前的数字，只有一个 15px 角标，谁也看不出该去重登。
+  //
+  // 过期但**有** refreshToken 仍算 USABLE：那是 CLI 能自愈的正常过期，走既有刷新路径。
+  // expiresAt 缺失或不是有效数字时一律按 USABLE——这是非公开接口写的凭据，字段随时可能
+  // 变，宁可发一次请求让服务端判，也不要凭一个缺失字段把用户推进重登提示。
+  function classifyCredential(raw, now = Date.now()) {
+    const cred = parseCredential(raw);
+    if (!cred) {
+      return 'NONE';
+    }
+    const hasAccess = typeof cred.accessToken === 'string' && cred.accessToken.length > 0;
+    const hasRefresh = typeof cred.refreshToken === 'string' && cred.refreshToken.length > 0;
+    if (!hasAccess && !hasRefresh) {
+      return 'NONE';
+    }
+    const expiresAt = Number(cred.expiresAt);
+    const expired = Number.isFinite(expiresAt) && expiresAt <= now;
+    if (expired && !hasRefresh) {
+      return 'REAUTH';
+    }
+    return 'USABLE';
+  }
+
+  // 「值得为它跑一次 claude 刷新吗」。REAUTH 与 NONE 都不值得：前者续不回来，后者没得续。
+  function hasClaudeCredential(raw, now = Date.now()) {
+    return classifyCredential(raw, now) === 'USABLE';
   }
 
   async function hasClaudeLogin(options = {}) {
     const readRaw = options.readRaw ?? runSecurity;
-    return hasClaudeCredential(await readRaw());
+    return hasClaudeCredential(await readRaw(), options.now ?? Date.now());
   }
 
   // ---------------------------------------------------------------- CLI 发现与刷新
@@ -304,11 +361,23 @@ export function createClaudeUsageAction(runtime) {
     return { weekly, fiveHour, scoped };
   }
 
+  // 凭据 seam 只有一个：readCredential 返回钥匙串原文，分类与取 token 都由这里做，
+  // 免得「判定用一份、请求用另一份」两条路走岔。
   async function fetchUsage(options = {}) {
     const doFetch = options.fetchImpl ?? fetch;
-    const readToken = options.readToken ?? (async () => extractAccessToken(await runSecurity()));
+    const readRaw = options.readCredential ?? runSecurity;
+    const now = options.now ?? Date.now();
 
-    const token = await readToken();
+    const raw = await readRaw();
+    const credentialState = classifyCredential(raw, now);
+    if (credentialState === 'NONE') {
+      return { ok: false, kind: 'NO_TOKEN' };
+    }
+    // 已知续不回来：不再发一次注定 401 的请求，直接给出「重新登录」。
+    if (credentialState === 'REAUTH') {
+      return { ok: false, kind: 'REAUTH' };
+    }
+    const token = extractAccessToken(raw);
     if (!token) {
       return { ok: false, kind: 'NO_TOKEN' };
     }
@@ -394,6 +463,26 @@ export function createClaudeUsageAction(runtime) {
     return theme.low;
   }
 
+  // 陈旧时长。只留最大单位（9d / 5h / 40m）——键面这点空间容不下两级，而"有多旧"这个
+  // 判断本来也只需要量级。门槛是连续 STALE_NOTICE_POLLS 拍都没拉回来：单次偶发失败
+  // （下一拍就可能恢复）不该在键面上留字。
+  function staleAgeLabel(instance, nowMs) {
+    if (!Number.isFinite(instance.fetchedAt)) {
+      return '';
+    }
+    const ageMs = nowMs - instance.fetchedAt;
+    const pollMs = (Number.parseInt(instance.settings.pollSec, 10) || 300) * 1000;
+    if (ageMs < pollMs * STALE_NOTICE_POLLS) {
+      return '';
+    }
+    const minutes = Math.floor(ageMs / 60_000);
+    if (minutes < 60) {
+      return `${minutes}m`;
+    }
+    const hours = Math.floor(minutes / 60);
+    return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+  }
+
   function severityColor(severity, theme, enabled) {
     if (!enabled) {
       return theme.accent;
@@ -440,6 +529,7 @@ export function createClaudeUsageAction(runtime) {
 
   const ERROR_COPY = {
     NO_TOKEN: { glyph: 'key', text: 'Sign in' },
+    REAUTH: { glyph: 'key', text: 'Re-login' },
     AUTH: { glyph: 'bang', text: 'Re-auth' },
     NETWORK: { glyph: 'offline', text: 'Offline' },
     RATE_LIMITED: { glyph: 'wait', text: 'Slow down' },
@@ -472,10 +562,13 @@ export function createClaudeUsageAction(runtime) {
     }
   }
 
-  // 需要重新登录：读不到 token（登出）。即便还留着上次的陈旧数据也照样进登录提示——
-  // 没 token 就拉不到新值，继续显示旧百分比只会误导。单击此态直接打开 CLI 让用户登录。
+  // 需要重新登录：读不到 token（NO_TOKEN，登出），或凭据过期且无 refreshToken（REAUTH，
+  // CLI 续不回来）。两者即便还留着上次的陈旧数据也照样进登录提示——拉不到新值时继续显示
+  // 旧百分比只会误导。单击此态直接打开 CLI 让用户登录，不浪费一次注定失败的刷新。
+  const LOGIN_KINDS = new Set(['NO_TOKEN', 'REAUTH']);
+
   function needsLogin(instance) {
-    return instance.displayState === 'NO_TOKEN' || instance.lastErrorKind === 'NO_TOKEN';
+    return LOGIN_KINDS.has(instance.displayState) || LOGIN_KINDS.has(instance.lastErrorKind);
   }
 
   function renderClaudeUsageIcon(instance, nowOverride) {
@@ -522,7 +615,12 @@ export function createClaudeUsageAction(runtime) {
         { showBar, severityColors, nowMs, refreshing: instance.refreshing },
       )).join('');
     } else {
-      const errState = loginNeeded ? 'NO_TOKEN' : state;
+      // 登录提示要报出具体哪一种：NO_TOKEN 是登出（Sign in），REAUTH 是凭据续不回来
+      // （Re-login）。两者的下一步动作不同，键面上不能混成同一句话。
+      const loginKind = LOGIN_KINDS.has(instance.displayState)
+        ? instance.displayState
+        : instance.lastErrorKind;
+      const errState = loginNeeded ? loginKind : state;
       const copy = ERROR_COPY[errState] || ERROR_COPY.PENDING;
       const color = errState === 'PENDING' ? theme.muted : theme.warn;
       body = `
@@ -552,6 +650,16 @@ export function createClaudeUsageAction(runtime) {
       })()
       : '';
 
+    // 陈旧时长写在角标正下方（角标 y≈58，分隔线 y=88，中间这条带子是空的），右对齐到
+    // 内容箱右沿。"Claude" 字样止于 x≈184，不会撞上。只在 STALE 且够旧时出现——
+    // 上次那次故障就是因为「旧了多久」只存在于 PI 诊断面板里，键面上完全看不出来。
+    const staleAge = instance.displayState === 'STALE' && !instance.refreshing && !loginNeeded
+      ? staleAgeLabel(instance, nowMs)
+      : '';
+    const staleAgeText = staleAge
+      ? `<text x="${boxX + boxWidth}" y="82" text-anchor="end" fill="${theme.muted}" font-size="13" font-weight="700" font-family="Arial, Helvetica, sans-serif">${escapeXml(staleAge)}</text>`
+      : '';
+
     return toDataUrl(`
     <svg width="392" height="392" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
       ${background.outer}
@@ -561,6 +669,7 @@ export function createClaudeUsageAction(runtime) {
           <text x="${labelX.toFixed(1)}" y="${headerBaseline - 10}" fill="${background.text}" font-size="25" font-weight="800" font-family="Arial, Helvetica, sans-serif">Claude</text>
           ${groundLine}
           ${staleBadge}
+          ${staleAgeText}
           ${refreshBadge}
           ${body}
         `)
@@ -638,15 +747,35 @@ export function createClaudeUsageAction(runtime) {
     return instances.get(instance.context) === instance && requestId === instance.requestId;
   }
 
+  // 失败留痕。上一次排障（凭据过期 9 天没人发现）最贵的一环，是插件在失败路径上一行日志
+  // 都不打——宿主调试模式开着也只有一句 "connected"，只能靠反推。这里只记「原因发生变化」
+  // 的那一拍：同一个原因连续失败不刷屏，恢复也记一条，否则日志里只有坏消息、看不出何时好的。
+  function logFetchOutcome(instance, kind, options = {}) {
+    const append = options.appendLog ?? appendDiagnosticLog;
+    if (typeof append !== 'function' || instance.lastLoggedKind === kind) {
+      return;
+    }
+    instance.lastLoggedKind = kind;
+    const now = options.now ?? Date.now();
+    append(DIAGNOSTIC_LOG, {
+      at: now,
+      kind,
+      displayState: instance.displayState || 'PENDING',
+      staleMs: Number.isFinite(instance.fetchedAt) ? now - instance.fetchedAt : null,
+    });
+  }
+
   function applyResult(instance, result, options = {}) {
     const now = options.now ?? Date.now();
     if (result.ok) {
       instance.weekly = result.data.weekly;
       instance.fiveHour = result.data.fiveHour;
       instance.scoped = result.data.scoped;
-      instance.fetchedAt = now;
       instance.lastErrorKind = null;
       instance.displayState = 'OK';
+      // 先记账再改 fetchedAt：恢复那一条要带着「之前旧了多久」，否则恢复日志永远是 0。
+      logFetchOutcome(instance, 'OK', { ...options, now });
+      instance.fetchedAt = now;
       return true;
     }
     instance.lastErrorKind = result.kind;
@@ -654,6 +783,7 @@ export function createClaudeUsageAction(runtime) {
     instance.displayState = (instance.weekly || instance.fiveHour || instance.scoped)
       ? 'STALE'
       : result.kind;
+    logFetchOutcome(instance, result.kind, { ...options, now });
     return false;
   }
 
@@ -761,10 +891,12 @@ export function createClaudeUsageAction(runtime) {
   const PROBE_PARAM = '__claudeusageProbe';
   const DIAG_PARAM = '__claudeusageDiag';
 
-  function buildDiagnostics(instance, hasToken) {
+  function buildDiagnostics(instance, credentialState) {
     return {
       platform: process.platform,
-      hasToken,
+      // hasToken 保留给旧版 PI；credentialState 才说得清「有串但续不回来」这一态。
+      hasToken: credentialState === 'USABLE',
+      credentialState,
       displayState: instance.displayState || 'PENDING',
       fetchedAt: instance.fetchedAt ?? null,
       lastErrorKind: instance.lastErrorKind || null,
@@ -775,12 +907,14 @@ export function createClaudeUsageAction(runtime) {
   // 平台、凭据是否存在、上次拉取时间、上次失败原因。
   async function runDiagnostics(instance, options = {}) {
     const send = options.send ?? sendParamFromPlugin;
-    const readToken = options.readToken ?? (async () => extractAccessToken(await runSecurity()));
+    const readRaw = options.readCredential ?? runSecurity;
     const run = options.run ?? runFetch;
 
-    const hasToken = process.platform === 'darwin' ? Boolean(await readToken()) : false;
+    const credentialState = process.platform === 'darwin'
+      ? classifyCredential(await readRaw())
+      : 'NONE';
     await run(instance, { immediateRender: true });
-    send({ [DIAG_PARAM]: buildDiagnostics(instance, hasToken) }, instance.context);
+    send({ [DIAG_PARAM]: buildDiagnostics(instance, credentialState) }, instance.context);
   }
 
   function handleLongPress(instance, options = {}) {
@@ -874,9 +1008,12 @@ export function createClaudeUsageAction(runtime) {
     config,
     testing: {
       applyResult,
+      classifyCredential,
       extractAccessToken,
       fetchUsage,
       hasClaudeCredential,
+      keychainServices,
+      staleAgeLabel,
       hasClaudeLogin,
       handleLongPress,
       handleShortPress,

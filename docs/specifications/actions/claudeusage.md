@@ -1,7 +1,7 @@
 # Claude Usage 功能与技术规范
 
 状态：持续维护
-最后代码核对：2026-07-28
+最后代码核对：2026-09-13
 action key：`claudeusage`
 UUID：`com.ulanzi.ulanzistudio.lexutility.claudeusage`
 
@@ -35,11 +35,30 @@ Claude Usage 在单个 DX200 键面上同时显示 Claude 订阅额度的 5 小�
 ### 3.1 凭据
 
 ```text
-security find-generic-password -s "Claude Code-credentials" -a <当前用户> -w
-→ JSON.claudeAiOauth.accessToken
+security find-generic-password -s <服务名> -a <当前用户> -w
+→ JSON.claudeAiOauth.{ accessToken, refreshToken, expiresAt }
 ```
 
+服务名随 Claude Code 的 config dir 分账：默认 `~/.claude` 用裸名 `Claude Code-credentials`，
+其它 profile 用 `Claude Code-credentials-<sha256(configDir) 前 8 位>`。按 `CLAUDE_CONFIG_DIR`
+推出候选名，哈希名优先、裸名兜底（用户的 CLI 版本可能仍在用旧命名），取第一个非 `NONE` 的。
+只读裸名的话，切过 profile 的用户会读到另一份早已作废的凭据。
+
+**凭据三态**（`classifyCredential`，判定与取 token 共用同一次钥匙串读取）：
+
+| 态 | 条件 | 处理 |
+| --- | --- | --- |
+| `NONE` | `accessToken` 与 `refreshToken` 皆空（登出只剩 `scopes` 等残留元数据），或解析失败 | `NO_TOKEN` → Sign in |
+| `REAUTH` | `accessToken` 在但 `expiresAt` 已过，且 `refreshToken` **为空** | 不发请求，直接 `REAUTH` → Re-login |
+| `USABLE` | 其余（含过期但有 `refreshToken`、`expiresAt` 缺失或非法） | 照常拉取 |
+
+`expiresAt` 缺失或不是有效数字时一律按 `USABLE`：这是非公开接口写的凭据，字段随时可能变，
+宁可发一次请求让服务端判，也不要凭一个缺失字段把用户推进重登提示。
+
 读取时**不写回钥匙串**。`accessToken` 生命周期约 1 小时；被动路径（自动轮询与 GET 拉取）只读取，读到即用、读不到即报错，不做任何刷新。
+
+刷新只对 `USABLE` 有意义：`REAUTH` 的凭据 CLI 自己也换不回新 token（没有 `refreshToken` 可用），
+因此 `hasClaudeCredential` 的语义是「**值得为它跑一次 claude 刷新吗**」，`REAUTH` 与 `NONE` 同为否。
 
 **主动刷新（仅短按触发，非轮询）**：`accessToken` 过期后若用户长时间不用 Claude Code，CLI 不会自行刷新，键面会一直停在过期 → `AUTH`/`STALE`。短按时后台跑一次
 
@@ -102,12 +121,21 @@ Inspector 采用 400ms 自动保存，开关与主题按钮立即提交，并提
 | `OK` | 拉取成功 | 正常数据行 |
 | 刷新中 | `instance.refreshing`（短按刷新期间） | 百分比置为 `...`（倒计时不变）+ 右上角循环箭头角标 |
 | `STALE` | 有历史数据，本次拉取失败（`NO_TOKEN` 除外） | 保留上次数值 + 右上角失败原因角标（AUTH/NO_TOKEN 用 crit，其余 warn） |
-| 需要登录 | `displayState==='NO_TOKEN'` 或 `lastErrorKind==='NO_TOKEN'` | 钥匙图标 + `Sign in`；**即便有陈旧数据也不显示旧百分比**，不叠陈旧角标；单击直接打开 CLI 登录 |
+| 需要登录 | `displayState` 或 `lastErrorKind` ∈ {`NO_TOKEN`, `REAUTH`} | 钥匙图标 + `Sign in`（登出）/ `Re-login`（凭据续不回来）；**即便有陈旧数据也不显示旧百分比**，不叠陈旧角标；单击直接打开 CLI 登录 |
+| `REAUTH` | 凭据过期且无 `refreshToken` | 见「需要登录」；不发请求 |
 | `AUTH` | HTTP 401 / 403 且无历史 | 感叹号 + `Re-auth` |
 | `NETWORK` | 请求异常 / 超时且无历史 | 断线图标 + `Offline` |
 | `RATE_LIMITED` | HTTP 429 且无历史 | 沙漏图标 + `Slow down` |
 | `PENDING` | 首次拉取尚未返回 | 标记 + 占位横线 |
 | `UNSUPPORTED` | 非 macOS | 标记 + `macOS only` |
+
+**陈旧时长**：`STALE` 且距上次成功超过 `pollSec × 3`（连续三拍都没拉回来）时，在角标正下方
+（`y=82`，右对齐到内容箱右沿）写出最大单位的时长：`40m` / `5h` / `9d`。一次偶发失败不写字。
+这条是 2026-09-13 故障的直接护栏——当时「旧了多久」只存在于 PI 诊断面板里，键面上完全看不出来。
+
+**失败留痕**：每次失败原因发生变化、以及失败后恢复，都往 `data/claudeusage-fetch.jsonl`
+（框架的 `appendDiagnosticLog`，512KB 滚动）写一条 `{ at, kind, displayState, staleMs }`。
+同一原因连续失败不重复写。恢复那条带的是恢复前的 `staleMs`，用来回答「坏了多久」。
 
 只要曾成功拉取过，任何失败都优先降级为 `STALE` 而非错误页——额度不使用就不会上涨，陈旧值仍然有参考价值。**唯一例外是登出（`NO_TOKEN`）**：没有 token 就拉不到新值，继续显示旧百分比只会误导，因此 `needsLogin` 优先于陈旧数据，整块换成登录提示。`AUTH` 不算「需要登录」——token 可能只是过期、可被短按刷新恢复，仍走陈旧数字 + 角标。失败的**具体原因**始终写入日志并回显到 Inspector 诊断面板。
 
@@ -194,6 +222,8 @@ lastSuccess: { weekly, fiveHour, scoped, fetchedAt }
   其中每项: { percent, severity, resetsAt, label }
 lastErrorKind
 ```
+
+`fetchedAt` 同时是键面陈旧时长的唯一依据，跨重启保留。
 
 - 仅在数据语义变化时写盘，不按对象引用判断。
 - 写盘走同目录临时文件 + rename 替换。
