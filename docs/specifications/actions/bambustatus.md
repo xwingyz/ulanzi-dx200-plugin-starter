@@ -1,7 +1,7 @@
 # Bambu 3D Printer Status 功能与技术规范
 
 状态：首版已实现，等待真实 P2S 状态订阅验收  
-最后代码核对：2026-07-27
+最后代码核对：2026-09-17
 action key：`bambustatus`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.bambustatus`
 
@@ -68,6 +68,7 @@ subscribe: device/<serialNumber>/report
 - 状态上报是增量，action 在实例内维护 `print` 状态镜像。
 - 连接后可向 `device/<serialNumber>/request` 发送只读 `pushall` 状态请求；不得发送任何设备控制 command。
 - 连接失败后使用实例定时器退避重连，最长退避 60 秒；短按跳过等待立即重连。
+- **地址漂移自愈**：序列号是打印机身份，IP 不是（换路由、DHCP 续租都会让它漂移）。从第二次重连起，每次重连前先做一次 §3.2 的局域网发现；若同序列号设备在不同地址应答，只更新 `printerIp` 并经框架 `persistSettings` 落盘，随后连接新地址，`printerName` 与 `accessCode` 不得被发现结果覆盖。第一次重连不发现（多数断线是瞬时的）；Inspector 手动扫描持有 UDP socket 时跳过本轮；发现期间序列号被用户修改则本次结果作废。采用新地址后以 `status: 'relocated'` 回推扫描结果，Inspector 只负责显示，不再次提交。
 
 ## 4. 设置契约
 
@@ -172,6 +173,7 @@ suppressFinishedUntilNextTask: boolean
 
 - 配置缺失：显示 `待配置`，Inspector 标出缺少字段。
 - DNS/网络/TLS/认证失败：显示离线，并在 Inspector 返回不含凭据的错误类别。
+- 配置地址连不上但同序列号在别的地址应答：按 §3.3 自动采用新地址，不要求用户重新扫描。
 - MQTT 已连接但状态请求/订阅持续无数据：显示 `不兼容`，明确提示 P2S 当前云端模式可能不开放本地状态。
 - JSON payload 损坏或字段缺失：忽略该增量并保留连接，不抛到进程级错误边界。
 - 任一实例异常不得影响 Lex Utility 的其他 action。

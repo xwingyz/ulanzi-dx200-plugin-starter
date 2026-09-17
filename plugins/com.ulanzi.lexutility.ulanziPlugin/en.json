@@ -316,6 +316,7 @@
     "Reading Bambu Studio settings and scanning the local network…": "Reading Bambu Studio settings and scanning the local network…",
     "Found %s and saved it automatically. You can continue editing.": "Found %s and saved it automatically. You can continue editing.",
     "Found a printer and saved it automatically. You can continue editing.": "Found a printer and saved it automatically. You can continue editing.",
+    "The printer answered from a new address, which was saved automatically.": "The printer answered from a new address, which was saved automatically.",
     "Discovered information was saved. Complete the remaining settings.": "Discovered information was saved. Complete the remaining settings.",
     "No available printer was found. Check the local network or enter settings manually.": "No available printer was found. Check the local network or enter settings manually.",
     "Live printer status received.": "Live printer status received.",

@@ -17,6 +17,9 @@ const TOTAL_ESTIMATE_TOLERANCE_SEC = 120;
 const ANCHOR_GAP_MS = 10 * 60_000;
 const MANUAL_REFRESH_FEEDBACK_MS = 650;
 const RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
+// 从第几次重连起先按序列号重新发现打印机。第一次重连不找：多数断线是瞬时的，没必要每次都占 3.5s
+// 的 UDP 监听；第二次仍连不上，IP 漂移就是头号嫌疑。
+const REDISCOVER_FROM_ATTEMPT = 2;
 const STATUS_TEXT_MAX_WIDTH = 164;
 const STATUS_FONT_SIZES = [34, 32, 30, 28, 26, 24, 22, 20, 18];
 const SCAN_PARAM = '__bambustatusScan';
@@ -600,7 +603,7 @@ export function createBambuStatusAction(runtime) {
     if (!isCompleteSettings(instance.settings) || instance.active === false) return;
     const index = Math.min(instance.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1);
     instance.reconnectAttempt += 1;
-    setInstanceTimeout(instance, 'bambustatusReconnect', () => connectPrinter(instance), RECONNECT_DELAYS_MS[index]);
+    setInstanceTimeout(instance, 'bambustatusReconnect', () => reconnectPrinter(instance), RECONNECT_DELAYS_MS[index]);
   }
 
   function snapshotFromInstance(instance) {
@@ -766,6 +769,46 @@ export function createBambuStatusAction(runtime) {
     client.on('close', safeNetwork(instance, generation, () => {
       if (instance.connectionState !== 'INCOMPATIBLE') markOffline(instance, 'Connection closed');
     }));
+  }
+
+  // IP 不是打印机的身份，序列号才是：换路由器、DHCP 续租都会让 IP 漂移（2026-09-15 真机：路由器
+  // 更换后打印机从 .180 挪到 .65，插件对着空地址退避了两天）。重连前按序列号在局域网找一遍，同序列号
+  // 在别的地址应答就采用新地址并落盘。只改 printerIp——名称与 Access Code 与地址无关，不能顺手覆盖。
+  async function relocatePrinter(instance, options = {}) {
+    const serialNumber = cleanString(instance.settings.serialNumber);
+    // 手动扫描进行中不抢 UDP socket；discoverDevices 会先关掉现有 socket，抢了会把用户的扫描打断。
+    if (!serialNumber || instance.discoverySocket) return null;
+    const devices = await (options.discover || discoverDevices)(instance);
+    // 等待期间用户可能在 Inspector 改了序列号：那这次发现结果就对不上，作废。
+    if (instance.active === false || cleanString(instance.settings.serialNumber) !== serialNumber) return null;
+    const match = devices.find((device) => device?.serialNumber === serialNumber);
+    const printerIp = cleanString(match?.printerIp);
+    if (!printerIp || printerIp === cleanString(instance.settings.printerIp)) return null;
+    instance.settings = { ...instance.settings, printerIp };
+    if (match.model) instance.model = match.model;
+    persistSettings(instance);
+    sendParamFromPlugin({
+      [SCAN_RESULT_PARAM]: {
+        status: 'relocated',
+        model: match.model || '',
+        settings: {
+          printerIp,
+          serialNumber,
+          accessCode: instance.settings.accessCode,
+          printerName: instance.settings.printerName,
+        },
+      },
+    }, instance.context);
+    return printerIp;
+  }
+
+  async function reconnectPrinter(instance, options = {}) {
+    if (instance.reconnectAttempt >= REDISCOVER_FROM_ATTEMPT) {
+      await relocatePrinter(instance, options);
+    }
+    // 发现期间短按已经把连接拉起来了（mqttClient 非空），别再叠一次连接。
+    if (instance.active === false || instance.mqttClient) return;
+    connectPrinter(instance, options);
   }
 
   function discoverDevices(instance, options = {}) {
@@ -1058,6 +1101,9 @@ export function createBambuStatusAction(runtime) {
       bambuOpenMakerWorld: openMakerWorld,
       parseSsdpPacket,
       readBambuStudioAccessCodes,
+      bambuReconnectPrinter: reconnectPrinter,
+      bambuRelocatePrinter: relocatePrinter,
+      bambuRediscoverFromAttempt: REDISCOVER_FROM_ATTEMPT,
       refreshDelay,
       resolvePrintState,
       shouldConnectOnReady,

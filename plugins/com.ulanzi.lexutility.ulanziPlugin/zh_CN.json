@@ -316,6 +316,7 @@
     "Reading Bambu Studio settings and scanning the local network…": "正在读取 Bambu Studio 设置并扫描局域网……",
     "Found %s and saved it automatically. You can continue editing.": "已发现 %s 并自动保存，可继续编辑。",
     "Found a printer and saved it automatically. You can continue editing.": "已发现打印机并自动保存，可继续编辑。",
+    "The printer answered from a new address, which was saved automatically.": "打印机换了地址并已自动保存新地址。",
     "Discovered information was saved. Complete the remaining settings.": "已保存发现的信息，请补全其余设置。",
     "No available printer was found. Check the local network or enter settings manually.": "未发现可用打印机。请检查局域网或手动填写设置。",
     "Live printer status received.": "已收到打印机实时状态。",

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { __testing as testing } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
+import { createBambuStatusAction } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/actions/bambustatus.js';
 
 function estimateBoldStatusTextWidth(text, fontSize) {
   const units = [...text].reduce((sum, character) => {
@@ -548,4 +549,118 @@ test('bambustatus built-in status lines fit the 164-unit visual budget in Englis
       testing.dropPersistedState(context);
     }
   }
+});
+
+// ---- 按序列号重新发现：IP 漂移后自愈 ----
+
+function rediscoveryHarness({ devices = [], settings = {} } = {}) {
+  const persisted = [];
+  const sent = [];
+  const connections = [];
+  const action = createBambuStatusAction({
+    clearInstanceTimeout: () => {},
+    escapeXml: (value) => value,
+    frameContent: () => '',
+    frameFor: () => ({}),
+    frameHighlight: () => '',
+    normalizeChoice: (value, fallback) => value || fallback,
+    persistSettings: (instance) => persisted.push({ ...instance.settings }),
+    readPersistedState: () => ({}),
+    renderInstance: () => {},
+    renderMeterRow: () => '',
+    renderThemeBackdrop: () => '',
+    sendParamFromPlugin: (payload) => sent.push(payload),
+    setInstanceTimeout: () => {},
+    t: (key) => key,
+    themeFor: () => ({}),
+    toDataUrl: (value) => value,
+    writePersistedState: () => true,
+  });
+  const instance = {
+    context: 'com.ulanzi.ulanzistudio.lexutility.bambustatus___0_2___bambu',
+    active: true,
+    settings: {
+      printerName: 'Workshop', printerIp: '192.168.1.180', serialNumber: 'TEST-SERIAL', accessCode: 'CODE',
+      ...settings,
+    },
+    mqttClient: null, discoverySocket: null, connectionGeneration: 0, reconnectAttempt: 0,
+    statusReceived: false, diagnostic: '', model: '',
+  };
+  const connect = (url) => {
+    connections.push(url);
+    return { on: () => {}, subscribe: () => {}, end: () => {} };
+  };
+  const discover = async () => devices;
+  return { action, instance, persisted, sent, connections, options: { connect, discover } };
+}
+
+test('bambustatus adopts the address a matching serial answers from and reconnects there', async () => {
+  const { action, instance, persisted, sent, connections, options } = rediscoveryHarness({
+    devices: [
+      { printerIp: '192.168.1.9', serialNumber: 'OTHER', model: 'P2S', name: 'Someone else' },
+      { printerIp: '192.168.1.65', serialNumber: 'TEST-SERIAL', model: 'P2S', name: 'Renamed on printer' },
+    ],
+  });
+  instance.reconnectAttempt = action.testing.bambuRediscoverFromAttempt;
+
+  await action.testing.bambuReconnectPrinter(instance, options);
+
+  assert.equal(instance.settings.printerIp, '192.168.1.65');
+  // 名称与 Access Code 与地址无关，不得被发现结果顺手覆盖。
+  assert.equal(instance.settings.printerName, 'Workshop');
+  assert.equal(instance.settings.accessCode, 'CODE');
+  assert.deepEqual(persisted.map((entry) => entry.printerIp), ['192.168.1.65']);
+  assert.equal(connections.length, 1);
+  assert.match(connections[0], /^mqtts:\/\/192\.168\.1\.65:8883$/);
+  const result = sent.find((payload) => payload.__bambustatusDiscovery)?.__bambustatusDiscovery;
+  assert.equal(result?.status, 'relocated');
+  assert.equal(result?.settings?.printerIp, '192.168.1.65');
+});
+
+test('bambustatus keeps the configured address when the serial is not seen or has not moved', async () => {
+  const unseen = rediscoveryHarness({ devices: [{ printerIp: '192.168.1.9', serialNumber: 'OTHER' }] });
+  unseen.instance.reconnectAttempt = unseen.action.testing.bambuRediscoverFromAttempt;
+  await unseen.action.testing.bambuReconnectPrinter(unseen.instance, unseen.options);
+  assert.equal(unseen.instance.settings.printerIp, '192.168.1.180');
+  assert.equal(unseen.persisted.length, 0);
+  assert.deepEqual(unseen.connections, ['mqtts://192.168.1.180:8883']);
+
+  const same = rediscoveryHarness({ devices: [{ printerIp: '192.168.1.180', serialNumber: 'TEST-SERIAL' }] });
+  same.instance.reconnectAttempt = same.action.testing.bambuRediscoverFromAttempt;
+  await same.action.testing.bambuReconnectPrinter(same.instance, same.options);
+  assert.equal(same.persisted.length, 0);
+  assert.equal(same.sent.some((payload) => payload.__bambustatusDiscovery), false);
+});
+
+test('bambustatus does not scan on the first reconnect and never while a manual scan holds the socket', async () => {
+  let scans = 0;
+  const first = rediscoveryHarness({ devices: [{ printerIp: '192.168.1.65', serialNumber: 'TEST-SERIAL' }] });
+  first.instance.reconnectAttempt = first.action.testing.bambuRediscoverFromAttempt - 1;
+  await first.action.testing.bambuReconnectPrinter(first.instance, {
+    ...first.options, discover: async () => { scans += 1; return []; },
+  });
+  assert.equal(scans, 0);
+  assert.deepEqual(first.connections, ['mqtts://192.168.1.180:8883']);
+
+  const busy = rediscoveryHarness({ devices: [{ printerIp: '192.168.1.65', serialNumber: 'TEST-SERIAL' }] });
+  busy.instance.discoverySocket = {};
+  busy.instance.reconnectAttempt = busy.action.testing.bambuRediscoverFromAttempt;
+  const relocated = await busy.action.testing.bambuRelocatePrinter(busy.instance, {
+    discover: async () => { scans += 1; return []; },
+  });
+  assert.equal(relocated, null);
+  assert.equal(scans, 0);
+});
+
+test('bambustatus discards a relocation if the serial was edited while scanning', async () => {
+  const { action, instance, persisted } = rediscoveryHarness();
+  const relocated = await action.testing.bambuRelocatePrinter(instance, {
+    discover: async () => {
+      instance.settings = { ...instance.settings, serialNumber: 'EDITED' };
+      return [{ printerIp: '192.168.1.65', serialNumber: 'TEST-SERIAL' }];
+    },
+  });
+  assert.equal(relocated, null);
+  assert.equal(instance.settings.printerIp, '192.168.1.180');
+  assert.equal(persisted.length, 0);
 });

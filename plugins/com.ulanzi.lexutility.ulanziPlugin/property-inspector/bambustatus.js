@@ -73,6 +73,8 @@ function initBambuStatusInspector() {
           'ok',
           result.model ? { '%s': result.model } : {},
         );
+      } else if (result.status === 'relocated') {
+        showLocalizedScanStatus('The printer answered from a new address, which was saved automatically.', 'ok');
       } else if (result.status === 'partial') {
         showLocalizedScanStatus('Discovered information was saved. Complete the remaining settings.', 'warn');
       } else {
