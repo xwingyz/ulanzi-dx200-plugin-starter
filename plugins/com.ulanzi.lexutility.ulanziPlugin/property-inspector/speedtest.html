@@ -74,8 +74,14 @@
               <label for="scope" data-localize="Server region">Server region</label>
               <select id="scope" name="scope">
                 <option value="any" data-localize="Any">Any</option>
-                <option value="mainland" selected data-localize="Mainland China">Mainland China</option>
-                <option value="overseas" data-localize="Overseas (including Hong Kong, Macao &amp; Taiwan)">Overseas (including Hong Kong, Macao &amp; Taiwan)</option>
+                <option value="china" selected data-localize="China">China</option>
+                <option value="japankorea" data-localize="Japan &amp; Korea">Japan &amp; Korea</option>
+                <option value="southeastasia" data-localize="Southeast Asia">Southeast Asia</option>
+                <option value="europe" data-localize="Europe">Europe</option>
+                <option value="useast" data-localize="United States (East)">United States (East)</option>
+                <option value="uswest" data-localize="United States (West)">United States (West)</option>
+                <option value="canada" data-localize="Canada">Canada</option>
+                <option value="oceania" data-localize="Oceania">Oceania</option>
               </select>
             </div>
             <div class="field">
@@ -183,7 +189,7 @@
               <option value="zh_CN">简体中文</option>
             </select>
           </div>
-          <p class="pi-note" data-localize="Each action instance independently selects any, mainland China, or overseas servers.">Each action instance independently selects any, mainland China, or overseas servers.</p>
+          <p class="pi-note" data-localize="Each action instance independently selects a server region. The server list is fetched for the selected region.">Each action instance independently selects a server region. The server list is fetched for the selected region.</p>
           <div class="action-row">
             <button class="ghost-btn" id="resetDefaults" type="button" data-localize="Restore defaults">Restore defaults</button>
             <button type="submit" data-localize="Save">Save</button>

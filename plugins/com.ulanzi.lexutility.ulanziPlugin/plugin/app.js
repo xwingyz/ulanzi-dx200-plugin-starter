@@ -1053,6 +1053,9 @@ function sanitizeServerList(value) {
         ipCountry: String(server?.ipCountry || '').slice(0, 80),
         ipCountryCode: String(server?.ipCountryCode || '').toUpperCase().slice(0, 3),
         locationSource: String(server?.locationSource || 'official').slice(0, 16),
+        // 官方目录给的坐标；只有 speedtest 用它按经度拆美东/美西，缺失时为 null。
+        lat: Number.isFinite(Number(server?.lat)) && server?.lat !== '' && server?.lat !== null ? Number(server.lat) : null,
+        lon: Number.isFinite(Number(server?.lon)) && server?.lon !== '' && server?.lon !== null ? Number(server.lon) : null,
       }];
     });
     return JSON.stringify(clean);

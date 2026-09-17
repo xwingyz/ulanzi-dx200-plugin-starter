@@ -17,6 +17,33 @@ const SPEEDTEST_FIELDS = withLanguageField([
 // 只驱动本地筛选，不属于实例设置，不能触发自动保存。
 const LOCAL_ONLY_INPUTS = ['serverSearch'];
 
+// 与 plugin/actions/speedtest.js 的 SPEEDTEST_REGION_RULES 逐字相同，
+// 由 tests/speedtest-action.test.js 锁定；改任一边必须同步另一边。
+const SPEEDTEST_REGION_RULES = {
+  china: { countries: ['CN', 'HK', 'MO', 'TW'] },
+  japankorea: { countries: ['JP', 'KR'] },
+  southeastasia: { countries: ['SG', 'MY', 'TH', 'VN', 'PH', 'ID'] },
+  europe: { countries: ['GB', 'IE', 'DE', 'FR', 'NL', 'BE', 'LU', 'ES', 'PT', 'IT', 'CH', 'AT', 'SE', 'NO', 'DK', 'FI', 'PL', 'CZ'] },
+  useast: { countries: ['US'], lonMin: -100 },
+  uswest: { countries: ['US'], lonMax: -100 },
+  canada: { countries: ['CA'] },
+  oceania: { countries: ['AU', 'NZ'] },
+};
+
+// 与 plugin/actions/speedtest.js 的 speedtestServerInScope 保持同一套判定。
+function serverInScope(scope, server) {
+  if (scope === 'any') return true;
+  const explicit = String(server.countryCode || '').toUpperCase();
+  const countryCode = explicit ||
+    (/^(china|中国|中国大陆|people'?s republic of china)$/i.test(String(server.country || '')) ? 'CN' : '');
+  const rule = SPEEDTEST_REGION_RULES[scope];
+  if (!rule || !rule.countries.includes(countryCode)) return false;
+  const lon = Number(server.lon);
+  if (rule.lonMin !== undefined && !(Number.isFinite(lon) && lon > rule.lonMin)) return false;
+  if (rule.lonMax !== undefined && !(Number.isFinite(lon) && lon <= rule.lonMax)) return false;
+  return true;
+}
+
 function syncChartButtons() {
   const chartInput = document.getElementById('chartType');
 
@@ -47,13 +74,8 @@ function initSpeedtestInspector() {
   function filteredServers() {
     const query = String(document.getElementById('serverSearch').value || '').toLowerCase();
     const scope = document.getElementById('scope').value;
-    return (runtime.servers || []).filter((server) => {
-      const country = String(server.country || '').toLowerCase();
-      const mainland = String(server.countryCode || '').toUpperCase() === 'CN' || /^(china|中国|中国大陆|people'?s republic of china)$/i.test(country);
-      // 与 plugin/actions/speedtest.js 的 speedtestCandidates 保持同一套判定。
-      const inScope = scope === 'any' ? true : scope === 'mainland' ? mainland : !mainland;
-      return inScope && JSON.stringify(server).toLowerCase().includes(query);
-    });
+    return (runtime.servers || []).filter((server) =>
+      serverInScope(scope, server) && JSON.stringify(server).toLowerCase().includes(query));
   }
 
   // 节点清单为空时向插件要一次；插件侧 ensureServers 不 force，

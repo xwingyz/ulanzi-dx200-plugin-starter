@@ -1,7 +1,7 @@
 # Network Speed Test 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-07-28
+最后代码核对：2026-09-17
 action key：`speedtest`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.speedtest`
 
@@ -24,7 +24,7 @@ Network Speed Test 调用官方 Ookla Speedtest CLI 测量下载、上传和网�
 - 用户必须自行下载、安装官方 Ookla `speedtest` 可执行文件，并在首次运行时接受其许可/GDPR 条款；插件不代为下载、安装或接受条款。
 - 查找顺序：用户 `cliPath`、`/opt/homebrew/bin/speedtest`、`/usr/local/bin/speedtest`、当前 `PATH`。
 - 测速命令：`speedtest --format=json --progress=no`；有选定节点时追加 `--server-id=<id>`。
-- 节点目录优先请求 `https://www.speedtest.net/api/js/servers`，同时查询 China 与通用列表并按 ID 去重；目录失败时回退 CLI `--servers --format=json`。
+- 节点目录优先请求 `https://www.speedtest.net/api/js/servers`。不带 `search` 的请求只按出口 IP 就近返回，从大陆看海外几乎只剩台湾/香港；大陆节点在该接口上几乎搜不到（`Beijing` 返回 0），只能靠就近列表。因此**按当前 `scope` 拉取**：就近列表（30）加上该区域的固定国家名搜索词（见 §5 区域表），每个搜索词的 `limit` 为 `clamp(floor(70 / 词数), 5, 30)`，总量控制在 100 条缓存上限内。请求并发上限 4，单个搜索词失败重试一次；各列表轮流取一条合并、按 ID 去重，再按国家、城市排序；单个搜索词最终失败不影响其他地区。目录整体失败时回退 CLI `--servers --format=json`。
 - 可选 GeoIP 通过 DNS 和 `ipwho.is` 补充 IP 实际位置；失败只跳过增强，不阻止测速。
 
 ## 3. 用户功能与交互
@@ -34,7 +34,7 @@ Network Speed Test 调用官方 Ookla Speedtest CLI 测量下载、上传和网�
 - 键面双击：切换自动测速暂停状态。由于基座要求第一次短按立即执行，进入暂停时第二次短按会取消第一次短按刚发起或原本正在运行的任务；恢复自动测速时保留第一次短按发起的手动测速。
 - 键面长按：使用系统默认浏览器打开 `https://www.speedtest.net/`；不修改测速历史、节点或调度设置。
 - Inspector 可立即测速、重新获取节点、搜索/筛选节点和清除当前实例历史。
-- 不勾节点：在当前区域全部候选中每日随机一个。
+- 不勾节点：在当前区域全部候选中每日随机一个；先随机选国家/地区，再在其中随机选节点，避免节点数最多的地区（如台湾）几乎每天被抽中。
 - 勾选 1 个节点：固定使用该节点。
 - 勾选 2 个及以上：每天在所选节点中随机一个，当天保持粘性。
 - 自动调度支持每 15/30/60 分钟或仅手动，并可限制自动测速时段；默认时段为 08:00 至次日 01:00。
@@ -49,7 +49,7 @@ Network Speed Test 调用官方 Ookla Speedtest CLI 测量下载、上传和网�
 | `theme` | `signal` | 公共主题 key | 全局外观 |
 | `frameSize` | `optimal` | `optimal` / `max` | 安全显示范围 |
 | `showFrame` | `true` | `true` / `false` | 是否绘制公共边框 |
-| `scope` | `mainland` | `any` / `mainland` / `overseas` | 节点区域；海外含港澳台 |
+| `scope` | `china` | `any` / `china` / `japankorea` / `southeastasia` / `europe` / `useast` / `uswest` / `canada` / `oceania` | 节点区域，见 §5 区域表；旧值 `mainland` / `overseas` 归一化为默认 `china` |
 | `intervalMin` | `30` | `15` / `30` / `60` / `manual` | 自动测速间隔 |
 | `activeAllDay` | `false` | 字符串布尔值 | 是否忽略活动起止时间 |
 | `activeStart` | `08:00` | 合法 24 小时时间 | 活动窗口起点 |
@@ -64,11 +64,26 @@ Network Speed Test 调用官方 Ookla Speedtest CLI 测量下载、上传和网�
 
 ## 5. 节点发现与选择
 
-- 节点缓存有效期 24 小时；空缓存、过期缓存、旧 GeoIP 结构或当前 scope 无候选时需要发现。
+- 区域表（`SPEEDTEST_REGIONS` / `SPEEDTEST_REGION_RULES`，Inspector 持有逐字相同的规则表副本，由测试锁定一致）：
+
+| scope | 键面代号 | 国家/地区代码与经度界限 | 目录搜索词 |
+| --- | --- | --- | --- |
+| `any` | `GLOBAL` | 不筛选 | China、Hong Kong、Taiwan、Japan、Korea、Singapore、United States、United Kingdom、Germany、Australia |
+| `china` | `CHINA` | CN、HK、MO、TW | China、Hong Kong、Macau、Taiwan |
+| `japankorea` | `JP·KR` | JP、KR | Japan、Korea |
+| `southeastasia` | `SE ASIA` | SG、MY、TH、VN、PH、ID | 同左国家名 |
+| `europe` | `EUROPE` | GB、IE、DE、FR、NL、BE、LU、ES、PT、IT、CH、AT、SE、NO、DK、FI、PL、CZ | United Kingdom、Germany、France、Netherlands、Spain、Italy、Switzerland、Sweden、Poland |
+| `useast` | `US EAST` | US，经度 > -100 | New York、Chicago、Dallas、Atlanta、Miami、Houston |
+| `uswest` | `US WEST` | US，经度 ≤ -100 | Los Angeles、Seattle、Denver、Phoenix、Salt Lake、San Jose |
+| `canada` | `CANADA` | CA | Canada、Toronto、Vancouver、Montreal |
+| `oceania` | `OCEANIA` | AU、NZ | Australia、New Zealand |
+
+  键面代号最长 8 字符；缩写只用 ISO 代码，不用带政治含义的简称。CLI 回退列表可能没有 `countryCode`，国家名为 China/中国 等写法时按 CN 处理。美东/美西以西经 100° 为界（达拉斯归东、丹佛归西），依赖官方目录的 `lon`；没有坐标的美国节点（CLI 回退）两边都不进，只在 `any` 出现。`Washington` 搜索词命中华盛顿州，不能用作美东搜索词。
+- 节点缓存有效期 24 小时；空缓存、过期缓存、旧 GeoIP 结构、缓存记录的 `serverCacheScope` 与当前 scope 不同，或当前 scope 无候选时需要发现。切换 scope 会绕过 10 分钟退避直接重新发现；仅改勾选不绕过。
 - 自动发现失败后 10 分钟退避；用户“重新获取节点”会绕过退避。
 - 只对当前候选前 12 个节点做 GeoIP 增强，控制网络开销。
 - GeoIP 缓存有效期 30 天；官方节点城市/国家保留，IP 位置使用独立字段，不覆盖官方位置。
-- `scope=mainland` 只保留 CN/中国大陆；`overseas` 取其补集；`any` 不筛选。
+- 筛选按区域表的国家代码；未归入任何大区的国家只在 `any` 里出现；`any` 不筛选。
 - 当日随机状态由 `dailyServerId + dailyServerDate` 持久化；只有一个候选时不写粘性选择。
 
 ## 6. 调度、排队与取消
@@ -94,6 +109,7 @@ CLI JSON 转换为：
 - `downloadMbps`、`uploadMbps`：从 bytes/s × 8 转为 Mbps，保留两位小数。
 - `pingMs`、`jitterMs`、`packetLoss`、`dataBytes`。
 - 服务端 ID、host、名称、城市、国家和 IP；不保存客户端公网 IP。
+- 节点对象另含官方目录的 `lat` / `lon`（数字，缺失为 `null`），由基座 `sanitizeServerList` 净化；目前只有本 action 使用。
 
 错误码：
 
@@ -105,7 +121,7 @@ CLI JSON 转换为：
 | `TIMEOUT` | CLI 超过配置硬超时 |
 | `NET` | 其他网络或执行错误 |
 
-运行态版本为 `version: 2`，保存 7 天内最多 672 条 history、最后成功结果、完成时间、下一次计划、自动测速暂停状态、每日节点选择、节点缓存、节点缓存时间和 GeoIP 缓存。成功与失败都进入历史；清除历史同时清空最后结果和错误显示，但保留节点缓存与调度。
+运行态版本为 `version: 2`，保存 7 天内最多 672 条 history、最后成功结果、完成时间、下一次计划、自动测速暂停状态、每日节点选择、节点缓存、节点缓存时间、节点缓存所属 scope（`serverCacheScope`，旧状态缺省为空）和 GeoIP 缓存。成功与失败都进入历史；清除历史同时清空最后结果和错误显示，但保留节点缓存与调度。
 
 每次测速完成/失败、调度变化、节点刷新和 dispose 时 flush。状态损坏或旧字段会经净化降级。
 
@@ -118,7 +134,7 @@ CLI JSON 转换为：
 | `onRun` | 空闲时测速；忙碌时取消 |
 | `onDoublePress` | 切换自动测速暂停状态；进入暂停时取消当前带宽任务 |
 | `onLongPress` | 使用系统默认浏览器打开 Speedtest 官网 |
-| `onSettingsChanged` | scope/候选变化清除每日选择并发现；调度字段变化重排 |
+| `onSettingsChanged` | scope/候选变化清除每日选择并发现（scope 变化强制发现）；调度字段变化重排 |
 | `onParamFromPlugin` | 处理刷新节点、确保节点、立即测速、清历史 |
 | `onDispose` | 同步 flush 当前状态；框架取消队列任务 |
 | `render` | 生成速度与趋势 SVG data URL |
@@ -127,7 +143,7 @@ CLI JSON 转换为：
 
 ## 9. 键面显示
 
-- 标题行左侧是区域 `MAINLAND` / `OVERSEAS` / `GLOBAL`，右侧是上次测速距今多久（`now` / `>15m` / `>1h` / `>3d`）。
+- 标题行左侧是区域代号（见 §5 区域表，如 `CHINA` / `EUROPE` / `SE ASIA`），右侧是上次测速距今多久（`now` / `>15m` / `>1h` / `>3d`）。
   时间戳用 `>` 前缀而不是 ` ago` 后缀：短 3 个字符，8 字符的区域全称才放得下；
   刻度本来就是向下取整的，`>15m` 字面意思正好等于它的真实含义。天数封顶 99 以约束宽度。
   曾经把区域缩成 `CN` / `INTL` 来腾地方，但这类简写带政治含义，不能为了排版采用。
@@ -145,7 +161,9 @@ CLI JSON 转换为：
 - Mbps 转换且不保留 client IP。
 - 7 天/672 条裁剪、活动窗口、跨午夜，以及候选计划时间越过窗口终点时立即改期。
 - 窗口外的手动按键仍立即发起一次测速。
-- 地区筛选、勾选节点覆盖、固定/每日随机选择。
+- 各区域筛选、勾选节点覆盖、固定/每日随机选择；每日随机先按国家再按节点抽取。
+- 目录发现按 scope 选择搜索词、每词限量、去重、排序、并发上限、单词重试与单地区失败容错；缓存 scope 不符触发重发现。
+- Inspector 国家表与插件逐字一致，下拉选项与 `SPEEDTEST_REGIONS` 键一一对应；键面区域代号不超过 8 字符。
 - 官方目录映射、缓存过期判断与 GeoIP 不覆盖官方位置。
 - 不同样本数下图表宽度与默认产品契约。
 - 双击暂停/恢复自动测速、暂停时取消当前任务并持久化；长按的平台浏览器启动参数。
@@ -157,6 +175,6 @@ CLI JSON 转换为：
 ## 多语言契约
 
 - Inspector 默认英文；静态文案使用 `data-localize`，自定义控制器通过共享 helper 处理 `uiLanguage`、权威设置回读和语言切换。
-- 测速阶段、节点模式、即时测速状态和键面运行态文案按实例 `uiLanguage` 翻译；简体中文界面的 `Mainland China`、`Overseas` 及键面 `MAINLAND`、`OVERSEAS` 保留英文。测速值、服务器名称、地区代码和外部错误详情保持原始数据。
+- 测速阶段、节点模式、即时测速状态和键面运行态文案按实例 `uiLanguage` 翻译；简体中文界面的 `China` 选项及键面全部区域代号保留英文（`GLOBAL` 译为“不限”）；日韩、东南亚、欧洲、美国东部/西部、加拿大、大洋洲选项使用中文。测速值、服务器名称、地区代码和外部错误详情保持原始数据。
 - `en.json` 与 `zh_CN.json` 的 action 名称/说明顺序必须与 manifest 一致，新增键由 `tests/i18n.test.js` 锁定覆盖。
 - 用户可见注册名称固定为英文 `Network Speed Test`、简体中文 `网络测速`。

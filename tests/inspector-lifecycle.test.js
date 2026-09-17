@@ -508,7 +508,7 @@ test('bambustatus applies discovery without resubmitting a cached result', () =>
 test('speedtest inspector persists scope, schedule, checked nodes and chart type', () => {
   const harness = createHarness('speedtest.js');
   harness.callbacks.connected[0]();
-  harness.elements.get('scope').value = 'overseas';
+  harness.elements.get('scope').value = 'europe';
   harness.elements.get('intervalMin').value = '30';
   harness.elements.get('candidateServers').value = '[{"id":"12345"}]';
   harness.elements.get('chartType').value = 'bar';
@@ -516,7 +516,7 @@ test('speedtest inspector persists scope, schedule, checked nodes and chart type
   harness.form.dispatchEvent({ type: 'submit' });
 
   const settings = harness.sends.at(-1).settings;
-  assert.equal(settings.scope, 'overseas');
+  assert.equal(settings.scope, 'europe');
   assert.equal(settings.intervalMin, '30');
   assert.equal(settings.candidateServers, '[{"id":"12345"}]');
   assert.equal(settings.chartType, 'bar');
@@ -563,7 +563,7 @@ test('speedtest inspector asks for nodes once while the list is empty', () => {
 test('speedtest node list renders checkboxes and derives the mode from how many are checked', () => {
   const harness = createHarness('speedtest.js');
   harness.callbacks.connected[0]();
-  harness.elements.get('scope').value = 'mainland';
+  harness.elements.get('scope').value = 'china';
 
   const servers = [
     { id: '3633', name: 'China Telecom', city: 'Nanjing', country: 'China', countryCode: 'CN' },

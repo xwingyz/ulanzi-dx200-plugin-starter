@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { __testing } from '../plugins/com.ulanzi.lexutility.ulanziPlugin/plugin/app.js';
 
 const {
   ACTION_CONFIGS,
   chooseSpeedtestServer,
+  fetchSpeedtestDirectoryServers,
   handleSpeedtestDoublePress,
   handleSpeedtestRun,
   hydrateSpeedtestState,
@@ -21,14 +25,17 @@ const {
   speedtestCandidates,
   speedtestNextActiveWindowStart,
   speedtestNextDueAt,
+  SPEEDTEST_REGIONS,
 } = __testing;
+
+const PLUGIN_DIR = path.resolve(import.meta.dirname, '../plugins/com.ulanzi.lexutility.ulanziPlugin');
 
 const ICON_NOW = Date.UTC(2026, 6, 18, 12);
 
 function iconSvg(phase, extra = {}, now = ICON_NOW) {
   return Buffer.from(
     renderSpeedtestIcon({
-      settings: { theme: 'signal', frameSize: 'optimal', showFrame: 'true', scope: 'mainland', chartType: 'line' },
+      settings: { theme: 'signal', frameSize: 'optimal', showFrame: 'true', scope: 'china', chartType: 'line' },
       history: [{ at: ICON_NOW, ok: true, downloadMbps: 215, uploadMbps: 66 }],
       lastResult: { at: ICON_NOW, downloadMbps: 215, uploadMbps: 66 },
       lastCompletedAt: ICON_NOW,
@@ -87,7 +94,7 @@ test('testing state drops the inner ring and puts the label on a filled pill', (
   assert.match(svg('error', { errorCode: 'CLI' }), /<rect x="44" y="38"[^>]*fill="#ef4444"/);
   // 空闲状态没有色块，标题就是区域代号。
   assert.ok(!svg('idle').includes('y="38"'));
-  assert.match(svg('idle'), />MAINLAND</);
+  assert.match(svg('idle'), />CHINA</);
 });
 
 test('scope renders as a full word beside the timestamp', () => {
@@ -103,9 +110,22 @@ test('scope renders as a full word beside the timestamp', () => {
     'base64',
   ).toString('utf8');
 
-  assert.match(scoped('mainland'), />MAINLAND</);
-  assert.match(scoped('overseas'), />OVERSEAS</);
   assert.match(scoped('any'), />GLOBAL</);
+  assert.match(scoped('china'), />CHINA</);
+  assert.match(scoped('japankorea'), />JP·KR</);
+  assert.match(scoped('southeastasia'), />SE ASIA</);
+  assert.match(scoped('europe'), />EUROPE</);
+  assert.match(scoped('useast'), />US EAST</);
+  assert.match(scoped('uswest'), />US WEST</);
+  assert.match(scoped('canada'), />CANADA</);
+  assert.match(scoped('oceania'), />OCEANIA</);
+  // 旧设置里的 mainland / overseas 归一化后回到默认的 China。
+  assert.match(scoped('mainland'), />CHINA</);
+  assert.match(scoped('overseas'), />CHINA</);
+  // 标题行只放得下 8 个字符，每个区域代号都得守住这个宽度。
+  for (const region of Object.values(SPEEDTEST_REGIONS)) {
+    assert.ok(region.label.length <= 8, `${region.label} is wider than the title row`);
+  }
 });
 
 test('chart spans the full width whatever the sample count', () => {
@@ -143,24 +163,62 @@ test('chart spans the full width whatever the sample count', () => {
   assert.equal(speedChart([], 'downloadMbps', 70, 68, '#fff', 'line'), '');
 });
 
-test('scope filters candidates to mainland, overseas, or everything', () => {
+test('scope filters candidates by region table or everything', () => {
   const serverCache = [
     { id: '1', countryCode: 'CN', city: 'Nanjing' },
     { id: '2', countryCode: 'HK', city: 'Hong Kong' },
     { id: '3', country: '中国', city: 'Shanghai' },
     { id: '4', countryCode: 'JP', city: 'Tokyo' },
+    { id: '5', countryCode: 'TW', city: 'Taipei' },
+    { id: '6', countryCode: 'MO', city: 'Macau' },
+    { id: '7', countryCode: 'KR', city: 'Seoul' },
+    { id: '8', countryCode: 'SG', city: 'Singapore' },
+    { id: '9', countryCode: 'DE', city: 'Frankfurt' },
+    { id: '10', countryCode: 'GB', city: 'London' },
+    { id: '11', countryCode: 'US', city: 'Seattle', lon: -122.33 },
+    { id: '12', countryCode: 'CA', city: 'Toronto' },
+    { id: '15', countryCode: 'US', city: 'New York', lon: -74.01 },
+    { id: '16', countryCode: 'US', city: 'Dallas', lon: -96.8 },
+    { id: '17', countryCode: 'US', city: 'Denver', lon: -104.99 },
+    { id: '18', countryCode: 'US', city: 'Unknown' },
+    { id: '13', countryCode: 'AU', city: 'Sydney' },
+    { id: '14', countryCode: 'BR', city: 'São Paulo' },
   ];
   const ids = (scope) => speedtestCandidates({ scope }, { serverCache }).map((server) => server.id);
 
-  assert.deepEqual(ids('mainland'), ['1', '3']);
-  assert.deepEqual(ids('overseas'), ['2', '4']);
-  assert.deepEqual(ids('any'), ['1', '2', '3', '4']);
+  assert.deepEqual(ids('china'), ['1', '2', '3', '5', '6']);
+  assert.deepEqual(ids('japankorea'), ['4', '7']);
+  assert.deepEqual(ids('southeastasia'), ['8']);
+  assert.deepEqual(ids('europe'), ['9', '10']);
+  // 以西经 100° 为界：达拉斯归东，丹佛归西；CLI 回退没坐标的美国节点两边都不进，只在 any 里。
+  assert.deepEqual(ids('useast'), ['15', '16']);
+  assert.deepEqual(ids('uswest'), ['11', '17']);
+  assert.deepEqual(ids('canada'), ['12']);
+  assert.deepEqual(ids('oceania'), ['13']);
+  // 没归到任何大区的节点（巴西）只在 any 里出现。
+  assert.deepEqual(ids('any'), serverCache.map((server) => server.id));
+});
+
+test('the inspector region table and the plugin region table stay identical', () => {
+  const extract = (file) => {
+    const source = fs.readFileSync(path.join(PLUGIN_DIR, file), 'utf8');
+    const match = source.match(/const SPEEDTEST_REGION_RULES = (\{[\s\S]*?\n\});/);
+    assert.ok(match, `${file}: SPEEDTEST_REGION_RULES block not found`);
+    return new Function(`return ${match[1]};`)();
+  };
+  assert.deepEqual(extract('property-inspector/speedtest.js'), extract('plugin/actions/speedtest.js'));
+
+  // Inspector 下拉的选项必须和插件接受的 scope 一一对应，顺序也一致。
+  const html = fs.readFileSync(path.join(PLUGIN_DIR, 'property-inspector/speedtest.html'), 'utf8');
+  const select = html.match(/<select id="scope"[\s\S]*?<\/select>/)[0];
+  const options = [...select.matchAll(/<option value="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(options, Object.keys(SPEEDTEST_REGIONS));
 });
 
 test('speedtest action defaults match the confirmed product contract', () => {
   const defaults = ACTION_CONFIGS.speedtest.defaults;
 
-  assert.equal(defaults.scope, 'mainland');
+  assert.equal(defaults.scope, 'china');
   assert.equal(defaults.intervalMin, '30');
   assert.equal(defaults.activeAllDay, 'false');
   assert.equal(defaults.activeStart, '08:00');
@@ -337,14 +395,14 @@ test('checked nodes replace the full cache as the candidate pool', () => {
   const checked = JSON.stringify([serverCache[0], serverCache[2]]);
 
   assert.deepEqual(
-    speedtestCandidates({ scope: 'mainland', candidateServers: checked }, { serverCache })
+    speedtestCandidates({ scope: 'china', candidateServers: checked }, { serverCache })
       .map((server) => server.id),
     ['1', '3'],
   );
-  // 勾选仍然要过区域筛选：勾了大陆节点但区域切到海外时候选池为空，
+  // 勾选仍然要过区域筛选：勾了中国节点但区域切到欧洲时候选池为空，
   // 由 needsSpeedtestDiscovery 触发重新发现，而不是拿着不匹配的节点硬测。
   assert.deepEqual(
-    speedtestCandidates({ scope: 'overseas', candidateServers: checked }, { serverCache }),
+    speedtestCandidates({ scope: 'europe', candidateServers: checked }, { serverCache }),
     [],
   );
 });
@@ -379,6 +437,8 @@ test('speedtest.net directory nodes map to the shared server model', () => {
     name: 'Shanghai',
     country: 'China',
     cc: 'CN',
+    lat: '31.2222',
+    lon: '121.4581',
   }]);
 
   assert.deepEqual(servers, [{
@@ -393,31 +453,140 @@ test('speedtest.net directory nodes map to the shared server model', () => {
     ipCountry: '',
     ipCountryCode: '',
     locationSource: 'official',
+    lat: 31.2222,
+    lon: 121.4581,
   }]);
+  // 坐标缺失或非数字时保留为 null，不能变成 0 落到赤道上。
+  assert.equal(mapSpeedtestDirectoryServers([{ id: '1', lon: 'n/a' }])[0].lon, null);
+  assert.equal(mapSpeedtestDirectoryServers([{ id: '1' }])[0].lat, null);
+});
+
+test('daily random picks a region first so one crowded region cannot monopolise the draw', () => {
+  const servers = [
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `tw${i}`, countryCode: 'TW', city: 'Taipei' })),
+    { id: 'jp1', countryCode: 'JP', city: 'Tokyo' },
+    { id: 'sg1', countryCode: 'SG', city: 'Singapore' },
+  ];
+  const now = new Date(2026, 6, 18, 9).getTime();
+  // 三个国家各占一票；random 落在最后一档时抽到 SG，而不是被 30 个台湾节点淹没。
+  const state = {};
+  assert.equal(chooseSpeedtestServer(state, servers, now, () => 0.99)?.id, 'sg1');
+  // 随机值落在第二档 → JP；国家内部再用同一随机数选节点。
+  assert.equal(chooseSpeedtestServer({}, servers, now, () => 0.5)?.id, 'jp1');
+  // 当天粘性仍然生效。
+  assert.equal(chooseSpeedtestServer(state, servers, now + 3_600_000, () => 0)?.id, 'sg1');
+});
+
+test('directory discovery queries a fixed set of regions instead of only the nearby list', async () => {
+  const queries = [];
+  const fetcher = async (url) => {
+    const search = url.searchParams.get('search') || '';
+    const limit = Number(url.searchParams.get('limit'));
+    queries.push({ search, limit });
+    const byRegion = {
+      '': [{ id: '1', cc: 'TW', country: 'Taiwan', name: 'Taipei', sponsor: 'A', host: 'a' },
+           { id: '2', cc: 'TW', country: 'Taiwan', name: 'Taipei', sponsor: 'B', host: 'b' }],
+      China: [{ id: '3', cc: 'CN', country: 'China', name: 'Shanghai', sponsor: 'C', host: 'c' }],
+      Japan: [{ id: '4', cc: 'JP', country: 'Japan', name: 'Tokyo', sponsor: 'D', host: 'd' },
+              { id: '1', cc: 'TW', country: 'Taiwan', name: 'Taipei', sponsor: 'A', host: 'a' }],
+    };
+    if (search === 'Singapore') throw new Error('HTTP 503');
+    return byRegion[search] || [];
+  };
+
+  const servers = await fetchSpeedtestDirectoryServers(fetcher, 'any');
+  const searched = queries.map((query) => query.search);
+
+  // 就近列表之外，Any 要固定覆盖中/港/台/日/韩/新/美/英/德/澳，才不会只剩出口附近那一个地区。
+  for (const region of ['', 'China', 'Hong Kong', 'Taiwan', 'Japan', 'Korea', 'Singapore',
+    'United States', 'United Kingdom', 'Germany', 'Australia']) {
+    assert.ok(searched.includes(region), `missing region query: ${region || '(nearby)'}`);
+  }
+  // 地区查询只取少量节点，避免 100 条上限被前面的地区吃光。
+  assert.ok(queries.filter((query) => query.search === 'Japan').every((query) => query.limit <= 8));
+  // 单个地区失败不影响其他地区；结果按 ID 去重并按国家排序。
+  assert.deepEqual(servers.map((server) => server.id), ['3', '4', '1', '2']);
+
+  // 具体大区只查自己的国家：查询数少了，每个国家就能多拿一些节点。
+  queries.length = 0;
+  await fetchSpeedtestDirectoryServers(fetcher, 'japankorea');
+  assert.deepEqual(queries.map((query) => query.search).sort(), ['', 'Japan', 'Korea']);
+  assert.ok(queries.filter((query) => query.search).every((query) => query.limit >= 20));
+
+  queries.length = 0;
+  await fetchSpeedtestDirectoryServers(fetcher, 'europe');
+  assert.ok(queries.some((query) => query.search === 'Germany'));
+  assert.ok(queries.some((query) => query.search === 'France'));
+  assert.ok(!queries.some((query) => query.search === 'Japan'));
+
+  // 单个搜索词第一次失败要重试一次；并发受限，不会把十几个请求一次全发出去。
+  let inFlight = 0;
+  let peak = 0;
+  const attempts = {};
+  const flaky = async (url) => {
+    const search = url.searchParams.get('search') || '';
+    attempts[search] = (attempts[search] || 0) + 1;
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    inFlight -= 1;
+    if (search === 'Germany' && attempts[search] === 1) throw new Error('HTTP 503');
+    return search === 'Germany' ? [{ id: '9', cc: 'DE', country: 'Germany', name: 'Berlin', sponsor: 'E', host: 'e' }] : [];
+  };
+  const retried = await fetchSpeedtestDirectoryServers(flaky, 'europe');
+  assert.equal(attempts.Germany, 2);
+  assert.deepEqual(retried.map((server) => server.id), ['9']);
+  assert.ok(peak <= 4, `directory concurrency reached ${peak}`);
+
+  // 每个大区的搜索词都不能为空，否则该大区永远拉不到节点。
+  for (const [scope, region] of Object.entries(SPEEDTEST_REGIONS)) {
+    assert.ok(region.searches.length > 0, `${scope} has no directory searches`);
+  }
 });
 
 test('node discovery runs initially, when stale, or when the configured scope is absent', () => {
   const now = Date.UTC(2026, 6, 18, 12);
-  const mainland = { id: '1', countryCode: 'CN', country: 'China' };
-  const overseas = { id: '2', countryCode: 'US', country: 'United States' };
+  const china = { id: '1', countryCode: 'CN', country: 'China' };
+  const america = { id: '2', countryCode: 'US', country: 'United States' };
 
-  assert.equal(needsSpeedtestDiscovery({ scope: 'mainland' }, {}, now), true);
-  assert.equal(needsSpeedtestDiscovery({ scope: 'mainland' }, {
+  assert.equal(needsSpeedtestDiscovery({ scope: 'china' }, {}, now), true);
+  assert.equal(needsSpeedtestDiscovery({ scope: 'china' }, {
     serverCacheUpdatedAt: now,
-    serverCache: [mainland, overseas],
+    serverCache: [china, america],
   }, now), false);
-  assert.equal(needsSpeedtestDiscovery({ scope: 'overseas' }, {
+  assert.equal(needsSpeedtestDiscovery({ scope: 'canada' }, {
     serverCacheUpdatedAt: now,
-    serverCache: [mainland],
+    serverCache: [china],
   }, now), true);
-  assert.equal(needsSpeedtestDiscovery({ scope: 'mainland' }, {
+  assert.equal(needsSpeedtestDiscovery({ scope: 'china' }, {
     serverCacheUpdatedAt: now - 25 * 60 * 60 * 1000,
-    serverCache: [mainland],
+    serverCache: [china],
   }, now), true);
-  assert.equal(needsSpeedtestDiscovery({ scope: 'mainland' }, {
+  assert.equal(needsSpeedtestDiscovery({ scope: 'china' }, {
     serverCacheUpdatedAt: now,
-    serverCache: [{ ...mainland, ip: '210.22.155.34', locationSource: 'geoip' }],
+    serverCache: [{ ...china, ip: '210.22.155.34', locationSource: 'geoip' }],
   }, now), true);
+  // 目录是按区域拉的：缓存记着上次为哪个区域拉的，区域一换就算有零星候选也要重拉。
+  assert.equal(needsSpeedtestDiscovery({ scope: 'europe' }, {
+    serverCacheUpdatedAt: now,
+    serverCacheScope: 'any',
+    serverCache: [{ id: '3', countryCode: 'DE' }],
+  }, now), true);
+  assert.equal(needsSpeedtestDiscovery({ scope: 'europe' }, {
+    serverCacheUpdatedAt: now,
+    serverCacheScope: 'europe',
+    serverCache: [{ id: '3', countryCode: 'DE' }],
+  }, now), false);
+});
+
+test('the server cache remembers which region it was fetched for', () => {
+  const state = hydrateSpeedtestState({
+    serverCache: [{ id: '3', countryCode: 'DE' }],
+    serverCacheUpdatedAt: 1,
+    serverCacheScope: 'europe',
+  });
+  assert.equal(state.serverCacheScope, 'europe');
+  assert.equal(hydrateSpeedtestState({}).serverCacheScope, '');
 });
 
 test('GeoIP verification preserves the official node location', () => {

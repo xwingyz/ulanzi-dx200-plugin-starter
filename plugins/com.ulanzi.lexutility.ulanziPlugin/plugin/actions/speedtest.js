@@ -40,11 +40,44 @@ const SPEEDTEST_DISCOVERY_RETRY_MS = 10 * 60 * 1000;
 // 相对时间标签的刷新节拍：一分钟一次，正好是标签的最小刻度。
 const SPEEDTEST_CLOCK_MS = 60 * 1000;
 const SPEEDTEST_DIRECTORY_URL = 'https://www.speedtest.net/api/js/servers';
+const SPEEDTEST_DIRECTORY_NEARBY_LIMIT = 30;
+const SPEEDTEST_DIRECTORY_CONCURRENCY = 4;
 const SPEEDTEST_WEBSITE_URL = 'https://www.speedtest.net/';
 const SPEEDTEST_INTERVALS = ['15', '30', '60', 'manual'];
 const SPEEDTEST_TIMEOUTS = ['120', '180', '240', '300'];
-// any 表示不筛选：候选池直接用全部节点，适合跨境网络或不确定该测哪边时。
-const SPEEDTEST_SCOPES = ['any', 'mainland', 'overseas'];
+// 各区域的筛选规则：国家/地区代码，可选经度上下限（美东/美西以西经 100° 为界）。
+// property-inspector/speedtest.js 里有一份逐字相同的副本，
+// 由 tests/speedtest-action.test.js 锁定两边一致；改这里必须同步改那边。
+// any 不在表里：不筛选。
+const SPEEDTEST_REGION_RULES = {
+  china: { countries: ['CN', 'HK', 'MO', 'TW'] },
+  japankorea: { countries: ['JP', 'KR'] },
+  southeastasia: { countries: ['SG', 'MY', 'TH', 'VN', 'PH', 'ID'] },
+  europe: { countries: ['GB', 'IE', 'DE', 'FR', 'NL', 'BE', 'LU', 'ES', 'PT', 'IT', 'CH', 'AT', 'SE', 'NO', 'DK', 'FI', 'PL', 'CZ'] },
+  useast: { countries: ['US'], lonMin: -100 },
+  uswest: { countries: ['US'], lonMax: -100 },
+  canada: { countries: ['CA'] },
+  oceania: { countries: ['AU', 'NZ'] },
+};
+// 目录接口不带 search 时只按出口 IP 就近返回，从大陆看海外几乎只剩台湾/香港，
+// 所以每个区域都固定按国家名搜索：search 按国家全名匹配最稳（'Tokyo' 只回 5 个，'Japan' 能回 11 个），
+// 而大陆节点在这个接口上几乎搜不到（'Beijing' 回 0），只能靠就近列表，就近列表因此对所有区域都保留。
+// 美东/美西按城市搜：'Washington' 命中的是华盛顿州，不能用。
+// label 显示在键面标题行，最长 8 个字符；缩写只用 ISO 代码，不用带政治含义的简称。
+const SPEEDTEST_REGIONS = {
+  any: { label: 'GLOBAL', searches: ['China', 'Hong Kong', 'Taiwan', 'Japan', 'Korea', 'Singapore',
+    'United States', 'United Kingdom', 'Germany', 'Australia'] },
+  china: { label: 'CHINA', searches: ['China', 'Hong Kong', 'Macau', 'Taiwan'] },
+  japankorea: { label: 'JP·KR', searches: ['Japan', 'Korea'] },
+  southeastasia: { label: 'SE ASIA', searches: ['Singapore', 'Malaysia', 'Thailand', 'Vietnam', 'Philippines', 'Indonesia'] },
+  europe: { label: 'EUROPE', searches: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Spain', 'Italy',
+    'Switzerland', 'Sweden', 'Poland'] },
+  useast: { label: 'US EAST', searches: ['New York', 'Chicago', 'Dallas', 'Atlanta', 'Miami', 'Houston'] },
+  uswest: { label: 'US WEST', searches: ['Los Angeles', 'Seattle', 'Denver', 'Phoenix', 'Salt Lake', 'San Jose'] },
+  canada: { label: 'CANADA', searches: ['Canada', 'Toronto', 'Vancouver', 'Montreal'] },
+  oceania: { label: 'OCEANIA', searches: ['Australia', 'New Zealand'] },
+};
+const SPEEDTEST_SCOPES = Object.keys(SPEEDTEST_REGIONS);
 const SPEEDTEST_CHART_TYPES = ['line', 'bar'];
 
 function parseSpeedtestResult(payload, now = Date.now()) {
@@ -108,6 +141,7 @@ function serializeSpeedtestState(instance, now = Date.now()) {
     dailyServerDate: String(instance?.dailyServerDate || ''),
     serverCache: JSON.parse(sanitizeServerList(instance?.serverCache || [])),
     serverCacheUpdatedAt: Number(instance?.serverCacheUpdatedAt || 0),
+    serverCacheScope: String(instance?.serverCacheScope || ''),
     geoCache: instance?.geoCache && typeof instance.geoCache === 'object'
       ? Object.fromEntries(Object.entries(instance.geoCache).filter(([, value]) => now - Number(value?.at || 0) <= SPEEDTEST_GEO_CACHE_MS))
       : {},
@@ -126,6 +160,7 @@ function hydrateSpeedtestState(payload = {}, now = Date.now()) {
     dailyServerDate: clean.dailyServerDate,
     serverCache: clean.serverCache,
     serverCacheUpdatedAt: clean.serverCacheUpdatedAt,
+    serverCacheScope: clean.serverCacheScope,
     geoCache: clean.geoCache,
   };
 }
@@ -192,16 +227,29 @@ function speedtestCandidates(settings, state) {
     configured = JSON.parse(sanitizeServerList(settings?.candidateServers || '[]'));
   } catch {}
   const source = configured.length ? configured : (Array.isArray(state?.serverCache) ? state.serverCache : []);
-  const scope = settings?.scope || 'mainland';
+  const scope = settings?.scope || 'china';
   if (scope === 'any') {
     return source.slice();
   }
-  return source.filter((server) => {
-    const countryCode = String(server.countryCode || '').toUpperCase();
-    const country = String(server.country || '').toLowerCase();
-    const isMainland = countryCode === 'CN' || /^(china|中国|中国大陆|people'?s republic of china)$/i.test(country);
-    return scope === 'mainland' ? isMainland : !isMainland;
-  });
+  return source.filter((server) => speedtestServerInScope(scope, server));
+}
+
+// CLI 回退列表可能没有 countryCode，只有国家名，所以大陆判定额外认几种写法。
+function speedtestServerCountryCode(server) {
+  const countryCode = String(server?.countryCode || '').toUpperCase();
+  if (countryCode) return countryCode;
+  return /^(china|中国|中国大陆|people'?s republic of china)$/i.test(String(server?.country || '')) ? 'CN' : '';
+}
+
+// 带经度界限的区域（美东/美西）要求节点有坐标；CLI 回退列表没有坐标，这类节点只进 any。
+function speedtestServerInScope(scope, server) {
+  if (scope === 'any') return true;
+  const rule = SPEEDTEST_REGION_RULES[scope];
+  if (!rule || !rule.countries.includes(speedtestServerCountryCode(server))) return false;
+  const lon = Number(server?.lon);
+  if (rule.lonMin !== undefined && !(Number.isFinite(lon) && lon > rule.lonMin)) return false;
+  if (rule.lonMax !== undefined && !(Number.isFinite(lon) && lon <= rule.lonMax)) return false;
+  return true;
 }
 
 function mapSpeedtestDirectoryServers(items) {
@@ -212,6 +260,8 @@ function mapSpeedtestDirectoryServers(items) {
     city: server?.name || server?.location,
     country: server?.country,
     countryCode: server?.cc || server?.countryCode,
+    lat: server?.lat,
+    lon: server?.lon,
     ip: server?.ip,
     locationSource: 'official',
   }))));
@@ -223,6 +273,8 @@ function needsSpeedtestDiscovery(settings, state, now = Date.now()) {
     server?.locationSource === 'geoip' && server?.ip && !server?.ipCountryCode);
   if (hasLegacyGeo) return true;
   if (now - Number(state.serverCacheUpdatedAt || 0) > SPEEDTEST_SERVER_CACHE_MS) return true;
+  // 目录按区域拉取；旧状态没记 scope 时退回“当前区域有没有候选”的判定。
+  if (state.serverCacheScope && state.serverCacheScope !== settings?.scope) return true;
   return speedtestCandidates(settings, { serverCache: state.serverCache }).length === 0;
 }
 
@@ -255,8 +307,16 @@ function chooseSpeedtestServer(state, servers, now = Date.now(), random = Math.r
   if (sticky) {
     return sticky;
   }
-  const index = Math.min(pool.length - 1, Math.max(0, Math.floor(Number(random()) * pool.length)));
-  const selected = pool[index];
+  // 先抽国家再抽节点：目录里台湾节点远多于其他海外地区，
+  // 直接在全池里均匀抽会让“海外”几乎天天落在同一个区域。
+  const pick = (list) => list[Math.min(list.length - 1, Math.max(0, Math.floor(Number(random()) * list.length)))];
+  const byCountry = new Map();
+  for (const server of pool) {
+    const key = String(server.countryCode || server.country || '').toUpperCase();
+    if (!byCountry.has(key)) byCountry.set(key, []);
+    byCountry.get(key).push(server);
+  }
+  const selected = pick(pick([...byCountry.values()]));
   state.dailyServerId = String(selected.id);
   state.dailyServerDate = dateKey;
   return selected;
@@ -320,6 +380,25 @@ function runSpeedtestCli(instance, args, signal) {
   });
 }
 
+// 同 Promise.allSettled，但最多同时跑 concurrency 个任务，结果顺序与输入一致。
+async function runSettledLimited(tasks, concurrency) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const index = next;
+      next += 1;
+      try {
+        results[index] = { status: 'fulfilled', value: await tasks[index]() };
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
+  return results;
+}
+
 function fetchJson(url, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     const request = https.get(url, { headers: { Accept: 'application/json', 'User-Agent': 'LexUtility/0.1' } }, (response) => {
@@ -339,25 +418,44 @@ function fetchJson(url, timeoutMs = 8000) {
   });
 }
 
-async function fetchSpeedtestDirectoryServers() {
-  const query = (search = '') => {
+async function fetchSpeedtestDirectoryServers(fetcher = (url) => fetchJson(url, 12_000), scope = 'china') {
+  const query = (search = '', limit = SPEEDTEST_DIRECTORY_NEARBY_LIMIT) => {
     const url = new URL(SPEEDTEST_DIRECTORY_URL);
     url.searchParams.set('engine', 'js');
     url.searchParams.set('https_functional', 'true');
-    url.searchParams.set('limit', '30');
+    url.searchParams.set('limit', String(limit));
     if (search) url.searchParams.set('search', search);
-    return fetchJson(url, 12_000);
+    return fetcher(url);
   };
-  const results = await Promise.allSettled([query('China'), query()]);
-  const merged = results.flatMap((result) => result.status === 'fulfilled'
+  const searches = (SPEEDTEST_REGIONS[scope] || SPEEDTEST_REGIONS.china).searches;
+  // 缓存最多 100 条：就近列表占 30，剩下的按搜索词数量均分，词少的区域每个国家就能多拿一些。
+  const limit = Math.min(30, Math.max(5, Math.floor(70 / searches.length)));
+  // 十来个请求一起发时目录接口偶发单个失败，整个国家就从清单里消失了：
+  // 限制并发并各重试一次，实测能把这种缺国家的情况压掉。
+  const retryOnce = (run) => run().catch(() => run());
+  const results = await runSettledLimited([
+    () => retryOnce(() => query()),
+    ...searches.map((search) => () => retryOnce(() => query(search, limit))),
+  ], SPEEDTEST_DIRECTORY_CONCURRENCY);
+  const lists = results.map((result) => result.status === 'fulfilled'
     ? mapSpeedtestDirectoryServers(result.value)
     : []);
-  const byId = new Map(merged.map((server) => [server.id, server]));
+  // 各列表轮流取一条再去重：sanitizeServerList 只保留前 100 条，
+  // 顺序拼接会让排在后面的地区整个被截掉。
+  const byId = new Map();
+  for (let index = 0; lists.some((list) => index < list.length); index += 1) {
+    for (const list of lists) {
+      const server = list[index];
+      if (server && !byId.has(server.id)) byId.set(server.id, server);
+    }
+  }
   if (!byId.size) {
     throw results.find((result) => result.status === 'rejected')?.reason ||
       new Error('Speedtest directory returned no nodes');
   }
-  return [...byId.values()];
+  const collator = new Intl.Collator('en');
+  return [...byId.values()].sort((a, b) => collator.compare(a.countryCode, b.countryCode) ||
+    collator.compare(a.city, b.city) || collator.compare(a.name, b.name));
 }
 
 async function enrichSpeedtestServer(instance, server, now = Date.now()) {
@@ -411,8 +509,9 @@ async function refreshSpeedtestServers(instance) {
     try {
       instance.discoveryAttemptedAt = Date.now();
       let discovered;
+      const scope = instance.settings.scope;
       try {
-        discovered = await fetchSpeedtestDirectoryServers();
+        discovered = await fetchSpeedtestDirectoryServers(undefined, scope);
       } catch {
         const stdout = await runSpeedtestCli(instance, ['--servers', '--format=json'], signal);
         discovered = parseSpeedtestServerList(stdout);
@@ -425,6 +524,7 @@ async function refreshSpeedtestServers(instance) {
         ? enrichSpeedtestServer(instance, server)
         : server));
       instance.serverCacheUpdatedAt = Date.now();
+      instance.serverCacheScope = scope;
       instance.phase = 'idle';
       instance.errorCode = '';
       flushSpeedtestState(instance);
@@ -800,8 +900,8 @@ function speedBand(value, arrow, top, theme, chart) {
 
 // 上次测速距今多久。这个键大部分时间显示的是「历史数据」，
 // 没有时间戳就无法判断屏幕上的数字是刚测的还是昨天的。
-// 用 `>` 前缀而不是 ` ago` 后缀：短 3 个字符，标题行才放得下 MAINLAND
-// 这样的全称；而且刻度是向下取整的，`>15m` 字面意思正好就是它的真实含义。
+// 用 `>` 前缀而不是 ` ago` 后缀：短 3 个字符，标题行才放得下 SE ASIA、OCEANIA
+// 这样 8 字符以内的区域代号；而且刻度是向下取整的，`>15m` 字面意思正好就是它的真实含义。
 // 天数封顶 99，免得长期没测出现 5 位数字把标题挤掉。
 function relativeAge(at, now) {
   const minutes = Math.floor(Math.max(0, now - Number(at || 0)) / 60000);
@@ -846,12 +946,12 @@ function renderSpeedtestIcon(instance, now = Date.now()) {
       : instance.phase === 'discovering' ? t('NODES', language)
         : instance.phase === 'error' ? t(instance.errorCode || 'ERROR', language)
           : instance.autoPaused ? t('PAUSED', language) : '';
-  const scopeKey = { any: 'GLOBAL', overseas: 'OVERSEAS' }[instance.settings.scope] || 'MAINLAND';
+  const scopeKey = (SPEEDTEST_REGIONS[instance.settings.scope] || SPEEDTEST_REGIONS.china).label;
   const scope = t(scopeKey, language);
   const history = instance.history || [];
   // 标题行两个槽位：左边是区域或当前状态，右边是上次测速距今多久。
   // 状态直接顶掉区域而不是挤在右边——TESTING / QUEUE 1 这种长度会和
-  // MAINLAND 撞在一起，而正在测速时状态本来就比区域更该被看到；
+  // OCEANIA 撞在一起，而正在测速时状态本来就比区域更该被看到；
   // 出状态时右边的时间也一起让位，否则色块会盖住它。
   // 也不用居中浮层：浮层正好压住下行速度，那是这个键存在的意义。
   const dim = phaseLabel ? 0.5 : 1;
@@ -883,7 +983,7 @@ const config = {
       theme: 'signal',
       frameSize: 'optimal',
       showFrame: 'true',
-      scope: 'mainland',
+      scope: 'china',
       intervalMin: '30',
       activeAllDay: 'false',
       activeStart: '08:00',
@@ -918,12 +1018,14 @@ const config = {
     onLongPress: () => openSpeedtestWebsite(),
     onReady: (instance) => initializeSpeedtestInstance(instance),
     onSettingsChanged: (instance, previousSettings) => {
-      const targetChanged = previousSettings.scope !== instance.settings.scope ||
+      const scopeChanged = previousSettings.scope !== instance.settings.scope;
+      const targetChanged = scopeChanged ||
         previousSettings.candidateServers !== instance.settings.candidateServers;
       if (targetChanged) {
         instance.dailyServerId = '';
         instance.dailyServerDate = '';
-        ensureSpeedtestDiscovery(instance);
+        // 换区域等于用户要看那个区域的节点，绕过 10 分钟退避直接重拉；改勾选不用。
+        ensureSpeedtestDiscovery(instance, { force: scopeChanged });
       }
       const scheduleChanged = ['intervalMin', 'activeAllDay', 'activeStart', 'activeEnd']
         .some((key) => previousSettings[key] !== instance.settings[key]);
@@ -940,6 +1042,7 @@ const config = {
     config,
     testing: {
       chooseSpeedtestServer,
+      fetchSpeedtestDirectoryServers,
       handleSpeedtestDoublePress,
       handleSpeedtestRun,
       hydrateSpeedtestState,
@@ -955,6 +1058,7 @@ const config = {
       speedtestCandidates,
       speedtestNextActiveWindowStart,
       speedtestNextDueAt,
+      SPEEDTEST_REGIONS,
     },
   };
 }

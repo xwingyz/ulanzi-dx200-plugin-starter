@@ -56,7 +56,8 @@ const LEX_ACTION_NAMES = {
 const LEX_DYNAMIC_LOCALIZATION_KEYS = [
   // Speed Test Inspector 运行阶段与范围。
   'Idle', 'Queued', 'Running', 'Discovering servers', 'Error',
-  'GLOBAL', 'OVERSEAS', 'MAINLAND', 'CLI', 'LICENSE', 'NODE', 'TIMEOUT', 'NET',
+  'GLOBAL', 'CHINA', 'JP·KR', 'SE ASIA', 'EUROPE', 'US EAST', 'US WEST', 'CANADA', 'OCEANIA',
+  'CLI', 'LICENSE', 'NODE', 'TIMEOUT', 'NET',
   // PomoWave 阶段。
   'READY', 'FOCUS', 'PAUSED', 'SHORT', 'LONG', 'DONE',
   // Claude / ChatGPT 诊断映射与键面错误文案。
