@@ -247,12 +247,22 @@ function speedtestCandidates(settings, state) {
   try {
     configured = JSON.parse(sanitizeServerList(settings?.candidateServers || '[]'));
   } catch {}
-  const source = configured.length ? configured : (Array.isArray(state?.serverCache) ? state.serverCache : []);
+  const cache = Array.isArray(state?.serverCache) ? state.serverCache : [];
+  // 加坐标之前保存的勾选没有 lat/lon，会被美东/美西的经度筛选整个过滤掉：
+  // 缺坐标的勾选按 ID 从缓存里补，不要求用户重新勾一遍。
+  const byId = new Map(cache.map((server) => [String(server.id), server]));
+  const hydrated = configured.map((server) => {
+    const cached = byId.get(String(server.id));
+    return cached && server.lon === null && server.lat === null
+      ? { ...server, lat: cached.lat, lon: cached.lon }
+      : server;
+  });
   const scope = settings?.scope || 'china';
-  if (scope === 'any') {
-    return source.slice();
-  }
-  return source.filter((server) => speedtestServerInScope(scope, server));
+  const inScope = (list) => (scope === 'any' ? list.slice() : list.filter((server) => speedtestServerInScope(scope, server)));
+  const checked = inScope(hydrated);
+  // 勾选全都不在当前区域时退回该区域的缓存节点：空池会让 CLI 无视区域自己选，
+  // 键面写着 US WEST 却在测上海（2026-09-19 真机）。
+  return checked.length ? checked : inScope(cache);
 }
 
 // CLI 回退列表可能没有 countryCode，只有国家名，所以大陆判定额外认几种写法。

@@ -475,6 +475,29 @@ test('checked nodes replace the full cache as the candidate pool', () => {
   );
 });
 
+test('checked nodes saved without coordinates borrow them from the cache instead of vanishing', () => {
+  // 2026-09-19 真机：US WEST 键的 7 个勾选节点是加坐标之前保存的（lat/lon 为 null），
+  // 全部被经度筛选过滤掉，插件静默退回 CLI 自动选点，一直在测上海。
+  const serverCache = [
+    { id: '60433', countryCode: 'US', city: 'Los Angeles, CA', lat: 34.05, lon: -118.24 },
+    { id: '62458', countryCode: 'US', city: 'Buffalo, NY', lat: 42.88, lon: -78.87 },
+  ];
+  const stale = JSON.stringify([
+    { id: '60433', countryCode: 'US', city: 'Los Angeles, CA', lat: null, lon: null },
+    { id: '62458', countryCode: 'US', city: 'Buffalo, NY', lat: null, lon: null },
+  ]);
+  const west = speedtestCandidates({ scope: 'uswest', candidateServers: stale }, { serverCache });
+  assert.deepEqual(west.map((server) => server.id), ['60433']);
+  assert.equal(west[0].lon, -118.24);
+
+  // 勾选的节点全都不在当前区域：退回该区域的缓存节点，而不是让 CLI 无视区域随便选。
+  const onlyEast = JSON.stringify([serverCache[1]]);
+  assert.deepEqual(
+    speedtestCandidates({ scope: 'uswest', candidateServers: onlyEast }, { serverCache }).map((server) => server.id),
+    ['60433'],
+  );
+});
+
 test('one checked node is fixed and several stay deterministic for the day', () => {
   const servers = [
     { id: '1', countryCode: 'CN', city: 'Nanjing' },
