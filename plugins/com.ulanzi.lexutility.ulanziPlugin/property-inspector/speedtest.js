@@ -31,6 +31,14 @@ const SPEEDTEST_REGION_RULES = {
   oceania: { countries: ['AU', 'NZ'] },
 };
 
+// 中国区域内四地对等显示：大陆节点不能标 China 和香港并列。其他国家沿用目录给的原始国家名。
+const CHINA_REGION_LABELS = { CN: 'Mainland', HK: 'Hong Kong', MO: 'Macao', TW: 'Taiwan' };
+
+function regionLabel(countryCode, fallback) {
+  const key = CHINA_REGION_LABELS[String(countryCode || '').toUpperCase()];
+  return key ? $UD.t(key) : fallback;
+}
+
 // 与 plugin/actions/speedtest.js 的 speedtestServerInScope 保持同一套判定。
 function serverInScope(scope, server) {
   if (scope === 'any') return true;
@@ -122,9 +130,9 @@ function initSpeedtestInspector() {
     const checkedIds = new Set(readCandidates().map((server) => String(server.id)));
     const candidates = filteredServers();
     list.innerHTML = candidates.length ? candidates.map((server) => {
-      const official = `${server.city || $UD.t('Unknown city')} · ${server.country || server.countryCode || $UD.t('Unknown region')}`;
+      const official = `${server.city || $UD.t('Unknown city')} · ${regionLabel(server.countryCode, server.country || server.countryCode || $UD.t('Unknown region'))}`;
       const ipLocation = server.ip
-        ? `<br>IP ${server.ip}${server.ipCity || server.ipCountry ? ` · ${server.ipCity || ''} ${server.ipCountry || server.ipCountryCode || ''}` : ''}`
+        ? `<br>IP ${server.ip}${server.ipCity || server.ipCountry ? ` · ${server.ipCity || ''} ${regionLabel(server.ipCountryCode, server.ipCountry || server.ipCountryCode || '')}` : ''}`
         : `<br>${server.host || ''}`;
       const checked = checkedIds.has(String(server.id));
       return `<label class="server${checked ? ' checked' : ''}"><input type="checkbox" data-server-id="${server.id}"${checked ? ' checked' : ''}><span><b>#${server.id} ${server.name || server.city || $UD.t('Unknown')}</b><br>${$UD.t('Server')} ${official}${ipLocation}</span></label>`;

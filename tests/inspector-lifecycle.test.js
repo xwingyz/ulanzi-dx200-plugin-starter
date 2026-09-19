@@ -584,6 +584,33 @@ test('speedtest inspector persists scope, schedule, checked nodes and chart type
   assert.equal(settings.fixedServerId, undefined);
 });
 
+test('speedtest node list labels mainland and HK/MO/TW as peers instead of China beside Hong Kong', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+  harness.elements.get('scope').value = 'china';
+  const servers = [
+    { id: '1', name: 'China Telecom', city: 'Shanghai', country: 'China', countryCode: 'CN', ip: '1.1.1.1', ipCity: 'Nanjing', ipCountry: 'China', ipCountryCode: 'CN' },
+    { id: '2', name: 'HKBN', city: 'Hong Kong', country: 'Hong Kong', countryCode: 'HK' },
+    { id: '3', name: 'CTM', city: 'Macau', country: 'Macau', countryCode: 'MO' },
+    { id: '4', name: 'HiNet', city: 'Taipei', country: 'Taiwan', countryCode: 'TW' },
+    { id: '5', name: 'Sonic', city: 'Los Angeles', country: 'United States', countryCode: 'US' },
+  ];
+  harness.callbacks.app[0]({ context: 'ctx-1', param: { candidateServers: '[]', speedtestRuntime: JSON.stringify({ servers }) } });
+  const html = harness.elements.get('serverList').innerHTML;
+  // 大陆节点不能标 China 和香港并列；四者对等：Mainland / Hong Kong / Macao / Taiwan。
+  assert.match(html, /Shanghai · Mainland/);
+  assert.match(html, /Nanjing Mainland/);
+  assert.ok(!/· China</.test(html) && !/ China</.test(html), 'China must not appear as a peer label');
+  assert.match(html, /Hong Kong · Hong Kong/);
+  assert.match(html, /Macau · Macao/);
+  assert.match(html, /Taipei · Taiwan/);
+
+  harness.elements.get('scope').value = 'any';
+  harness.callbacks.app[0]({ context: 'ctx-1', param: { candidateServers: '[]', speedtestRuntime: JSON.stringify({ servers }) } });
+  // 其他国家仍显示目录给的原始国家名。
+  assert.match(harness.elements.get('serverList').innerHTML, /Los Angeles · United States/);
+});
+
 test('speedtest inspector shows the route verdict from runtime', () => {
   const harness = createHarness('speedtest.js');
   harness.callbacks.connected[0]();
