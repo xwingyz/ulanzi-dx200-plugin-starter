@@ -31,11 +31,17 @@ const SPEEDTEST_REGION_RULES = {
   oceania: { countries: ['AU', 'NZ'] },
 };
 
-// 中国区域内四地对等显示：大陆节点不能标 China 和香港并列。其他国家沿用目录给的原始国家名。
-const CHINA_REGION_LABELS = { CN: 'Mainland', HK: 'Hong Kong', MO: 'Macao', TW: 'Taiwan' };
+// 中国四地的显示名：China 区域内四地对等（Mainland / Hong Kong / Macao / Taiwan），
+// 大陆节点不能标 China 和香港并列；其他区域（Any 等）统一带 China 前缀，港澳台不单独出现。
+// 其他国家沿用目录给的原始国家名。
+const CHINA_REGION_LABELS = {
+  china: { CN: 'Mainland', HK: 'Hong Kong', MO: 'Macao', TW: 'Taiwan' },
+  other: { CN: 'China Mainland', HK: 'China Hong Kong', MO: 'China Macao', TW: 'China Taiwan' },
+};
 
-function regionLabel(countryCode, fallback) {
-  const key = CHINA_REGION_LABELS[String(countryCode || '').toUpperCase()];
+function regionLabel(scope, countryCode, fallback) {
+  const table = CHINA_REGION_LABELS[scope === 'china' ? 'china' : 'other'];
+  const key = table[String(countryCode || '').toUpperCase()];
   return key ? $UD.t(key) : fallback;
 }
 
@@ -128,11 +134,12 @@ function initSpeedtestInspector() {
       return;
     }
     const checkedIds = new Set(readCandidates().map((server) => String(server.id)));
+    const scope = document.getElementById('scope').value;
     const candidates = filteredServers();
     list.innerHTML = candidates.length ? candidates.map((server) => {
-      const official = `${server.city || $UD.t('Unknown city')} · ${regionLabel(server.countryCode, server.country || server.countryCode || $UD.t('Unknown region'))}`;
+      const official = `${server.city || $UD.t('Unknown city')} · ${regionLabel(scope, server.countryCode, server.country || server.countryCode || $UD.t('Unknown region'))}`;
       const ipLocation = server.ip
-        ? `<br>IP ${server.ip}${server.ipCity || server.ipCountry ? ` · ${server.ipCity || ''} ${regionLabel(server.ipCountryCode, server.ipCountry || server.ipCountryCode || '')}` : ''}`
+        ? `<br>IP ${server.ip}${server.ipCity || server.ipCountry ? ` · ${server.ipCity || ''} ${regionLabel(scope, server.ipCountryCode, server.ipCountry || server.ipCountryCode || '')}` : ''}`
         : `<br>${server.host || ''}`;
       const checked = checkedIds.has(String(server.id));
       return `<label class="server${checked ? ' checked' : ''}"><input type="checkbox" data-server-id="${server.id}"${checked ? ' checked' : ''}><span><b>#${server.id} ${server.name || server.city || $UD.t('Unknown')}</b><br>${$UD.t('Server')} ${official}${ipLocation}</span></label>`;

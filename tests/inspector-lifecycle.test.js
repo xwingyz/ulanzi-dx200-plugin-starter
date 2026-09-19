@@ -607,8 +607,16 @@ test('speedtest node list labels mainland and HK/MO/TW as peers instead of China
 
   harness.elements.get('scope').value = 'any';
   harness.callbacks.app[0]({ context: 'ctx-1', param: { candidateServers: '[]', speedtestRuntime: JSON.stringify({ servers }) } });
+  const anyHtml = harness.elements.get('serverList').innerHTML;
+  // China 区域之外，四地统一带 China 前缀，港澳台不能单独出现。
+  assert.match(anyHtml, /Shanghai · China Mainland/);
+  assert.match(anyHtml, /Nanjing China Mainland/);
+  assert.match(anyHtml, /Hong Kong · China Hong Kong/);
+  assert.match(anyHtml, /Macau · China Macao/);
+  assert.match(anyHtml, /Taipei · China Taiwan/);
+  assert.ok(!/· Hong Kong</.test(anyHtml) && !/· Taiwan</.test(anyHtml) && !/· Mainland</.test(anyHtml));
   // 其他国家仍显示目录给的原始国家名。
-  assert.match(harness.elements.get('serverList').innerHTML, /Los Angeles · United States/);
+  assert.match(anyHtml, /Los Angeles · United States/);
 });
 
 test('speedtest inspector shows the route verdict from runtime', () => {
