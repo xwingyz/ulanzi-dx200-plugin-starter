@@ -116,14 +116,14 @@ function initSpeedtestInspector() {
   }
 
   // 选择模式完全由勾选数量推导，没有单独的模式开关；
-  // 这行文案要和 plugin/actions/speedtest.js 的 chooseSpeedtestServer 说的是同一件事。
+  // 这行文案要和 plugin/actions/speedtest.js 的 selectSpeedtestServer 说的是同一件事。
   function renderSelectionSummary() {
     const count = readCandidates().length;
     document.getElementById('selectionSummary').textContent = count === 0
-      ? $UD.t('No selection: choose daily from all servers in this region.')
+      ? $UD.t('No selection: test the lowest-latency server in this region.')
       : count === 1
         ? $UD.t('One server selected: always use this server.')
-        : $UD.t('%s servers selected: choose one daily.').replace('%s', String(count));
+        : $UD.t('%s servers selected: test the lowest-latency one.').replace('%s', String(count));
   }
 
   function renderServers() {

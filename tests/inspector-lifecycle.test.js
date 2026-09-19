@@ -688,7 +688,7 @@ test('speedtest node list renders checkboxes and derives the mode from how many 
   const list = harness.elements.get('serverList');
   assert.equal((list.innerHTML.match(/type="checkbox"/g) || []).length, 2);
   assert.ok(!list.innerHTML.includes('checked'), '未勾选时不应有 checked 属性');
-  assert.equal(harness.elements.get('selectionSummary').textContent, 'No selection: choose daily from all servers in this region.');
+  assert.equal(harness.elements.get('selectionSummary').textContent, 'No selection: test the lowest-latency server in this region.');
 
   // 勾第一个：写入候选池，文案切到「固定」。
   const check = (id, checked) => list.dispatchEvent({
@@ -708,7 +708,7 @@ test('speedtest node list renders checkboxes and derives the mode from how many 
     JSON.parse(harness.elements.get('candidateServers').value).map((server) => server.id),
     ['3633', '5083'],
   );
-  assert.equal(harness.elements.get('selectionSummary').textContent, '2 servers selected: choose one daily.');
+  assert.equal(harness.elements.get('selectionSummary').textContent, '2 servers selected: test the lowest-latency one.');
 
   // 取消勾选会从候选池里移除，且发出去的设置里带的是新值。
   check('3633', false);

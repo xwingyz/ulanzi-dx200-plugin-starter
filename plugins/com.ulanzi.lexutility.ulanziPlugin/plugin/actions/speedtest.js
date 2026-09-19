@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import fs from 'node:fs';
+import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 
@@ -42,6 +43,16 @@ const SPEEDTEST_CLOCK_MS = 60 * 1000;
 const SPEEDTEST_DIRECTORY_URL = 'https://www.speedtest.net/api/js/servers';
 const SPEEDTEST_DIRECTORY_NEARBY_LIMIT = 30;
 const SPEEDTEST_DIRECTORY_CONCURRENCY = 4;
+// 选节点前的延迟探测：每个节点串行采 3 次 /hi，节点间最多 4 个并发；单次超时按 3 秒计价。
+// 2026-09-19 实测：苏州 JSQY(16204) 约三成采样跳到 290 ms、下行只有 0.7 Mbps，
+// 上海电信(3633) 稳定 42 ms、下行 130+ Mbps；用均值而不是最小值，就是为了让这种抖动被算进去。
+const SPEEDTEST_PROBE_SAMPLES = 3;
+const SPEEDTEST_PROBE_TIMEOUT_MS = 3000;
+const SPEEDTEST_PROBE_CONCURRENCY = 4;
+const SPEEDTEST_PROBE_PORT = 8080;
+// 历史反馈剔除慢节点的窗口和比例：24 小时内的成功结果，下行不到池内最好成绩 1/10 视为慢。
+const SPEEDTEST_SLOW_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SPEEDTEST_SLOW_RATIO = 0.1;
 const SPEEDTEST_WEBSITE_URL = 'https://www.speedtest.net/';
 const SPEEDTEST_INTERVALS = ['15', '30', '60', 'manual'];
 const SPEEDTEST_TIMEOUTS = ['120', '180', '240', '300'];
@@ -299,9 +310,8 @@ function mergeSpeedtestGeo(server, ip, geo = {}) {
   };
 }
 
-// 选择模式由勾选数量决定，没有单独的开关：
-// 勾 1 个 = 固定该节点；勾 2 个及以上 = 在勾选的节点里每日随机；
-// 一个都不勾 = 在当前区域的全部节点里每日随机（pool 由 speedtestCandidates 兜底）。
+// 每日随机选点：现在只是 selectSpeedtestServer 在延迟探测全部失败时的退路。
+// 勾 1 个 = 固定该节点；多个候选 = 当天粘住一个随机节点（pool 由 speedtestCandidates 兜底）。
 function chooseSpeedtestServer(state, servers, now = Date.now(), random = Math.random) {
   const pool = Array.isArray(servers) ? servers : [];
   if (!pool.length) {
@@ -330,6 +340,95 @@ function chooseSpeedtestServer(state, servers, now = Date.now(), random = Math.r
   state.dailyServerId = String(selected.id);
   state.dailyServerDate = dateKey;
   return selected;
+}
+
+// Ookla 节点在 8080 端口提供 /hi（回 "hello 2.x"），speedtest.net 网页也是拿它选最低延迟的节点。
+function speedtestProbeUrl(server) {
+  const host = String(server?.host || '').trim();
+  if (!host) return '';
+  const hasPort = /^\[.*\]:\d+$/.test(host) || (!host.startsWith('[') && /:\d+$/.test(host));
+  return `http://${hasPort ? host : `${host}:${SPEEDTEST_PROBE_PORT}`}/hi`;
+}
+
+function measureHttpLatency(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const startedAt = process.hrtime.bigint();
+    const request = http.get(url, { headers: { 'User-Agent': 'LexUtility/0.1' } }, (response) => {
+      response.resume();
+      response.on('end', () => {
+        if ((response.statusCode || 500) >= 400) {
+          reject(new Error(`HTTP ${response.statusCode}`));
+          return;
+        }
+        resolve(Number(process.hrtime.bigint() - startedAt) / 1e6);
+      });
+    });
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('probe timeout')));
+    request.on('error', reject);
+  });
+}
+
+// 对候选池逐个测 /hi 延迟：同一节点串行采样，失败的采样按超时计价（抖动和丢包都会拉高均值），
+// 全部失败记为 null 表示不可达。结果顺序与输入一致。
+async function probeSpeedtestServers(servers, options = {}) {
+  const samples = Math.max(1, Number(options.samples) || SPEEDTEST_PROBE_SAMPLES);
+  const timeoutMs = Number(options.timeoutMs) || SPEEDTEST_PROBE_TIMEOUT_MS;
+  const probe = options.probe || ((url) => measureHttpLatency(url, timeoutMs));
+  const pool = Array.isArray(servers) ? servers : [];
+  const results = await runSettledLimited(pool.map((server) => async () => {
+    const url = speedtestProbeUrl(server);
+    if (!url) return null;
+    let total = 0;
+    let reachable = 0;
+    for (let index = 0; index < samples; index += 1) {
+      try {
+        total += Math.min(timeoutMs, Number(await probe(url)) || 0);
+        reachable += 1;
+      } catch {
+        // 一次失败就不再采样：剩余采样按超时计价，坏节点最多拖一个超时的时间。
+        total += timeoutMs * (samples - index);
+        break;
+      }
+    }
+    return reachable ? Math.round(total / samples) : null;
+  }), options.concurrency || SPEEDTEST_PROBE_CONCURRENCY);
+  return pool.map((server, index) => ({
+    server,
+    latencyMs: results[index].status === 'fulfilled' ? results[index].value : null,
+  }));
+}
+
+// 延迟探测分不出吞吐问题：JSQY(16204) 有三成时间 /hi 延迟和上海电信一样低，下行却只有 0.7 Mbps，
+// 光靠探测会周期性再选中它。所以用插件自己的历史做反馈：候选里 24 小时内有过成功结果、
+// 下行不到池内最好成绩 1/10 的节点先剔除。只比同一池内的节点，不设绝对阈值。
+function speedtestSlowServerIds(history, pool, now = Date.now()) {
+  const latest = new Map();
+  for (const entry of Array.isArray(history) ? history : []) {
+    const id = String(entry?.server?.id || '');
+    if (entry?.ok === true && id && now - Number(entry.at) <= SPEEDTEST_SLOW_WINDOW_MS) {
+      latest.set(id, Number(entry.downloadMbps) || 0);
+    }
+  }
+  const measured = pool.map((server) => String(server.id)).filter((id) => latest.has(id));
+  const best = Math.max(0, ...measured.map((id) => latest.get(id)));
+  if (!(best > 0)) return new Set();
+  return new Set(measured.filter((id) => latest.get(id) < best * SPEEDTEST_SLOW_RATIO));
+}
+
+// 每次测速前在候选池里选延迟最低的可达节点，和 speedtest.net 网页的选法一致。
+// 只有一个候选不探测；探测全部失败（比如 /hi 被拦）退回每日随机，不比以前差。
+async function selectSpeedtestServer(state, servers, options = {}) {
+  const candidates = Array.isArray(servers) ? servers : [];
+  const slow = speedtestSlowServerIds(state?.history, candidates, options.now ?? Date.now());
+  const eligible = candidates.filter((server) => !slow.has(String(server.id)));
+  const pool = eligible.length ? eligible : candidates;
+  if (pool.length <= 1) return pool[0] || null;
+  const probe = options.probe || probeSpeedtestServers;
+  const scored = (await probe(pool)).filter((entry) => Number.isFinite(entry?.latencyMs));
+  if (!scored.length) {
+    return chooseSpeedtestServer(state, pool, options.now ?? Date.now(), options.random ?? Math.random);
+  }
+  return scored.reduce((best, entry) => (entry.latencyMs < best.latencyMs ? entry : best)).server;
 }
 
 function resolveSpeedtestCli(settings = {}) {
@@ -712,12 +811,14 @@ function recordSpeedtestFailure(instance, errorCode) {
 
 function requestSpeedtest(instance, options = {}) {
   if (options.source !== 'retry') clearInstanceTimeout(instance, 'speedtestRetry');
-  const selected = options.server || chooseSpeedtestServer(
-    instance,
-    speedtestCandidates(instance.settings, instance),
-  );
   const promise = exclusiveTasks.run(instance, SPEEDTEST_RESOURCE, async (signal) => {
     try {
+      // 选点放在任务里：探测本身要发请求，不能在排队阶段就跑。
+      const selected = options.server || await selectSpeedtestServer(
+        instance,
+        speedtestCandidates(instance.settings, instance),
+      );
+      if (signal.aborted) return { cancelled: true };
       const result = await executeSpeedtest(instance, selected, signal);
       if (signal.aborted) return { cancelled: true };
       instance.history = pruneSpeedtestHistory([...(instance.history || []), result], result.at);
@@ -743,8 +844,8 @@ function requestSpeedtest(instance, options = {}) {
       renderInstance(instance);
       if (!['CLI', 'LICENSE'].includes(errorCode) && instance.retryCount < 1) {
         instance.retryCount += 1;
-        // 重试前丢掉当天的粘性节点，换一个再试；只勾了一个节点时
-        // 候选池本来就只有它，清空 sticky 不会改变选择。
+        // 重试前丢掉当天的粘性节点：探测退路走每日随机时才用得上，
+        // 正常路径每次重新探测，清空与否不影响。
         instance.dailyServerId = '';
         instance.dailyServerDate = '';
         setInstanceTimeout(instance, 'speedtestRetry', () => requestSpeedtest(instance, { source: 'retry' }), SPEEDTEST_RETRY_MS);
@@ -1121,8 +1222,11 @@ const config = {
       needsSpeedtestDiscovery,
       parseSpeedtestResult,
       openSpeedtestWebsite,
+      probeSpeedtestServers,
       renderSpeedtestIcon,
       resolveSpeedtestProxy,
+      selectSpeedtestServer,
+      speedtestProbeUrl,
       serializeSpeedtestState,
       speedtestProxyState,
       speedChart,

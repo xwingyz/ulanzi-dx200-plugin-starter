@@ -16,6 +16,9 @@ const {
   isWithinActiveWindow,
   parseSpeedtestResult,
   openSpeedtestWebsite,
+  probeSpeedtestServers,
+  selectSpeedtestServer,
+  speedtestProbeUrl,
   mapSpeedtestDirectoryServers,
   mergeSpeedtestGeo,
   needsSpeedtestDiscovery,
@@ -492,6 +495,82 @@ test('one checked node is fixed and several stay deterministic for the day', () 
   assert.equal(first.id, '2');
   assert.equal(second.id, '2');
   assert.equal(state.dailyServerId, '2');
+});
+
+test('latency probe hits /hi on the Ookla port and averages the samples', async () => {
+  assert.equal(speedtestProbeUrl({ host: 'speedtest1.online.sh.cn:8080' }), 'http://speedtest1.online.sh.cn:8080/hi');
+  assert.equal(speedtestProbeUrl({ host: 'speedtest.example.net' }), 'http://speedtest.example.net:8080/hi');
+  assert.equal(speedtestProbeUrl({ host: '' }), '');
+
+  // 探测按节点串行采样、节点间并发；失败的采样按超时计价，全部失败才算不可达。
+  // 一次采样失败就停止后续采样并按超时计价：坏节点最多拖一个超时，不是三个。
+  const latency = { 'http://a:8080/hi': [40, 44, 42], 'http://b:8080/hi': [50, null, 60], 'http://c:8080/hi': [null, null, null] };
+  const calls = [];
+  const probe = async (url) => {
+    calls.push(url);
+    const sample = latency[url].shift();
+    if (sample === null) throw new Error('timeout');
+    return sample;
+  };
+  const servers = [{ id: 'a', host: 'a:8080' }, { id: 'b', host: 'b:8080' }, { id: 'c', host: 'c:8080' }];
+  const scored = await probeSpeedtestServers(servers, { probe, samples: 3, timeoutMs: 3000 });
+
+  assert.deepEqual(scored.map((entry) => entry.server.id), ['a', 'b', 'c']);
+  assert.equal(scored[0].latencyMs, 42);
+  assert.equal(scored[1].latencyMs, Math.round((50 + 3000 + 3000) / 3));
+  assert.equal(scored[2].latencyMs, null);
+  assert.equal(calls.filter((url) => url.startsWith('http://a')).length, 3);
+  assert.equal(calls.filter((url) => url.startsWith('http://b')).length, 2);
+  assert.equal(calls.filter((url) => url.startsWith('http://c')).length, 1);
+});
+
+test('several candidates pick the lowest-latency reachable node on every run', async () => {
+  const servers = [
+    { id: '16204', host: 'speedtest.jsqiuying.com:8080', countryCode: 'CN' },
+    { id: '3633', host: 'speedtest1.online.sh.cn:8080', countryCode: 'CN' },
+    { id: '5396', host: '4gsuzhou1.speedtest.jsinfo.net:8080', countryCode: 'CN' },
+  ];
+  const latency = { '16204': 120, '3633': 42, '5396': null };
+  const probe = async (pool) => pool.map((server) => ({ server, latencyMs: latency[server.id] }));
+  const state = { dailyServerId: '16204', dailyServerDate: '2026-09-19' };
+  const now = new Date(2026, 8, 19, 19).getTime();
+
+  // 旧的当日粘性不再决定结果：延迟最低的可达节点胜出，下线节点被跳过。
+  const chosen = await selectSpeedtestServer(state, servers, { probe, now, random: () => 0 });
+  assert.equal(chosen.id, '3633');
+
+  // 单个候选直接使用，不探测。
+  let probed = false;
+  const only = await selectSpeedtestServer({}, [servers[0]], { probe: async () => { probed = true; return []; }, now });
+  assert.equal(only.id, '16204');
+  assert.equal(probed, false);
+  assert.equal(await selectSpeedtestServer({}, [], { probe, now }), null);
+
+  // 延迟探测分不出吞吐问题：16204 有三成时间延迟和 3633 一样低，下行却只有 0.7 Mbps。
+  // 24 小时内测过、下行不到池内最好成绩 1/10 的节点先剔除，不再进探测。
+  const history = [
+    { at: now - 3 * 3_600_000, ok: true, downloadMbps: 131, server: { id: '3633' } },
+    { at: now - 2 * 3_600_000, ok: true, downloadMbps: 0.74, server: { id: '16204' } },
+    { at: now - 30 * 3_600_000, ok: true, downloadMbps: 0.5, server: { id: '5396' } },
+  ];
+  const probedIds = [];
+  const evenLatency = async (pool) => { probedIds.push(pool.map((server) => server.id)); return pool.map((server) => ({ server, latencyMs: 20 })); };
+  assert.equal((await selectSpeedtestServer({ history }, servers, { probe: evenLatency, now })).id, '3633');
+  assert.deepEqual(probedIds, [['3633', '5396']]);
+  // 剔除后只剩一个候选：直接用它，不探测。
+  probedIds.length = 0;
+  assert.equal((await selectSpeedtestServer({ history }, servers.slice(0, 2), { probe: evenLatency, now })).id, '3633');
+  assert.deepEqual(probedIds, []);
+  // 剔除会把候选池清空时不剔除：所有节点都慢就还是在它们之间比延迟。
+  const allSlow = [{ at: now - 3_600_000, ok: true, downloadMbps: 0.5, server: { id: '16204' } }];
+  assert.equal((await selectSpeedtestServer({ history: allSlow }, servers.slice(0, 1), { probe: evenLatency, now })).id, '16204');
+
+  // 探测全部失败（例如 /hi 被拦）退回原来的每日随机，行为不比以前差。
+  const fallbackState = {};
+  const unreachable = async (pool) => pool.map((server) => ({ server, latencyMs: null }));
+  const fallback = await selectSpeedtestServer(fallbackState, servers.slice(0, 2), { probe: unreachable, now, random: () => 0.99 });
+  assert.equal(fallback.id, '3633');
+  assert.equal(fallbackState.dailyServerId, '3633');
 });
 
 test('speedtest.net directory nodes map to the shared server model', () => {
