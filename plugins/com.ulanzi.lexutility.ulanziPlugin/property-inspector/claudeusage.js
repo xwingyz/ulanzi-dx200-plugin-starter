@@ -158,9 +158,7 @@ function initClaudeUsageInspector() {
     void afterLanguageSelection(() => renderDiagnostics(lastDiagnostics));
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }
 
 initClaudeUsageInspector();

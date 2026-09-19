@@ -193,9 +193,7 @@ function initPomowaveInspector() {
     void afterLanguageSelection(() => renderPomowaveStatus(lastStatus));
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }
 
 initPomowaveInspector();

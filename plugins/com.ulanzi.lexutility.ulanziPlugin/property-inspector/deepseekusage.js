@@ -185,9 +185,7 @@ function initDeepSeekUsageInspector() {
     void afterLanguageSelection(() => renderDiagnostics(lastDiagnostics));
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }
 
 initDeepSeekUsageInspector();

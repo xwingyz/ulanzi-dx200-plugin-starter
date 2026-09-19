@@ -155,9 +155,7 @@ function initChatGptUsageInspector() {
     void afterLanguageSelection(() => renderChatGptDiagnostics(lastDiagnostics));
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }
 
 initChatGptUsageInspector();

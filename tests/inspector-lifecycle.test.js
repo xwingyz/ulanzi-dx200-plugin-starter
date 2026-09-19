@@ -70,7 +70,7 @@ class FakeElement extends FakeEventTarget {
   }
 }
 
-function createHarness(entryFile) {
+function createHarness(entryFile, options = {}) {
   const window = new FakeEventTarget();
   const form = new FakeElement({ id: 'property-inspector' });
   const wrapper = new FakeElement();
@@ -145,6 +145,7 @@ function createHarness(entryFile) {
   const sends = [];
   const languageCalls = [];
   const $UD = {
+    ...(options.identity || {}),
     connect: () => {},
     onConnected: (callback) => callbacks.connected.push(callback),
     onAdd: (callback) => callbacks.add.push(callback),
@@ -194,6 +195,62 @@ function createHarness(entryFile) {
     window,
   };
 }
+
+test('a panel ignores messages addressed to other instances once the host has told it whose it is', () => {
+  // 宿主把 PARAMFROMPLUGIN 广播给所有面板：实例 B 回推运行态时，打开着 A 的面板也会收到。
+  // 2026-09-19 宿主日志实证：3_0 的面板收下 2_0 的回推后把 context 换成 2_0，用户随后的编辑写进了 2_0。
+  const harness = createHarness();
+  harness.callbacks.connected[0]();
+  harness.callbacks.add.forEach((cb) => cb({ context: 'ctx-1', param: { title: 'Mine' } }));
+
+  harness.callbacks.plugin.forEach((cb) => cb({ context: 'ctx-2', param: { title: 'Theirs', theme: 'neon' } }));
+  assert.equal(harness.elements.get('title').value, 'Mine', '别的实例的设置不能灌进表单');
+
+  harness.form.dispatchEvent({ type: 'input' });
+  harness.runTimers();
+  const last = harness.sends.at(-1);
+  assert.equal(last.context, 'ctx-1', '提交目标必须还是自己的实例');
+  assert.equal(last.settings.title, 'Mine');
+
+  // 自己实例的回推照常生效。
+  harness.callbacks.plugin.forEach((cb) => cb({ context: 'ctx-1', param: { title: 'Mine v2' } }));
+  assert.equal(harness.elements.get('title').value, 'Mine v2');
+});
+
+test('a panel opened with host query identity ignores even host events for other keys', () => {
+  const identity = { uuid: 'test.action', key: '3_0', actionid: 'aid-3' };
+  const harness = createHarness(undefined, { identity });
+  harness.callbacks.connected[0]();
+  // harness 已经发过一条 ctx-1 的 add；带 query 身份时它不属于本面板，必须被丢弃。
+  harness.callbacks.add.forEach((cb) => cb({ context: 'other___2_0___aid-2', param: { title: 'Theirs' } }));
+  assert.notEqual(harness.elements.get('title').value, 'Theirs');
+
+  harness.callbacks.plugin.forEach((cb) => cb({ context: 'test.action___3_0___aid-3', param: { title: 'Mine' } }));
+  assert.equal(harness.elements.get('title').value, 'Mine');
+  harness.form.dispatchEvent({ type: 'input' });
+  harness.runTimers();
+  assert.equal(harness.sends.at(-1).context, 'test.action___3_0___aid-3');
+});
+
+test('speedtest panel keeps its own instance when another instance pushes runtime', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+  harness.callbacks.app[0]({ context: 'ctx-1', param: { scope: 'china', theme: 'mint', speedtestRuntime: JSON.stringify({ servers: [] }) } });
+
+  harness.callbacks.plugin[0]({
+    context: 'ctx-2',
+    param: { scope: 'uswest', theme: 'neon', speedtestRuntime: JSON.stringify({ servers: [{ id: '9', countryCode: 'US', lon: -120 }] }) },
+  });
+  assert.equal(harness.elements.get('scope').value, 'china');
+  assert.equal(harness.elements.get('theme').value, 'mint');
+
+  harness.elements.get('scope').value = 'europe';
+  harness.form.dispatchEvent({ type: 'input', target: harness.elements.get('scope') });
+  harness.runTimers();
+  const last = harness.sends.at(-1);
+  assert.equal(last.context, 'ctx-1');
+  assert.equal(last.settings.scope, 'europe');
+});
 
 test('shared inspector binds input and exit lifecycle only once across reconnects', () => {
   const harness = createHarness();
@@ -364,7 +421,7 @@ test('pomowave renders live phase counts and the current background name', async
   const harness = createHarness('pomowave.js');
   harness.callbacks.connected[0]();
   harness.callbacks.plugin.forEach((callback) => callback({
-    context: 'ctx-pomowave',
+    context: 'ctx-1',
     param: {
       pomodoroStatus: JSON.stringify({
         today: {

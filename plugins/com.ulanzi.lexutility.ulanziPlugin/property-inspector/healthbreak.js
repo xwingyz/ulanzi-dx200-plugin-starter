@@ -228,9 +228,7 @@ function initHealthBreakInspector() {
     });
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
   syncGroupUi();
   syncDayUi();
 }

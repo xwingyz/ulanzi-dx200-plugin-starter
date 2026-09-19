@@ -234,6 +234,40 @@ function bindLanguageSelection(commitSettings, onLocalized) {
   });
 }
 
+// ---- 面板身份守卫 ----
+// 宿主把主进程发出的 PARAMFROMPLUGIN 广播给所有面板，不按 key / actionid 过滤。
+// 2026-09-19 宿主日志实证：实例 2_0 回推运行态（带它的全部设置）时，打开着 3_0 的面板收下了它，
+// 把 currentContext 换成 2_0、表单也被灌成 2_0 的设置，用户随后的编辑全写进了 2_0。
+// 面板只服务打开它的那个实例：身份优先取宿主打开面板时的 query（$UD.key / $UD.actionid，
+// 在 connect() 之后、任何消息到达之前读取），拿不到时锁定第一条宿主事件（add / paramfromapp）的 context。
+// paramfromplugin 永远不能建立身份；与身份不符的消息一律丢弃。
+let inspectorOwnContext = '';
+
+function lockInspectorIdentityFromQuery() {
+  if (!inspectorOwnContext && $UD.key && $UD.actionid) {
+    inspectorOwnContext = `${$UD.uuid || ''}___${$UD.key}___${$UD.actionid}`;
+  }
+}
+
+function acceptInspectorMessage(message, source) {
+  const context = String(message?.context || '');
+  if (!context) {
+    return true;
+  }
+  if (!inspectorOwnContext && source === 'host') {
+    inspectorOwnContext = context;
+  }
+  return !inspectorOwnContext || context === inspectorOwnContext;
+}
+
+// 所有面板统一走这里绑定三类来件；action 自己的 apply 不需要再关心身份问题。
+function bindInspectorMessages(apply) {
+  lockInspectorIdentityFromQuery();
+  $UD.onAdd((message) => { if (acceptInspectorMessage(message, 'host')) apply(message); });
+  $UD.onParamFromApp((message) => { if (acceptInspectorMessage(message, 'host')) apply(message); });
+  $UD.onParamFromPlugin((message) => { if (acceptInspectorMessage(message, 'plugin')) apply(message); });
+}
+
 function initInspector(actionUuid, fields) {
   const allFields = withLanguageField(fields);
   let currentContext = '';
@@ -297,7 +331,5 @@ function initInspector(actionUuid, fields) {
     applyLanguageSelection();
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }

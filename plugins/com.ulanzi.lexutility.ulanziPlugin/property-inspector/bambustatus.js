@@ -102,9 +102,7 @@ function initBambuStatusInspector() {
     bindUiOnce();
     $UD.sendParamFromPlugin({ [REQUEST_SETTINGS_PARAM]: 'true' }, currentContext);
   });
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }
 
 initBambuStatusInspector();

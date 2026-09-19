@@ -152,6 +152,7 @@ Studio 是 GUI 应用、没有终端接管，默认情况下这一路直接被�
 - “恢复默认配置”走框架保留控制参数 `__resetDefaults: 'true'`（PI 发送、框架在 `pluginSubmit` 入口拦截）：框架把设置重置为 `defaults` 的归一化结果，按持久化语义变化决定是否写盘，随后触发 `onSettingsChanged`、渲染并把权威设置回推 PI 刷新表单。控制参数不进入设置合并、不落盘，也不透传给 action 的 `onParamFromPlugin`。
 - Inspector WebSocket 连接成功后必须发送 `__requestSettings: 'true'`。框架用 persisted 语义创建或读取实例并回推完整权威设置，但不得写盘、渲染、调用 `onReady` 或转发业务钩子；该握手用于覆盖 PI 晚于宿主恢复事件加载的竞态。
 - 框架回推完整设置时必须附带 `__settingsSync: 'true'`。宿主会把主进程发出的 `PARAMFROMPLUGIN` 广播回主进程；带此标记的消息只用于填充 Inspector，框架不得把广播回声合并、持久化、渲染或转发给 action 钩子。
+- 宿主把主进程发出的 `PARAMFROMPLUGIN` 广播给**所有**已打开的 Inspector，不按 key / actionid 过滤（2026-09-19 宿主日志实证：实例 2_0 回推运行态时，打开着 3_0 的面板收下了它并把 context 换成 2_0，用户随后的编辑全写进了 2_0）。因此每个 Inspector 必须通过 `inspector-shared.js` 的 `bindInspectorMessages(apply)` 绑定 add / paramfromapp / paramfromplugin：面板身份优先取宿主打开面板时的 query（`$UD.key` / `$UD.actionid`），拿不到时锁定第一条宿主事件的 context；`paramfromplugin` 永远不能建立身份，与身份不符的消息一律丢弃。action 的 `apply` 不得再直接 `$UD.onAdd(apply)` 之类地裸绑定。
 - Inspector 通过浏览器桥提交完整设置时必须附带 `__settingsSubmit: 'true'`，框架在合并前移除该标记。没有控制参数、也没有此提交标记的 `PARAMFROMPLUGIN` 视为宿主缓存的旧同步快照，只读忽略；这保证升级后首次切换 action 也不会用旧表单值覆盖磁盘。
 
 ### 进程内隔离（单进程约束下的强制规则）

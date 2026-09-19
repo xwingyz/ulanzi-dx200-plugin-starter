@@ -115,9 +115,7 @@ function initSystemStatusInspector() {
     });
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }
 
 initSystemStatusInspector();

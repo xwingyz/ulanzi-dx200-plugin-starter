@@ -89,9 +89,7 @@ function initLatencyInspector() {
     void applyLanguageSelection();
   }
 
-  $UD.onAdd(apply);
-  $UD.onParamFromApp(apply);
-  $UD.onParamFromPlugin(apply);
+  bindInspectorMessages(apply);
 }
 
 initLatencyInspector();
