@@ -79,6 +79,8 @@ const SPEEDTEST_REGIONS = {
 };
 const SPEEDTEST_SCOPES = Object.keys(SPEEDTEST_REGIONS);
 const SPEEDTEST_CHART_TYPES = ['line', 'bar'];
+// auto：按每次测速结果自动判定；direct / proxy：用户手动声明，键面按声明显示。
+const SPEEDTEST_PROXY_MODES = ['auto', 'direct', 'proxy'];
 
 function parseSpeedtestResult(payload, now = Date.now()) {
   const server = payload?.server || {};
@@ -92,6 +94,11 @@ function parseSpeedtestResult(payload, now = Date.now()) {
     jitterMs: Number(payload?.ping?.jitter || 0),
     packetLoss: Number.isFinite(Number(payload?.packetLoss)) ? Number(payload.packetLoss) : null,
     dataBytes: Number(payload?.download?.bytes || 0) + Number(payload?.upload?.bytes || 0),
+    // 测速流量是否从 VPN/TUN 接口出去。Clash TUN 下 CLI 报 isVpn=true、接口 utun5、
+    // 内网 198.18.0.1（2026-09-19 实测）；老版本不给 isVpn 时靠接口名兜底。
+    viaVpn: payload?.interface?.isVpn === true || /^(utun|tun|tap|wg|ppp)\d*/i.test(String(payload?.interface?.name || '')),
+    viaProxy: null,
+    exitCountryCode: '',
     server: {
       id: String(server.id || ''),
       host: String(server.host || ''),
@@ -118,6 +125,9 @@ function pruneSpeedtestHistory(history, now = Date.now()) {
         jitterMs: Number(entry.jitterMs || 0),
         packetLoss: entry.packetLoss === null ? null : Number(entry.packetLoss || 0),
         dataBytes: Number(entry.dataBytes || 0),
+        // 只留判定结论和出口国家，出口 IP 不进历史（也不进任何持久化结构）。
+        viaProxy: typeof entry.viaProxy === 'boolean' ? entry.viaProxy : null,
+        exitCountryCode: String(entry.exitCountryCode || '').toUpperCase().slice(0, 3),
         server: entry.server && typeof entry.server === 'object' ? {
           id: String(entry.server.id || ''), host: String(entry.server.host || ''),
           name: String(entry.server.name || ''), city: String(entry.server.city || ''),
@@ -487,7 +497,44 @@ async function executeSpeedtest(instance, server, signal) {
   const args = ['--format=json', '--progress=no'];
   if (server?.id) args.push(`--server-id=${server.id}`);
   const stdout = await runSpeedtestCli(instance, args, signal);
-  return parseSpeedtestResult(JSON.parse(stdout));
+  const payload = JSON.parse(stdout);
+  const result = parseSpeedtestResult(payload);
+  // 出口 IP 只在这里用一次，查完国家就丢，不进 result、不进持久化。
+  const exitCountryCode = await lookupSpeedtestExitCountry(instance, payload?.interface?.externalIp);
+  return { ...result, exitCountryCode, viaProxy: resolveSpeedtestProxy(result, exitCountryCode) };
+}
+
+// 判定“这次测速走没走代理”。宿主 Clash 以 TUN 接管全部路由，走 DIRECT 规则的国内流量同样从 utun 出去，
+// 单看 isVpn 会把国内直连判成代理；所以再看出口 IP 的国家：走了 VPN/TUN 且出口不在 CN 才算代理。
+// 走了 TUN 但出口国家不明（GeoIP 关闭或失败）→ null，键面不显示标志，Inspector 显示“无法判定”。
+function resolveSpeedtestProxy(result, exitCountryCode) {
+  if (!result?.viaVpn) return false;
+  if (!exitCountryCode) return null;
+  return String(exitCountryCode).toUpperCase() !== 'CN';
+}
+
+// 键面/Inspector 用的最终状态：手动声明优先，auto 时看最近一次成功结果的判定。
+function speedtestProxyState(instance) {
+  const mode = instance?.settings?.proxyMode || 'auto';
+  if (mode === 'proxy' || mode === 'direct') return mode;
+  const verdict = instance?.lastResult?.viaProxy;
+  return verdict === true ? 'proxy' : verdict === false ? 'direct' : '';
+}
+
+// 出口 IP 的 GeoIP 只放内存缓存（进程生命周期内出口通常不变），不进 geoCache 这类会落盘的结构。
+async function lookupSpeedtestExitCountry(instance, ip) {
+  const address = String(ip || '').trim();
+  if (!address || String(instance?.settings?.geoIpEnabled) !== 'true') return '';
+  instance.exitGeoCache ||= new Map();
+  if (instance.exitGeoCache.has(address)) return instance.exitGeoCache.get(address);
+  try {
+    const payload = await fetchJson(`https://ipwho.is/${encodeURIComponent(address)}?fields=success,country_code`);
+    const code = payload?.success ? String(payload.country_code || '').toUpperCase() : '';
+    if (code) instance.exitGeoCache.set(address, code);
+    return code;
+  } catch {
+    return '';
+  }
 }
 
 function parseSpeedtestServerList(stdout) {
@@ -822,6 +869,8 @@ function sendSpeedtestRuntime(instance) {
     cliFound: Boolean(resolveSpeedtestCli(instance.settings)),
     nextDueAt: instance.nextDueAt || 0,
     autoPaused: instance.autoPaused === true,
+    proxyState: speedtestProxyState(instance),
+    exitCountryCode: instance.lastResult?.exitCountryCode || '',
   };
   sendParamFromPlugin({ ...instance.settings, speedtestRuntime: JSON.stringify(payload) }, instance.context);
 }
@@ -935,6 +984,23 @@ function statusPill(label, theme, isError) {
   `;
 }
 
+// 线路标志：压在下载带顶部的图表区（y 70–84）右侧。那一带只有图表背景——数值基线在 120、
+// 字高 46，顶到 86 左右；标题行在 60 以上——所以是键面上唯一放得下一个小标签的位置。
+// PROXY 用强调色实底，DIRECT 只描边，一眼能分出两个实例谁走了代理。
+function routeTag(state, theme, language) {
+  if (state !== 'proxy' && state !== 'direct') return '';
+  const label = t(state === 'proxy' ? 'PROXY' : 'DIRECT', language);
+  const fontSize = 11;
+  const glyphs = [...label];
+  const width = glyphs.reduce((sum, ch) => sum + (/^[\x00-\x7F]$/.test(ch) ? 0.66 : 1), 0) * fontSize + 10;
+  const x = 214 - width;
+  const proxy = state === 'proxy';
+  return `
+    <rect x="${x.toFixed(1)}" y="72" width="${width.toFixed(1)}" height="14" rx="4" fill="${proxy ? theme.accent : 'none'}" stroke="${proxy ? 'none' : theme.muted}" stroke-width="1.5"/>
+    <text x="${(x + width / 2).toFixed(1)}" y="82.5" text-anchor="middle" fill="${proxy ? theme.canvas : theme.muted}" font-size="${fontSize}" font-weight="800" letter-spacing="0.5" font-family="Arial, sans-serif">${escapeXml(label)}</text>
+  `;
+}
+
 function renderSpeedtestIcon(instance, now = Date.now()) {
   const theme = themeFor(instance.settings);
   const frame = frameFor(instance.settings);
@@ -968,6 +1034,7 @@ function renderSpeedtestIcon(instance, now = Date.now()) {
         ${headline}
         <g opacity="${dim}">
           ${speedBand(last ? Math.round(last.downloadMbps) : null, 'down', 70, theme, speedChart(history, 'downloadMbps', 70, 68, theme.accent, instance.settings.chartType))}
+          ${routeTag(speedtestProxyState(instance), theme, language)}
           ${speedBand(last ? Math.round(last.uploadMbps) : null, 'up', 146, theme, speedChart(history, 'uploadMbps', 146, 68, theme.muted, instance.settings.chartType))}
         </g>
       `)}
@@ -992,6 +1059,7 @@ const config = {
       candidateServers: '[]',
       chartType: 'line',
       geoIpEnabled: 'true',
+      proxyMode: 'auto',
       cliPath: '',
     },
     normalizeSettings: (settings, defaults) => ({
@@ -1004,6 +1072,7 @@ const config = {
       candidateServers: sanitizeServerList(settings.candidateServers ?? defaults.candidateServers),
       chartType: normalizeChoice(settings.chartType, defaults.chartType, SPEEDTEST_CHART_TYPES),
       geoIpEnabled: normalizeBooleanString(settings.geoIpEnabled, defaults.geoIpEnabled),
+      proxyMode: normalizeChoice(settings.proxyMode, defaults.proxyMode, SPEEDTEST_PROXY_MODES),
       cliPath: String(settings.cliPath || '').trim().slice(0, 300),
     }),
     createState: (instance) => ({
@@ -1053,7 +1122,9 @@ const config = {
       parseSpeedtestResult,
       openSpeedtestWebsite,
       renderSpeedtestIcon,
+      resolveSpeedtestProxy,
       serializeSpeedtestState,
+      speedtestProxyState,
       speedChart,
       speedtestCandidates,
       speedtestNextActiveWindowStart,

@@ -85,6 +85,14 @@
               </select>
             </div>
             <div class="field">
+              <label for="proxyMode" data-localize="Route">Route</label>
+              <select id="proxyMode" name="proxyMode">
+                <option value="auto" selected data-localize="Auto-detect (VPN interface + exit IP location)">Auto-detect (VPN interface + exit IP location)</option>
+                <option value="direct" data-localize="Direct connection">Direct connection</option>
+                <option value="proxy" data-localize="Via proxy">Via proxy</option>
+              </select>
+            </div>
+            <div class="field">
               <label for="intervalMin" data-localize="Automatic test">Automatic test</label>
               <select id="intervalMin" name="intervalMin">
                 <option value="15" data-localize="Every 15 minutes">Every 15 minutes</option>

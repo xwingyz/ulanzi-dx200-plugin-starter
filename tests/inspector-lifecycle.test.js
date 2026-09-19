@@ -566,6 +566,7 @@ test('speedtest inspector persists scope, schedule, checked nodes and chart type
   const harness = createHarness('speedtest.js');
   harness.callbacks.connected[0]();
   harness.elements.get('scope').value = 'europe';
+  harness.elements.get('proxyMode').value = 'proxy';
   harness.elements.get('intervalMin').value = '30';
   harness.elements.get('candidateServers').value = '[{"id":"12345"}]';
   harness.elements.get('chartType').value = 'bar';
@@ -574,12 +575,30 @@ test('speedtest inspector persists scope, schedule, checked nodes and chart type
 
   const settings = harness.sends.at(-1).settings;
   assert.equal(settings.scope, 'europe');
+  assert.equal(settings.proxyMode, 'proxy');
   assert.equal(settings.intervalMin, '30');
   assert.equal(settings.candidateServers, '[{"id":"12345"}]');
   assert.equal(settings.chartType, 'bar');
   // 模式不再是独立设置项，勾选数量就是模式。
   assert.equal(settings.selectionMode, undefined);
   assert.equal(settings.fixedServerId, undefined);
+});
+
+test('speedtest inspector shows the route verdict from runtime', () => {
+  const harness = createHarness('speedtest.js');
+  harness.callbacks.connected[0]();
+  harness.callbacks.app[0]({
+    context: 'ctx-1',
+    param: { speedtestRuntime: JSON.stringify({ servers: [], proxyState: 'proxy', exitCountryCode: 'US', lastResult: { downloadMbps: 1, uploadMbps: 1, viaProxy: true } }) },
+  });
+  assert.match(harness.elements.get('runtime').innerHTML, /Via proxy/);
+  assert.match(harness.elements.get('runtime').innerHTML, /US/);
+
+  harness.callbacks.app[0]({
+    context: 'ctx-1',
+    param: { speedtestRuntime: JSON.stringify({ servers: [], proxyState: '', lastResult: { downloadMbps: 1, uploadMbps: 1, viaProxy: null } }) },
+  });
+  assert.match(harness.elements.get('runtime').innerHTML, /Route unknown/);
 });
 
 test('speedtest chart button commits the chart type once after reconnect', () => {

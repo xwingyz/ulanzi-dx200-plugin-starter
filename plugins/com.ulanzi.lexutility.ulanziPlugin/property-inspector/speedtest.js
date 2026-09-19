@@ -1,5 +1,6 @@
 const SPEEDTEST_FIELDS = withLanguageField([
   'scope',
+  'proxyMode',
   'intervalMin',
   'activeAllDay',
   'activeStart',
@@ -148,7 +149,13 @@ function initSpeedtestInspector() {
     const discovered = runtime.serverCacheUpdatedAt
       ? `<br>${$UD.t('Server catalog')} ${new Date(runtime.serverCacheUpdatedAt).toLocaleString()} · ${(runtime.servers || []).length} ${$UD.t('servers')}`
       : `<br>${$UD.t('Fetching server catalog…')}`;
-    document.getElementById('runtime').innerHTML = `<strong>${status}</strong>${discovered}${last ? `<br>↓ ${Math.round(last.downloadMbps)} Mbps · ↑ ${Math.round(last.uploadMbps)} Mbps · ${Math.round(last.pingMs || 0)} ms<br>#${last.server?.id || '—'} ${last.server?.city || ''} ${last.server?.ip || ''}` : `<br>${$UD.t('No test results yet')}`}${runtime.errorCode ? `<br><span class="danger">${runtime.errorCode}</span>` : ''}`;
+    // 线路：手动声明时按声明显示；auto 时显示最近一次测速的判定和出口国家，判不出来就明说。
+    const route = runtime.proxyState === 'proxy'
+      ? `${$UD.t('Via proxy')}${runtime.exitCountryCode ? ` · ${$UD.t('exit')} ${runtime.exitCountryCode}` : ''}`
+      : runtime.proxyState === 'direct'
+        ? `${$UD.t('Direct connection')}${runtime.exitCountryCode ? ` · ${$UD.t('exit')} ${runtime.exitCountryCode}` : ''}`
+        : $UD.t('Route unknown');
+    document.getElementById('runtime').innerHTML = `<strong>${status}</strong>${discovered}<br>${$UD.t('Route')}: ${route}${last ? `<br>↓ ${Math.round(last.downloadMbps)} Mbps · ↑ ${Math.round(last.uploadMbps)} Mbps · ${Math.round(last.pingMs || 0)} ms<br>#${last.server?.id || '—'} ${last.server?.city || ''} ${last.server?.ip || ''}` : `<br>${$UD.t('No test results yet')}`}${runtime.errorCode ? `<br><span class="danger">${runtime.errorCode}</span>` : ''}`;
     renderServers();
     requestServersIfEmpty();
   }

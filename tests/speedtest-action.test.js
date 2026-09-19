@@ -20,7 +20,9 @@ const {
   mergeSpeedtestGeo,
   needsSpeedtestDiscovery,
   renderSpeedtestIcon,
+  resolveSpeedtestProxy,
   serializeSpeedtestState,
+  speedtestProxyState,
   speedChart,
   speedtestCandidates,
   speedtestNextActiveWindowStart,
@@ -219,6 +221,9 @@ test('speedtest action defaults match the confirmed product contract', () => {
   const defaults = ACTION_CONFIGS.speedtest.defaults;
 
   assert.equal(defaults.scope, 'china');
+  assert.equal(defaults.proxyMode, 'auto');
+  assert.equal(ACTION_CONFIGS.speedtest.normalizeSettings({ proxyMode: 'bogus' }, defaults).proxyMode, 'auto');
+  assert.equal(ACTION_CONFIGS.speedtest.normalizeSettings({ proxyMode: 'proxy' }, defaults).proxyMode, 'proxy');
   assert.equal(defaults.intervalMin, '30');
   assert.equal(defaults.activeAllDay, 'false');
   assert.equal(defaults.activeStart, '08:00');
@@ -266,6 +271,66 @@ test('official speedtest JSON is converted to Mbps without retaining client IP',
   });
   assert.equal('externalIp' in result, false);
   assert.equal('resultUrl' in result, false);
+  // 没走 VPN/TUN 接口。
+  assert.equal(result.viaVpn, false);
+});
+
+test('the result records whether the test left through a VPN/TUN interface', () => {
+  const base = { download: { bandwidth: 1 }, upload: { bandwidth: 1 }, server: {} };
+  // Clash TUN：CLI 报 isVpn=true、接口 utun5、内网 198.18.0.1（2026-09-19 实测）。
+  assert.equal(parseSpeedtestResult({ ...base, interface: { isVpn: true, name: 'utun5', internalIp: '198.18.0.1', externalIp: '64.188.23.129' } }).viaVpn, true);
+  // 有些版本不给 isVpn，只能靠接口名。
+  assert.equal(parseSpeedtestResult({ ...base, interface: { name: 'utun8', externalIp: '1.2.3.4' } }).viaVpn, true);
+  assert.equal(parseSpeedtestResult({ ...base, interface: { isVpn: false, name: 'en1', externalIp: '1.2.3.4' } }).viaVpn, false);
+});
+
+test('proxy detection needs both a VPN interface and a non-CN exit', () => {
+  // TUN 接管全部路由时，走 DIRECT 规则的国内流量同样从 utun 出去，只看 isVpn 会把直连判成代理。
+  assert.equal(resolveSpeedtestProxy({ viaVpn: true }, 'US'), true);
+  assert.equal(resolveSpeedtestProxy({ viaVpn: true }, 'CN'), false);
+  assert.equal(resolveSpeedtestProxy({ viaVpn: false }, 'US'), false);
+  // 走了 TUN 但出口国家不明（GeoIP 关闭或失败）：无法判定。
+  assert.equal(resolveSpeedtestProxy({ viaVpn: true }, ''), null);
+});
+
+test('the key shows the proxy state from the setting, or from detection when set to auto', () => {
+  const last = (viaProxy) => ({ at: 1, ok: true, downloadMbps: 1, uploadMbps: 1, viaProxy, exitCountryCode: viaProxy ? 'US' : 'CN' });
+  assert.equal(speedtestProxyState({ settings: { proxyMode: 'proxy' }, lastResult: last(false) }), 'proxy');
+  assert.equal(speedtestProxyState({ settings: { proxyMode: 'direct' }, lastResult: last(true) }), 'direct');
+  assert.equal(speedtestProxyState({ settings: { proxyMode: 'auto' }, lastResult: last(true) }), 'proxy');
+  assert.equal(speedtestProxyState({ settings: { proxyMode: 'auto' }, lastResult: last(false) }), 'direct');
+  assert.equal(speedtestProxyState({ settings: { proxyMode: 'auto' }, lastResult: { ...last(true), viaProxy: null } }), '');
+  assert.equal(speedtestProxyState({ settings: { proxyMode: 'auto' }, lastResult: null }), '');
+
+  const icon = (settings, lastResult) => Buffer.from(
+    renderSpeedtestIcon({
+      settings: { theme: 'signal', frameSize: 'optimal', showFrame: 'true', scope: 'china', chartType: 'line', ...settings },
+      history: lastResult ? [lastResult] : [],
+      lastResult,
+      lastCompletedAt: 1,
+      phase: 'idle',
+    }, 2).split(',')[1],
+    'base64',
+  ).toString('utf8');
+  assert.match(icon({ proxyMode: 'proxy' }, last(false)), />PROXY</);
+  assert.match(icon({ proxyMode: 'auto' }, last(false)), />DIRECT</);
+  assert.ok(!/>PROXY<|>DIRECT</.test(icon({ proxyMode: 'auto' }, null)));
+  // 标签压在下载带顶部的图表区（y 70–84），不能撞到数值（基线 120，字高 46）或标题行。
+  const tag = icon({ proxyMode: 'proxy' }, last(false)).match(/<rect[^>]*y="72"[^>]*height="14"/);
+  assert.ok(tag, 'proxy tag rect is missing');
+});
+
+test('history keeps the proxy verdict and exit country but never the exit IP', () => {
+  const at = Date.UTC(2026, 6, 18, 12);
+  const state = serializeSpeedtestState({
+    history: [{ at, ok: true, downloadMbps: 1, uploadMbps: 1, viaVpn: true, viaProxy: true, exitCountryCode: 'US', externalIp: '64.188.23.129' }],
+  }, at);
+  assert.equal(state.history[0].viaProxy, true);
+  assert.equal(state.history[0].exitCountryCode, 'US');
+  assert.equal(state.lastResult.viaProxy, true);
+  assert.ok(!JSON.stringify(state).includes('64.188.23.129'));
+  // 旧记录没有这两个字段：viaProxy 归一为 null（未知），不是 false。
+  assert.equal(serializeSpeedtestState({ history: [{ at, ok: true, downloadMbps: 1, uploadMbps: 1 }] }, at).history[0].viaProxy, null);
 });
 
 test('speedtest state keeps seven days and at most 672 records', () => {

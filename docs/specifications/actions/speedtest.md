@@ -1,7 +1,7 @@
 # Network Speed Test 功能与技术规范
 
 状态：持续维护  
-最后代码核对：2026-09-17
+最后代码核对：2026-09-19
 action key：`speedtest`  
 UUID：`com.ulanzi.ulanzistudio.lexutility.speedtest`
 
@@ -26,6 +26,7 @@ Network Speed Test 调用官方 Ookla Speedtest CLI 测量下载、上传和网�
 - 测速命令：`speedtest --format=json --progress=no`；有选定节点时追加 `--server-id=<id>`。
 - 节点目录优先请求 `https://www.speedtest.net/api/js/servers`。不带 `search` 的请求只按出口 IP 就近返回，从大陆看海外几乎只剩台湾/香港；大陆节点在该接口上几乎搜不到（`Beijing` 返回 0），只能靠就近列表。因此**按当前 `scope` 拉取**：就近列表（30）加上该区域的固定国家名搜索词（见 §5 区域表），每个搜索词的 `limit` 为 `clamp(floor(70 / 词数), 5, 30)`，总量控制在 100 条缓存上限内。请求并发上限 4，单个搜索词失败重试一次；各列表轮流取一条合并、按 ID 去重，再按国家、城市排序；单个搜索词最终失败不影响其他地区。目录整体失败时回退 CLI `--servers --format=json`。
 - 可选 GeoIP 通过 DNS 和 `ipwho.is` 补充 IP 实际位置；失败只跳过增强，不阻止测速。
+- 线路自动判定同样用 `ipwho.is` 查一次出口 IP（CLI `interface.externalIp`）的国家码；出口 IP 只在进程内存缓存，不进 result、不进任何持久化结构。
 
 ## 3. 用户功能与交互
 
@@ -57,7 +58,8 @@ Network Speed Test 调用官方 Ookla Speedtest CLI 测量下载、上传和网�
 | `timeoutSec` | `180` | `120` / `180` / `240` / `300` | CLI 硬超时 |
 | `candidateServers` | `[]` | 最多 100 个净化后的节点对象 | 用户勾选的节点池 |
 | `chartType` | `line` | `line` / `bar` | 下载/上传历史图表 |
-| `geoIpEnabled` | `true` | 字符串布尔值 | 是否补充 IP 实际位置 |
+| `geoIpEnabled` | `true` | 字符串布尔值 | 是否补充 IP 实际位置；关闭时线路自动判定也失去出口国家，只能给出“无法判定” |
+| `proxyMode` | `auto` | `auto` / `direct` / `proxy` | 线路：auto 按每次结果自动判定，direct / proxy 为用户手动声明 |
 | `cliPath` | 空 | 最长 300 字符 | 自定义 CLI 路径 |
 
 `serverSearch` 是 Inspector 本地筛选字段，不进入设置或自动保存。
@@ -109,6 +111,9 @@ CLI JSON 转换为：
 - `downloadMbps`、`uploadMbps`：从 bytes/s × 8 转为 Mbps，保留两位小数。
 - `pingMs`、`jitterMs`、`packetLoss`、`dataBytes`。
 - 服务端 ID、host、名称、城市、国家和 IP；不保存客户端公网 IP。
+- `viaVpn`（仅运行态）：CLI `interface.isVpn === true` 或接口名匹配 `utun|tun|tap|wg|ppp`。Clash TUN 下实测 isVpn=true、接口 utun5、内网 198.18.0.1。
+- `viaProxy`：`true` / `false` / `null`。规则：没走 VPN/TUN 接口 → `false`；走了且出口国家码非 CN → `true`；走了但出口国家未知 → `null`。TUN 接管全部路由时走 DIRECT 规则的国内流量同样经 utun 出去，所以不能只看 isVpn。
+- `exitCountryCode`：出口 IP 的国家码（最长 3 字符），随历史持久化；出口 IP 本身不保存。旧记录缺字段时 `viaProxy` 归一为 `null`。
 - 节点对象另含官方目录的 `lat` / `lon`（数字，缺失为 `null`），由基座 `sanitizeServerList` 净化；目前只有本 action 使用。
 
 错误码：
@@ -139,7 +144,7 @@ CLI JSON 转换为：
 | `onDispose` | 同步 flush 当前状态；框架取消队列任务 |
 | `render` | 生成速度与趋势 SVG data URL |
 
-插件通过 `speedtestRuntime` JSON 回传 phase、错误、排队位置、最近结果、最近 12 个历史点、节点缓存、CLI 可用性、`nextDueAt` 和 `autoPaused`。Inspector 用它渲染状态与节点列表；它不是持久化设置字段。
+插件通过 `speedtestRuntime` JSON 回传 phase、错误、排队位置、最近结果、最近 12 个历史点、节点缓存、CLI 可用性、`nextDueAt`、`autoPaused`、`proxyState`（`proxy` / `direct` / 空）和 `exitCountryCode`。`proxyState` 由 `speedtestProxyState` 计算：`proxyMode` 为手动值时直接用它，auto 时取最近一次成功结果的 `viaProxy`。Inspector 状态区显示“线路：经代理 · 出口 US / 直连 / 线路无法判定”。Inspector 用它渲染状态与节点列表；它不是持久化设置字段。
 
 ## 9. 键面显示
 
@@ -155,6 +160,7 @@ CLI JSON 转换为：
 - 图表无论样本数多少都铺满同一宽度，x 轴随样本数动态分配；单点折线以圆点表示。
 - 忙碌态不画内框线（会压住首字母），改由状态色块表达；旧结果降低不透明度但仍可参考。
 - 相对时间由每分钟一次的重绘节拍保持新鲜，否则两次测速之间标签会停在测完那一刻。
+- 线路标志：下载带顶部右侧（y 72–86）一个 14 高的小标签，`PROXY` 用强调色实底、`DIRECT` 只描边；`proxyState` 为空时不画。那一带只有图表背景（数值基线 120、字高 46，顶到 86 左右；标题行在 60 以上），是键面上唯一放得下标签的位置。简体中文键面显示“代理”/“直连”。
 
 ## 10. 已覆盖的关键验证
 
@@ -169,6 +175,7 @@ CLI JSON 转换为：
 - 双击暂停/恢复自动测速、暂停时取消当前任务并持久化；长按的平台浏览器启动参数。
 - 键面渲染：数值右对齐与单位列、相对时间四档格式与让位规则、状态色块与无内框线、区域代号映射。
 - Inspector 的调度、节点选择、图表、即时测速和空列表请求。
+- 线路：`viaVpn` 解析、`resolveSpeedtestProxy` 三态判定、`speedtestProxyState` 手动优先、键面标签位置与显隐、历史保留判定但不含出口 IP、`proxyMode` 默认值与归一化、Inspector 持久化与状态区文案。
 
 修改 CLI 参数、错误分类、节点数据模型、调度/队列或状态版本时，应同步本文件并扩充 `tests/speedtest-action.test.js`；修改 Inspector runtime 或控制命令时还应更新 `tests/inspector-lifecycle.test.js`。
 
