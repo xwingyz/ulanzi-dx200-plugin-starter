@@ -46,6 +46,10 @@ export function createClaudeUsageAction(runtime) {
   const REFRESH_COMMAND = 'claude';
   const REFRESH_ARGS = ['-p', 'ping', '--model', 'haiku', '--max-turns', '1'];
   const REFRESH_TIMEOUT_MS = 45_000;
+  // 轮询遇 401 时的自动刷新预算：每 8 小时最多一次。accessToken 的寿命实测正好 8 小时，
+  // 所以正常情况下这等于「每个 token 生命周期刷一次」——一天三条 haiku ping，是让键面
+  // 自己活着的最低成本。失败也占掉这个窗口：CLI 找不到 / 超时时绝不能每拍 spawn 一次。
+  const AUTO_REFRESH_INTERVAL_MS = 8 * 3600_000;
 
   // 插件进程由 Ulanzi Studio 拉起，其 PATH 未必包含 homebrew 等前缀——补一份常见兵库。
   // 与 chatgptusage 的探测同构，但按隔离规范各自持有，不跨 action 借用。
@@ -171,7 +175,12 @@ export function createClaudeUsageAction(runtime) {
     }
     const expiresAt = Number(cred.expiresAt);
     const expired = Number.isFinite(expiresAt) && expiresAt <= now;
-    if (expired && !hasRefresh) {
+    // refreshToken 自己也有寿命（实测 28 天，`refreshTokenExpiresAt`）。过了期的 refreshToken
+    // 换不回新 token，与没有一样——否则会拿着它白跑一次 45s 的 claude 刷新。字段缺失或非法
+    // 时与 expiresAt 同一口径：不凭缺失字段断定过期。
+    const refreshExpiresAt = Number(cred.refreshTokenExpiresAt);
+    const refreshExpired = Number.isFinite(refreshExpiresAt) && refreshExpiresAt <= now;
+    if (expired && (!hasRefresh || refreshExpired)) {
       return 'REAUTH';
     }
     return 'USABLE';
@@ -688,6 +697,7 @@ export function createClaudeUsageAction(runtime) {
       scoped: instance.scoped || null,
       fetchedAt: instance.fetchedAt ?? null,
       lastErrorKind: instance.lastErrorKind || null,
+      lastRefreshAt: instance.lastRefreshAt ?? null,
     };
   }
 
@@ -712,6 +722,8 @@ export function createClaudeUsageAction(runtime) {
       scoped,
       fetchedAt: valid && Number.isFinite(raw.fetchedAt) ? raw.fetchedAt : null,
       lastErrorKind: valid && typeof raw.lastErrorKind === 'string' ? raw.lastErrorKind : null,
+      // 自动刷新的记账跨重启保留，否则每次重启都会在第一个 401 上再花一条 ping。
+      lastRefreshAt: valid && Number.isFinite(raw.lastRefreshAt) ? raw.lastRefreshAt : null,
       // 水合出来的数据一定是上次会话留下的，直接标陈旧，等首次拉取成功再转正。
       displayState: hasAny ? 'STALE' : 'PENDING',
     };
@@ -807,7 +819,7 @@ export function createClaudeUsageAction(runtime) {
       renderInstance(instance);
     }
 
-    const result = await (options.fetchUsageImpl ?? fetchUsage)();
+    const result = await fetchWithAutoRefresh(instance, options);
 
     if (!isInstanceCurrent(instance, requestId)) {
       instance.fetching = false;
@@ -823,20 +835,48 @@ export function createClaudeUsageAction(runtime) {
     schedulePoll(instance);
   }
 
-  // 手动刷新序列：立刻亮起刷新角标 → 跑一次 claude 让 CLI 刷新凭据（尽力而为，失败
-  // 也继续）→ 清角标并照常拉取。角标在 claude 那 ~5s 窗口里可见，给用户"按下有反应"
-  // 的即时反馈；随后的 GET 很快，最终由 runFetch 渲染结果。
-  async function runManualRefresh(instance, options = {}) {
+  function autoRefreshDue(instance, now) {
+    return !(Number.isFinite(instance.lastRefreshAt) && now - instance.lastRefreshAt < AUTO_REFRESH_INTERVAL_MS);
+  }
+
+  // 亮起刷新角标 → 跑一次 claude 让 CLI 用 refreshToken 刷新钥匙串凭据（尽力而为，失败
+  // 也不抛）→ 放下角标。手动与自动两条路共用，且共用同一份记账 lastRefreshAt：手动刚刷过，
+  // 自动就不该紧接着再花一次。先记账再 spawn——失败也占窗口。
+  async function runRefreshWithBadge(instance, options = {}) {
     const refresh = options.refresh ?? runClaudeRefresh;
-    const run = options.run ?? runFetch;
+    instance.lastRefreshAt = options.now ?? Date.now();
     instance.refreshing = true;
     renderInstance(instance);
     try {
       await refresh();
     } catch {
       // 刷新失败不阻断拉取：旧 token 也许仍能用，不行就照常降级 STALE。
+    } finally {
+      instance.refreshing = false;
     }
-    instance.refreshing = false;
+  }
+
+  // 轮询的取数：只在**真的 401** 之后、且自动刷新预算未用尽时，刷一次再立刻重拉一次。
+  // 其它失败不刷——429 是限流、NETWORK 是网络、NO_TOKEN / REAUTH 已在 fetchUsage 短路且
+  // 刷新对它们无意义。为什么不按 expiresAt 提前刷：实测过期 9 天的 token 仍能返回 200，
+  // 服务端说了才算，提前刷等于为一个可能还活着的 token 白花一条 ping。
+  async function fetchWithAutoRefresh(instance, options = {}) {
+    const fetchImpl = options.fetchUsageImpl ?? fetchUsage;
+    const now = options.now ?? Date.now();
+    const result = await fetchImpl();
+    if (result.ok || result.kind !== 'AUTH' || !autoRefreshDue(instance, now)) {
+      return result;
+    }
+    await runRefreshWithBadge(instance, { ...options, now });
+    return fetchImpl();
+  }
+
+  // 手动刷新序列：立刻亮起刷新角标 → 跑一次 claude 让 CLI 刷新凭据 → 清角标并照常拉取。
+  // 角标在 claude 那 ~5s 窗口里可见，给用户"按下有反应"的即时反馈；随后的 GET 很快，
+  // 最终由 runFetch 渲染结果。
+  async function runManualRefresh(instance, options = {}) {
+    const run = options.run ?? runFetch;
+    await runRefreshWithBadge(instance, options);
     return run(instance, { immediateRender: true });
   }
 
@@ -872,12 +912,26 @@ export function createClaudeUsageAction(runtime) {
     return undefined;
   }
 
-  // 短按：需要登录时直接打开 CLI 让用户登录；否则跑手动刷新。刷新有冷却——claude 刷新
+  // 登录态短按：先重读钥匙串再决定。`claude login` 会先清掉钥匙串条目、等浏览器 OAuth 完成
+  // 再写回，轮询若落在这个空档里就读到 NO_TOKEN → 键面「请登录」；用户随即在终端登好、回来
+  // 按键——若这时只会再开一个终端，键面得干等下一拍轮询（最长 5 分钟）。凭据已可用就直接
+  // 拉取（token 是新的，不需要 claude 去刷新）；仍不可用才开 CLI。
+  async function recheckLoginThenPress(instance, options = {}) {
+    const now = options.now ?? Date.now();
+    const readRaw = options.readCredential ?? runSecurity;
+    if (classifyCredential(await readRaw(), now) === 'USABLE') {
+      instance.lastManualAt = now;
+      return (options.fetchNow ?? runFetch)(instance, { immediateRender: true });
+    }
+    return (options.openCli ?? openClaudeCli)(instance, { now });
+  }
+
+  // 短按：需要登录时先重读钥匙串（见上）；否则跑手动刷新。刷新有冷却——claude 刷新
   // 会 spawn 进程、真实消耗一点额度，连点毫无意义还会堆进程；冷却窗口内直接忽略。
   function handleShortPress(instance, options = {}) {
     const now = options.now ?? Date.now();
     if (needsLogin(instance)) {
-      return (options.openCli ?? openClaudeCli)(instance, { now });
+      return recheckLoginThenPress(instance, options);
     }
     const run = options.run ?? runManualRefresh;
     if (instance.lastManualAt && now - instance.lastManualAt < MANUAL_COOLDOWN_MS) {
@@ -1011,6 +1065,7 @@ export function createClaudeUsageAction(runtime) {
       classifyCredential,
       extractAccessToken,
       fetchUsage,
+      fetchWithAutoRefresh,
       hasClaudeCredential,
       keychainServices,
       staleAgeLabel,

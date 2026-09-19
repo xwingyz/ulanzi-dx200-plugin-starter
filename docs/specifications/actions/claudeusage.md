@@ -1,7 +1,7 @@
 # Claude Usage 功能与技术规范
 
 状态：持续维护
-最后代码核对：2026-09-13
+最后代码核对：2026-09-19
 action key：`claudeusage`
 UUID：`com.ulanzi.ulanzistudio.lexutility.claudeusage`
 
@@ -24,7 +24,7 @@ Claude Usage 在单个 DX200 键面上同时显示 Claude 订阅额度的 5 小�
 
 - 按设定间隔自动拉取额度，键面按更短的间隔本地重绘倒计时。
 - 短按松开（正常态）：先亮起刷新角标、百分比暂置为 `...`，触发一次凭据刷新（见 §3.1）后立即拉取，带冷却保护；拉回后 `...` 换成新值。
-- 短按松开（需要登录时）：不刷新，直接打开交互式 claude 终端让用户登录（见 §8 `openClaudeCli`）。
+- 短按松开（需要登录时）：**先重读钥匙串**——凭据已可用（用户刚在终端登录完）就直接拉取，不开终端、不跑 claude 刷新；仍不可用才打开交互式 claude 终端让用户登录（见 §8 `openClaudeCli`）。原因：`claude login` 先清钥匙串条目、等浏览器 OAuth 完成再写回，轮询落在空档里会短暂读到 `NO_TOKEN`，此时用户回来按键应当立刻恢复，而不是干等下一拍轮询。
 - 双击：打开交互式 claude 终端（`onDoublePress`）。与登出态单击共用同一入口，2 秒冷却去重避免双击开出两个窗口。
 - 按住至少 600ms 显示反色确认，松开后打开官方用量页面。
 - 三行数据按窗口时长排序，短窗口在前（5H → W → 模型周限）。
@@ -36,7 +36,7 @@ Claude Usage 在单个 DX200 键面上同时显示 Claude 订阅额度的 5 小�
 
 ```text
 security find-generic-password -s <服务名> -a <当前用户> -w
-→ JSON.claudeAiOauth.{ accessToken, refreshToken, expiresAt }
+→ JSON.claudeAiOauth.{ accessToken, refreshToken, expiresAt, refreshTokenExpiresAt }
 ```
 
 服务名随 Claude Code 的 config dir 分账：默认 `~/.claude` 用裸名 `Claude Code-credentials`，
@@ -49,13 +49,15 @@ security find-generic-password -s <服务名> -a <当前用户> -w
 | 态 | 条件 | 处理 |
 | --- | --- | --- |
 | `NONE` | `accessToken` 与 `refreshToken` 皆空（登出只剩 `scopes` 等残留元数据），或解析失败 | `NO_TOKEN` → Sign in |
-| `REAUTH` | `accessToken` 在但 `expiresAt` 已过，且 `refreshToken` **为空** | 不发请求，直接 `REAUTH` → Re-login |
+| `REAUTH` | `accessToken` 在但 `expiresAt` 已过，且 `refreshToken` **为空或 `refreshTokenExpiresAt` 已过**（实测 accessToken 8 小时、refreshToken 28 天） | 不发请求，直接 `REAUTH` → Re-login |
 | `USABLE` | 其余（含过期但有 `refreshToken`、`expiresAt` 缺失或非法） | 照常拉取 |
 
 `expiresAt` 缺失或不是有效数字时一律按 `USABLE`：这是非公开接口写的凭据，字段随时可能变，
 宁可发一次请求让服务端判，也不要凭一个缺失字段把用户推进重登提示。
 
-读取时**不写回钥匙串**。`accessToken` 生命周期约 1 小时；被动路径（自动轮询与 GET 拉取）只读取，读到即用、读不到即报错，不做任何刷新。
+读取时**不写回钥匙串**。`accessToken` 生命周期实测 8 小时、`refreshToken` 28 天。被动路径（自动轮询）只读取；**唯一例外是有界自动刷新**（见下），其余情况读到即用、读不到即报错。
+
+**有界自动刷新（2026-09-19 起）**：轮询拉取返回 **401（`AUTH`）** 时，若距上次刷新（手动或自动共用一份记账 `lastRefreshAt`，跨重启持久化）已满 **8 小时**，就跑一次与短按相同的 `claude -p ping`，然后立刻重拉一次；期间亮刷新角标。为什么这样定：终端 CLI 的 token 每 8 小时到期，而用户日常用的是桌面 App（不写 CLI 的钥匙串条目），键面会一直 STALE 到有人短按——2026-09-18 实测连续 18 小时 401。8 小时预算等于「每个 token 生命周期刷一次」，一天三条 haiku ping，是让键面自己活着的最低成本。**只有 401 触发**：429 是限流、NETWORK 是网络、NO_TOKEN / REAUTH 刷新无意义；**不按 `expiresAt` 提前刷**——实测过期 9 天的 token 仍可返回 200，服务端说了才算。**刷新失败也占掉预算**（先记账再 spawn），CLI 找不到 / 超时时绝不会每拍 spawn 一次。
 
 刷新只对 `USABLE` 有意义：`REAUTH` 的凭据 CLI 自己也换不回新 token（没有 `refreshToken` 可用），
 因此 `hasClaudeCredential` 的语义是「**值得为它跑一次 claude 刷新吗**」，`REAUTH` 与 `NONE` 同为否。
@@ -193,7 +195,8 @@ severity 映射：`normal → ok`，`warning → warn`，`critical → crit`。`
 | --- | --- |
 | `createState` | 初始化显示态，水合上次成功数据 |
 | `onReady` | 安排拉取与重绘两个独立定时器；无历史时立即首拉 |
-| `onRun` | 短按：需要登录时 `openClaudeCli`；否则亮刷新角标（百分比→`...`）→ 跑一次凭据刷新（见 §3.1，未登录则跳过）→ 立即拉取，10 秒冷却 |
+| 轮询拉取 | `runFetch` → `fetchWithAutoRefresh`：401 且预算未用尽时刷一次再重拉一次（§3.1） |
+| `onRun` | 短按：需要登录时先重读钥匙串，可用则直接 `runFetch`，否则 `openClaudeCli`；正常态亮刷新角标（百分比→`...`）→ 跑一次凭据刷新（见 §3.1，未登录则跳过）→ 立即拉取，10 秒冷却 |
 | `onDoublePress` | `openClaudeCli`：打开交互式 claude 终端；2 秒冷却去重 |
 | `onLongPress` | 打开 `usageUrl` |
 | `onParamFromPlugin` | 收到 `__claudeusageProbe` 控制命令时跑一次诊断并回推 `__claudeusageDiag` |
@@ -221,9 +224,10 @@ severity 映射：`normal → ok`，`warning → warn`，`critical → crit`。`
 lastSuccess: { weekly, fiveHour, scoped, fetchedAt }
   其中每项: { percent, severity, resetsAt, label }
 lastErrorKind
+lastRefreshAt
 ```
 
-`fetchedAt` 同时是键面陈旧时长的唯一依据，跨重启保留。
+`fetchedAt` 同时是键面陈旧时长的唯一依据，跨重启保留。`lastRefreshAt` 是自动刷新预算的记账，跨重启保留，否则每次重启都会在第一个 401 上再花一条 ping。
 
 - 仅在数据语义变化时写盘，不按对象引用判断。
 - 写盘走同目录临时文件 + rename 替换。

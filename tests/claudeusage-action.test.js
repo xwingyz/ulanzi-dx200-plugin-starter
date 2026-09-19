@@ -9,6 +9,7 @@ const {
   classifyCredential,
   extractAccessToken,
   fetchUsage,
+  fetchWithAutoRefresh,
   formatCountdown,
   handleShortPress,
   hasClaudeCredential,
@@ -592,13 +593,14 @@ test('double press opens the Claude CLI, deduped so a logged-out double-open can
   assert.equal(opens.length, 2, 'reopens once the cooldown expires');
 });
 
-test('short press opens the CLI when login is needed, otherwise refreshes', () => {
+test('short press opens the CLI when login is needed, otherwise refreshes', async () => {
   let opened = 0; let refreshed = 0;
   const openCli = () => { opened += 1; };
   const run = () => { refreshed += 1; };
+  const stillLoggedOut = async () => null;
 
-  // 登出：单击直接开 CLI 让用户登录，不进刷新。
-  handleShortPress(instance({ displayState: 'NO_TOKEN', lastManualAt: 0 }), { openCli, run, now: 1000 });
+  // 登出且钥匙串仍空：单击直接开 CLI 让用户登录，不进刷新。
+  await handleShortPress(instance({ displayState: 'NO_TOKEN', lastManualAt: 0 }), { openCli, run, readCredential: stillLoggedOut, now: 1000 });
   assert.deepEqual([opened, refreshed], [1, 0]);
 
   // 正常态：单击走刷新，不开 CLI。
@@ -677,7 +679,7 @@ test('fetchUsage reports REAUTH without spending a request on a credential it kn
   assert.equal(good.ok, true);
 });
 
-test('REAUTH replaces stale percentages with a re-login prompt', () => {
+test('REAUTH replaces stale percentages with a re-login prompt', async () => {
   const decode = (i) => Buffer.from(config.render(i).split(',')[1], 'base64').toString('utf8');
   const rows = { weekly: limit('W', 66), fiveHour: limit('5H', 57) };
 
@@ -696,13 +698,57 @@ test('REAUTH replaces stale percentages with a re-login prompt', () => {
   // 短按直接开 CLI 让用户登录，而不是又跑一次注定失败的刷新。
   let opened = 0;
   let ran = 0;
-  handleShortPress(instance({ ...rows, displayState: 'REAUTH', lastManualAt: 0 }), {
+  await handleShortPress(instance({ ...rows, displayState: 'REAUTH', lastManualAt: 0 }), {
     openCli: () => { opened += 1; },
     run: () => { ran += 1; },
+    readCredential: async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk', refreshToken: '', expiresAt: 1 } }),
     now: 1000,
   });
   assert.equal(opened, 1);
   assert.equal(ran, 0);
+});
+
+// 2026-09-19 实机：`claude login` 先清钥匙串、等浏览器 OAuth 完成再写回，插件一拍落在空档里
+// 读到 NO_TOKEN → 键面「请登录」。用户随即在终端登好、回来按键——登录态短按却只会再开一个
+// 终端，键面要等下一拍轮询（最长 5 分钟）才恢复。修法：登录态短按先重读钥匙串。
+test('a short press in the login state re-reads the keychain and fetches if the user has logged in since', async () => {
+  const rows = { weekly: limit('W', 66), fiveHour: limit('5H', 57) };
+  const fresh = JSON.stringify({ claudeAiOauth: { accessToken: 'sk-new', refreshToken: 'rt', expiresAt: 10_000_000 } });
+  let opened = 0; let fetched = 0; let refreshed = 0;
+  const options = {
+    openCli: () => { opened += 1; },
+    fetchNow: async () => { fetched += 1; },
+    run: () => { refreshed += 1; },
+    now: 1000,
+  };
+
+  // 刚登录完：凭据已可用 → 直接拉取，不开终端，也不需要 claude 去刷新（token 是新的）。
+  for (const state of [
+    instance({ displayState: 'NO_TOKEN' }),
+    instance({ ...rows, displayState: 'STALE', lastErrorKind: 'REAUTH' }),
+  ]) {
+    await handleShortPress(state, { ...options, readCredential: async () => fresh });
+  }
+  assert.deepEqual([opened, fetched, refreshed], [0, 2, 0]);
+
+  // 还没登录：照旧开 CLI。
+  await handleShortPress(instance({ displayState: 'NO_TOKEN' }), { ...options, readCredential: async () => null });
+  assert.deepEqual([opened, fetched, refreshed], [1, 2, 0]);
+});
+
+test('an expired refresh token is as good as none', () => {
+  const wrap = (cred) => JSON.stringify({ claudeAiOauth: cred });
+  const now = 2_000_000;
+  const dead = { accessToken: 'sk', refreshToken: 'rt', expiresAt: now - 1 };
+  // refreshToken 在但 refreshTokenExpiresAt 已过：CLI 拿它换不回新 token，与没有一样 → REAUTH。
+  assert.equal(classifyCredential(wrap({ ...dead, refreshTokenExpiresAt: now - 1 }), now), 'REAUTH');
+  assert.equal(hasClaudeCredential(wrap({ ...dead, refreshTokenExpiresAt: now - 1 }), now), false);
+  // 未过期 / 字段缺失 / 字段非法：仍按可续期处理。
+  assert.equal(classifyCredential(wrap({ ...dead, refreshTokenExpiresAt: now + 1 }), now), 'USABLE');
+  assert.equal(classifyCredential(wrap(dead), now), 'USABLE');
+  assert.equal(classifyCredential(wrap({ ...dead, refreshTokenExpiresAt: 'junk' }), now), 'USABLE');
+  // accessToken 未过期时 refreshToken 死活无所谓，照常可用。
+  assert.equal(classifyCredential(wrap({ accessToken: 'sk', refreshToken: 'rt', expiresAt: now + 1, refreshTokenExpiresAt: now - 1 }), now), 'USABLE');
 });
 
 test('a stale key face shows how old the numbers are once several polls have failed', () => {
@@ -772,4 +818,92 @@ test('failed fetches and recoveries land in the diagnostic log', () => {
   applyResult(inst, { ok: true, data: { weekly: limit('W', 25), fiveHour: limit('5H', 43), scoped: null } }, { now, appendLog: logImpl });
   assert.equal(entries.length, 3);
   assert.equal(entries[2][1].kind, 'OK');
+});
+
+// ---------------------------------------------------------------- 轮询时的有界自动刷新
+// 2026-09-19 日志实证：终端 CLI 的 token 每 8 小时到期，桌面 App 不替它续，键面从 9/18 16:17
+// 起连续 18 小时 401 + STALE，直到用户短按。用户据此决定放开自动刷新，但要最低成本：
+// 只在真的 401 之后、每 8 小时最多一次、仍是那条 haiku ping。
+
+test('a 401 during polling earns one claude refresh and an immediate refetch, at most once per 8h', async () => {
+  const now = 1_800_000_000_000;
+  const good = { ok: true, data: { weekly: limit('W', 20), fiveHour: limit('5H', 33), scoped: null } };
+  let fetches = 0;
+  const refreshes = [];
+  const fetchUsageImpl = async () => { fetches += 1; return fetches === 1 ? { ok: false, kind: 'AUTH' } : good; };
+  const refresh = async () => { refreshes.push(inst.refreshing); return { ok: true }; };
+  // active:false 让框架层 renderInstance 短路，避免真的往宿主发帧。
+  const inst = instance({ active: false, lastRefreshAt: null });
+
+  const result = await fetchWithAutoRefresh(inst, { fetchUsageImpl, refresh, now });
+  assert.equal(result.ok, true, '刷新后立刻重拉，不等下一拍');
+  assert.equal(fetches, 2);
+  assert.deepEqual(refreshes, [true], '刷新期间角标要亮');
+  assert.equal(inst.refreshing, false);
+  assert.equal(inst.lastRefreshAt, now);
+
+  // 8 小时内再遇 401：不再刷新，照常回 AUTH（降级 STALE 由 applyResult 负责）。
+  fetches = 0; refreshes.length = 0;
+  const again = await fetchWithAutoRefresh(inst, {
+    fetchUsageImpl: async () => { fetches += 1; return { ok: false, kind: 'AUTH' }; },
+    refresh,
+    now: now + 8 * 3600_000 - 1,
+  });
+  assert.equal(again.kind, 'AUTH');
+  assert.equal(fetches, 1);
+  assert.deepEqual(refreshes, []);
+
+  // 满 8 小时：允许再来一次。
+  await fetchWithAutoRefresh(inst, { fetchUsageImpl: async () => ({ ok: false, kind: 'AUTH' }), refresh, now: now + 8 * 3600_000 });
+  assert.deepEqual(refreshes, [true]);
+});
+
+test('only a real 401 earns an automatic refresh', async () => {
+  for (const kind of ['RATE_LIMITED', 'NETWORK', 'NO_TOKEN', 'REAUTH']) {
+    let refreshed = 0; let fetches = 0;
+    const inst = instance({ active: false, lastRefreshAt: null });
+    const result = await fetchWithAutoRefresh(inst, {
+      fetchUsageImpl: async () => { fetches += 1; return { ok: false, kind }; },
+      refresh: async () => { refreshed += 1; },
+      now: 1_800_000_000_000,
+    });
+    assert.equal(result.kind, kind);
+    assert.equal(refreshed, 0, `${kind} must not spend a claude ping`);
+    assert.equal(fetches, 1, `${kind} must not refetch`);
+    assert.equal(inst.lastRefreshAt, null);
+  }
+  // 成功更不会。
+  let refreshed = 0;
+  await fetchWithAutoRefresh(instance({ active: false }), {
+    fetchUsageImpl: async () => ({ ok: true, data: { weekly: limit('W', 1), fiveHour: null, scoped: null } }),
+    refresh: async () => { refreshed += 1; },
+  });
+  assert.equal(refreshed, 0);
+});
+
+test('a refresh that fails still spends the 8h window, so a broken CLI cannot spawn on every poll', async () => {
+  const now = 1_800_000_000_000;
+  let refreshed = 0;
+  const inst = instance({ active: false, lastRefreshAt: null });
+  const options = {
+    fetchUsageImpl: async () => ({ ok: false, kind: 'AUTH' }),
+    refresh: async () => { refreshed += 1; throw new Error('spawn failed'); },
+  };
+  const result = await fetchWithAutoRefresh(inst, { ...options, now });
+  assert.equal(result.kind, 'AUTH', '刷新失败不抛，照常回拉取结果');
+  assert.equal(inst.refreshing, false, '抛错也要把角标放下');
+  assert.equal(inst.lastRefreshAt, now);
+  await fetchWithAutoRefresh(inst, { ...options, now: now + 300_000 });
+  assert.equal(refreshed, 1);
+});
+
+test('a manual refresh resets the automatic budget and the budget survives a restart', async () => {
+  const now = 1_800_000_000_000;
+  const inst = instance({ active: false, lastRefreshAt: null });
+  await runManualRefresh(inst, { refresh: async () => {}, run: async () => {}, now });
+  assert.equal(inst.lastRefreshAt, now, '手动刚刷过，自动不该紧接着再花一次');
+
+  // 持久化往返：重启后不会因为记账清零而立刻再 spawn 一次。
+  assert.equal(hydrateState({ v: 1, weekly: limit('W', 10), fetchedAt: now, lastRefreshAt: now }).lastRefreshAt, now);
+  assert.equal(hydrateState({ v: 1, lastRefreshAt: 'junk' }).lastRefreshAt, null);
 });
