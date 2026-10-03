@@ -18,7 +18,9 @@ const {
   keychainServices,
   needsLogin,
   openClaudeCli,
+  parseScutilProxy,
   parseUsage,
+  proxiedFetch,
   readScopedLimit,
   resolveClaudeCommand,
   runClaudeRefresh,
@@ -460,6 +462,85 @@ test('the request carries oauth headers and never a request body', async () => {
   assert.equal(seen.options.headers['anthropic-beta'], 'oauth-2025-04-20');
   // 只读取额度，绝不发送任何推理请求——零额度消耗正是这个 action 的立身之本。
   assert.equal(seen.options.body, undefined);
+});
+
+test('scutil output yields the https system proxy, and nothing when it is off', () => {
+  const on = `<dictionary> {\n  HTTPEnable : 1\n  HTTPPort : 7890\n  HTTPProxy : 127.0.0.1\n  HTTPSEnable : 1\n  HTTPSPort : 7891\n  HTTPSProxy : 127.0.0.2\n}`;
+  assert.deepEqual(parseScutilProxy(on), { host: '127.0.0.2', port: 7891 });
+  assert.equal(parseScutilProxy(on.replace('HTTPSEnable : 1', 'HTTPSEnable : 0')), null);
+  assert.equal(parseScutilProxy('<dictionary> {\n  ExcludeSimpleHostnames : 0\n}'), null);
+  assert.equal(parseScutilProxy(''), null);
+  assert.equal(parseScutilProxy(null), null);
+});
+
+// 2026-09-29 实机故障：Studio 拉起的插件进程没有 HTTPS_PROXY，Node fetch 又不读系统代理，
+// 直连出口被 Anthropic 以 403 拒掉，被误归成 AUTH——凭据其实一直是好的。
+test('when a system proxy is on, the usage request goes through it instead of direct', async () => {
+  const readCredential = async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk-proxy' } });
+  const calls = [];
+  const direct = async () => { calls.push('direct'); return { status: 403, ok: false, json: async () => ({}) }; };
+  const viaProxy = async (proxy, url) => {
+    calls.push(`proxy:${proxy.host}:${proxy.port}`);
+    return { status: 200, ok: true, json: async () => usagePayload(), url };
+  };
+  const result = await fetchUsage({
+    readCredential,
+    resolveProxy: async () => ({ host: '127.0.0.1', port: 7890 }),
+    directFetch: direct,
+    proxiedFetchImpl: viaProxy,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['proxy:127.0.0.1:7890']);
+});
+
+test('an unreachable proxy falls back to a direct request rather than failing the key', async () => {
+  const readCredential = async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk-proxy' } });
+  const calls = [];
+  const result = await fetchUsage({
+    readCredential,
+    resolveProxy: async () => ({ host: '127.0.0.1', port: 7890 }),
+    directFetch: async () => { calls.push('direct'); return { status: 200, ok: true, json: async () => usagePayload() }; },
+    proxiedFetchImpl: async () => { calls.push('proxy'); throw new Error('ECONNREFUSED'); },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['proxy', 'direct']);
+});
+
+test('without a system proxy the request stays direct', async () => {
+  const readCredential = async () => JSON.stringify({ claudeAiOauth: { accessToken: 'sk-proxy' } });
+  const calls = [];
+  const result = await fetchUsage({
+    readCredential,
+    resolveProxy: async () => null,
+    directFetch: async () => { calls.push('direct'); return { status: 200, ok: true, json: async () => usagePayload() }; },
+    proxiedFetchImpl: async () => { calls.push('proxy'); throw new Error('must not be used'); },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['direct']);
+});
+
+test('proxiedFetch opens a CONNECT tunnel to the target and surfaces a refused tunnel as an error', async () => {
+  const http = await import('node:http');
+  const seen = [];
+  const server = http.createServer();
+  server.on('connect', (req, socket) => {
+    seen.push(req.url);
+    socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await assert.rejects(
+      proxiedFetch({ host: '127.0.0.1', port: server.address().port }, 'https://api.anthropic.com/api/oauth/usage', {
+        method: 'GET',
+        headers: { authorization: 'Bearer x' },
+        signal: AbortSignal.timeout(3000),
+      }),
+      /CONNECT 502/,
+    );
+    assert.deepEqual(seen, ['api.anthropic.com:443']);
+  } finally {
+    server.close();
+  }
 });
 
 test('countdown colour brightens as the reset gets closer, and never borrows alert colours', () => {
